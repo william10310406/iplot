@@ -8,3 +8,7 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "BLE", "S102", "S605", "
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["core"]
+omit = ["core/ui.py"]
