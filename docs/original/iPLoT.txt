@@ -1,0 +1,247 @@
+### iPLoT :  Intellegnece Plot
+### iPLoT based on GUI includes (1) Directory Pannel (2) Content Pannel
+### iPLoT for each content pannel maintains standalone, 
+### but fit it into the directory pannel.
+### Date: 2026/09/12
+################################################################################
+from tkinterdnd2 import TkinterDnD, DND_FILES 
+import tkinter
+import _tkinter
+import os
+############################# check root window is active #####################
+def is_any_tk_active():
+    # Checks if the default root window exists and is initialized
+    return tkinter._default_root is not None
+############################# check root window is active #####################
+############################# obtain the title of the root window #############
+def get_default_root_title():
+    try:
+        if tkinter._default_root and tkinter._default_root.winfo_exists():
+            return tkinter._default_root.title()
+    except (_tkinter.TclError, AttributeError):
+        pass
+    return "未找到作用中的主視窗"
+############################# obtain the title of the root window #############
+def AutoInvoke():
+    pass
+    os.chdir(iPLoTHOMEDIR)
+    #################################
+    ### Define auto-invoke @ initial
+    #autoFlag=["David","Angela"]
+    #autoFlag=["David","Projects"]
+    autoFlag=["David"]
+    #################################
+    if "iPLoTWIN" in globals():
+       for x in iPLoTWIN.winfo_children():
+           if x["text"] in autoFlag:
+              x.invoke()
+###############################################################################
+def cmdEXCUTE_iPLoT(filename):
+    print(filename)
+    subDIR=os.path.dirname(filename)
+    myName=os.path.basename(subDIR)
+    pass
+    print(filename)
+    if os.path.exists(filename):
+       cmds='global '+myName+'HOMEDIR'
+       print('*****',cmds)
+       exec(cmds,globals())
+       cmds=myName+'HOMEDIR="'+subDIR+'"'
+       print(cmds)
+       exec(cmds,globals())
+       exec(open(filename,'r',encoding='utf-8').read(),globals())
+    else:
+       sub2DIR=sorted([x for x in os.listdir(subDIR) if os.path.isdir(os.path.join(subDIR,x))])
+       NN=len(sub2DIR)
+       if NN>0:
+          DY=1./NN
+          subDIRWIN=tkinter.Toplevel()
+          subDIRWIN.title(myName)
+          subDIRWIN.geometry('200x600+760+0')
+          iii=0
+          for w in sub2DIR:
+              B=tkinter.Button(subDIRWIN)
+              B.configure(text=w)
+              filename=os.path.join(os.path.join(subDIR,w),w+'.txt')
+              myName=w
+              cmds='global '+myName+'HOMEDIR'
+              print('*****',cmds)
+              exec(cmds,globals())
+              cmds=myName+'HOMEDIR="'+os.path.dirname(filename)+'"'
+              print(cmds)
+              exec(cmds,globals())
+              B.configure(command=lambda a=filename:cmdEXCUTE_iPLoT(a))
+              #B.configure(command=lambda a=filename:exec(open(a,'r',encoding='utf-8').read(),globals()))
+              B.place(relx=0,rely=iii*DY,relwidth=1,relheight=DY)
+              iii+=1
+############################# set the type of iPLoTWIN #########################
+### set the iPLoTHOMEDIR
+###
+###
+if  is_any_tk_active():
+    if 'iPLoTHOMEDIR' in globals():
+       pass
+       iPLoTWIN=tkinter.Toplevel()
+       print('iPLoTWIN is tkinter.Toplevel()')
+       myName='iPLoT'
+       iPLoTWIN.title(myName)
+       iPLoTWIN.geometry('200x600+760+0')
+       iPLoTWIN.after(30000,iPLoTWIN.destroy)
+else:
+       iPLoTHOMEFILE=os.path.abspath(__file__)
+       iPLoTHOMEDIR=os.path.dirname(__file__)
+       #iPLoTWIN=tkinter.Tk()
+       iPLoTWIN=TkinterDnD.Tk()
+       myName='iPLoT'
+       iPLoTWIN.title(myName)
+       iPLoTWIN.geometry('150x600+0+0')
+       iPLoTWIN.after(3000000,iPLoTWIN.destroy)
+#######################################################################################
+#######################################################################################
+#######################################################################################
+def cmdiPLoTEdit():
+    pass
+    #LF=iPLoTLabelF[0]
+    #for w in LF.winfo_children():
+    #    if w.cget('fg')=='magenta':
+    #        meFILE=os.path.join(os.path.join(iPLoTHOMEDIR,'iPLoTSpace'),w.cget('text'))
+    #LF=iPLoTLabelF[1]
+    #iflag=0
+    #for w in LF.winfo_children():
+    #    if w.cget('fg')=='magenta':
+    #        meFILE=os.path.join(os.path.join(meFILE,w.cget('text')),w.cget('text')+'.txt')
+    #        iflag=1
+    #if iflag==0:
+    #        myName=os.path.basename(meFILE)
+    #        meFILE=os.path.join(meFILE,myName+'.txt')
+     
+    meFILE=os.path.join(iPLoTHOMEDIR,'iPLoT.txt')
+    iPLoTEditTxT=os.path.join(os.path.join(iPLoTHOMEDIR,'iPLoTSpace'),'iPLoTEdit.txt')
+    if os.path.exists(iPLoTEditTxT):
+           print(iPLoTEditTxT+' exists')
+           exec(open(iPLoTEditTxT,'r',encoding='utf-8').read(),globals())
+           cmds='iPLoTEdit("'+'LCMDs+dir='+os.path.dirname(meFILE)+'+file='+os.path.basename(meFILE)+'+iPLoTEdit")'
+           exec(cmds,globals())
+#################################################################################
+#################################################################################
+#################################################################################
+def cmdiPLoTSpace():
+    pass
+    import tkinter
+    #LF=iPLoTLabelF[0]
+    #for w in LF.winfo_children():
+    #    if w.cget('fg')=='magenta':
+    #        meDIR=os.path.join(os.path.join(iPLoTHOMEDIR,'iPLoTSpace'),w.cget('text'))
+    #LF=iPLoTLabelF[1]
+    #iflag=0
+    #for w in LF.winfo_children():
+    #    if w.cget('fg')=='magenta':
+    #        meDIR=os.path.join(os.path.join(meDIR,w.cget('text')),w.cget('text')+'Space')
+    #        iflag=1
+    #
+    #DIRC=meDIR
+    DIRC=os.path.join(iPLoTHOMEDIR,'iPLoTSpace')
+    pdflist=[x for x in os.listdir(DIRC) if not os.path.isdir(os.path.join(DIRC,x)) ]
+    NN=len(pdflist)
+    NC=3
+    NR=NN//NC+int(NN%3>0)
+    DX=1./NC
+    DY=1./NR
+    iii=-1
+    if len(pdflist)>0:
+       if 'iPLoTListSpaceWIN' in globals():
+           del iPLoTListSpaceWIN
+       iPLoTListSpaceWIN=tkinter.Toplevel()
+       iPLoTListSpaceWIN.geometry('600x400+80+80')
+       if 'BBB' in globals():
+           del BBB
+       BBB=[]
+       for x in pdflist:
+           B=tkinter.Button(iPLoTListSpaceWIN)
+           BBB.append(B)
+           BBB[-1].configure(text=x)
+           filePDF=os.path.join(DIRC,x)
+           BBB[-1].configure(command=lambda bbb=filePDF:os.system('open "'+bbb+'"'))
+           iii+=1
+           BBB[-1].place(relx=(iii%NC)*DX,rely=(iii//NC)*DY,relwidth=DX,relheight=DY)
+
+#################################################################################
+def DPanel(iPLoTHOMEDI,iPLoTWIN):
+  if  not isinstance(iPLoTWIN,tkinter.Tk) and not isinstance(iPLoTWIN,TkinterDnD.Tk):
+       subDIR=iPLoTHOMEDIR
+       myName=os.path.basename(subDIR)
+       sub2DIR=sorted([x for x in os.listdir(subDIR) if os.path.isdir(os.path.join(subDIR,x))])
+       NN=len(sub2DIR)
+       if NN>0:
+          DY=0.9/NN
+          iii=0
+          for w in sub2DIR:
+              B=tkinter.Button(iPLoTWIN)
+              B.configure(text=w)
+              filename=os.path.join(os.path.join(subDIR,w),w+'.txt')
+              B.configure(command=lambda a=filename:cmdEXCUTE_iPLoT(a))
+              #B.configure(command=lambda a=filename:exec(open(a,'r',encoding='utf-8').read(),globals()))
+              B.place(relx=0,rely=iii*DY,relwidth=1,relheight=DY)
+              iii+=1
+       BiPLoTEdit=tkinter.Button(iPLoTWIN)
+       BiPLoTEdit.configure(text='iPloTEdit')
+       BiPLoTEdit.place(relx=0,rely=0.9,relwidth=0.33,relheight=0.1)
+       BiPLoTEdit.configure(command=cmdiPLoTEdit)
+       BTerminal=tkinter.Button(iPLoTWIN)
+       BTerminal.configure(text='Terminal')
+       BTerminal.place(relx=0.33,rely=0.9,relwidth=0.33,relheight=0.1)
+       BTerminal.configure(command=lambda DIRC=iPLoTHOMEDIR:os.system('open -a Terminal "'+DIRC+'"'))
+       BSpace=tkinter.Button(iPLoTWIN)
+       BSpace.configure(text='Space')
+       BSpace.place(relx=0.66,rely=0.9,relwidth=0.33,relheight=0.1)
+       BSpace.configure(command=cmdiPLoTSpace)
+  else:
+       DIRC=iPLoTHOMEDIR
+       dirwdc=sorted([x for x in os.listdir(DIRC) if os.path.isdir(os.path.join(DIRC,x)) and os.path.exists(os.path.join(os.path.join(DIRC,x),x+'.txt'))])
+       DIRP=os.path.dirname(iPLoTHOMEDIR)
+       dirwdp=sorted([x for x in os.listdir(DIRP) if os.path.isdir(os.path.join(DIRP,x)) and not x[0]=='.' and os.path.exists(os.path.join(os.path.join(DIRP,x),x+'.txt')) and not x=='iPLoT'])
+       DIRPP=os.path.join(os.path.dirname(iPLoTHOMEDIR),'Desktop')
+       dirwdpp=sorted([x for x in os.listdir(DIRPP) if os.path.isdir(os.path.join(DIRPP,x)) and not x[0]=='.' and os.path.exists(os.path.join(os.path.join(DIRPP,x),x+'.txt'))])
+       NN=len(dirwdc)+len(dirwdp)+len(dirwdpp)
+       DY=1./NN
+       DX=1.0
+       ii=0
+       for x in dirwdc:
+           filename=os.path.join(os.path.join(DIRC,x),x+'.txt')
+           if os.path.exists(filename):
+              print(filename)
+              B=tkinter.Button(iPLoTWIN)
+              B.configure(text=x)
+              B.configure(fg="blue")
+              B.configure(command=lambda f=filename:cmdEXCUTE_iPLoT(f))
+              #B.configure(command=lambda a=filename:exec(open(a,'r',encoding='utf-8').read(),globals()))
+              B.place(relx=0,rely=ii*DY,relwidth=DX,relheight=DY)
+              ii+=1
+       for x in dirwdp:
+           filename=os.path.join(os.path.join(DIRP,x),x+'.txt')
+           if os.path.exists(filename):
+              print(filename)
+              B=tkinter.Button(iPLoTWIN)
+              B.configure(text=x)
+              B.configure(fg="red")
+              B.configure(command=lambda f=filename:cmdEXCUTE_iPLoT(f))
+              #B.configure(command=lambda a=filename:exec(open(a,'r',encoding='utf-8').read(),globals()))
+              B.place(relx=0,rely=ii*DY,relwidth=DX,relheight=DY)
+              ii+=1
+       for x in dirwdpp:
+           filename=os.path.join(os.path.join(DIRPP,x),x+'.txt')
+           if os.path.exists(filename):
+              print(filename)
+              B=tkinter.Button(iPLoTWIN)
+              B.configure(text=x)
+              B.configure(fg="green")
+              B.configure(command=lambda f=filename:cmdEXCUTE_iPLoT(f))
+              #B.configure(command=lambda a=filename:exec(open(a,'r',encoding='utf-8').read(),globals()))
+              B.place(relx=0,rely=ii*DY,relwidth=DX,relheight=DY)
+              ii+=1
+############################
+DPanel(iPLoTHOMEDIR,iPLoTWIN)
+############################
+if isinstance(iPLoTWIN,tkinter.Tk) or isinstance(iPLoTWIN,TkinterDnD.Tk):
+    AutoInvoke()
+    iPLoTWIN.mainloop()
