@@ -28,8 +28,22 @@ class FakeView:
     def logs(self):
         return [e[1] for e in self.events if e[0] == "log"]
 
+    @property
+    def shows(self):
+        return [e[1] for e in self.events if e[0] == "show"]
+
+    @property
+    def reports(self):
+        return [e[1] for e in self.events if e[0] == "report"]
+
+    def show(self, scope):
+        self.events.append(("show", scope))
+
     def log(self, text):
         self.events.append(("log", text))
+
+    def report(self, error):
+        self.events.append(("report", error))
 
     def ask(self, prompt, default=""):
         return default
@@ -76,3 +90,8 @@ def info(home):
 @pytest.fixture
 def fake_core(home):
     return FakeCore(home, DEFAULT_CONFIG, FakeView())
+
+
+@pytest.fixture
+def view():
+    return FakeView()
