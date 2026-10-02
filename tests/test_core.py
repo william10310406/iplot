@@ -152,3 +152,26 @@ def test_snapshot_failure_still_runs_and_rescans(home, view, monkeypatch):
     shown = len(view.shows)
     c.rescan()
     assert len(view.shows) == shown + 1
+
+
+def test_press_logs_output_before_reporting_error(home, view):
+    make_module(home / "modules", "A", "def run(app):\n    print('before')\n    1/0\n")
+    c = started(home, view)
+    view.events.clear()
+    c.press(find(c, "A"))
+    assert [e[0] for e in view.events] == ["log", "report"]
+    assert view.logs == ["before"] and view.reports[0].line == 3
+
+
+def test_run_by_name_not_found_raises(home, view):
+    c = started(home, view)
+    with pytest.raises(LookupError) as ei:
+        c.run_by_name("nope")
+    assert str(ei.value) == T["not_found"].format(name="nope")
+
+
+def test_create_already_exists_logs(home, view):
+    make_module(home / "modules", "A")
+    c = started(home, view)
+    assert c.create(home / "modules", "A") is None
+    assert view.logs[-1] == T["already_exists"].format(name="A")

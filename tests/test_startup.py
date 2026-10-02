@@ -2,6 +2,7 @@
 
 import dataclasses
 
+import pytest
 from conftest import make_module
 
 from core.core import Core, load_config
@@ -69,3 +70,24 @@ def test_valid_config_loaded(tmp_path):
     f.write_text('ROOTS = ["modules", "~/Desktop"]\nEDITOR = ["code", "{file}"]\n', encoding="utf-8")
     assert load_config(f) == (dataclasses.replace(
         DEFAULT_CONFIG, roots=("modules", "~/Desktop"), editor=("code", "{file}")), None)
+
+
+def test_load_config_bad_tilde_falls_back(tmp_path):
+    f = tmp_path / "config.py"
+    f.write_text('ROOTS = ["modules", "~Desktop"]\n', encoding="utf-8")
+    config, err = load_config(f)
+    assert config == DEFAULT_CONFIG and (err.source, err.file) == ("config", f)
+    assert "~Desktop" in err.message
+
+
+@pytest.mark.parametrize("src, name", [
+    ('ROOTS = "modules"\n', "ROOTS"), ('ROOTS = ["modules", 1]\n', "ROOTS"),
+    ('EDITOR = "code"\n', "EDITOR"), ('HISTORY_KEEP = "20"\n', "HISTORY_KEEP"),
+    ("HISTORY_KEEP = 0\n", "HISTORY_KEEP"), ("HISTORY_KEEP = True\n", "HISTORY_KEEP"),
+])
+def test_load_config_type_errors_name_the_variable(tmp_path, src, name):
+    f = tmp_path / "config.py"
+    f.write_text(src, encoding="utf-8")
+    config, err = load_config(f)
+    assert config == DEFAULT_CONFIG and err.kind == "TypeError"
+    assert err.message.startswith(name)

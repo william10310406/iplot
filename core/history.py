@@ -1,8 +1,11 @@
 """記住上一版：模組 iplot.py 的快照存在模組自己的 .history/，可以復原。"""
 
 import hashlib
+import re
 from datetime import datetime
 from pathlib import Path
+
+NAME = re.compile(r"\d{4}-\d{2}-\d{2}_\d{6}(_\d+)?")  # 只認自己的命名；.history/ 裡別的檔案一律不碰
 
 
 def _now() -> datetime:
@@ -16,7 +19,8 @@ def _order(p: Path) -> tuple[str, int]:
 
 def versions(file: Path) -> list[Path]:
     """file 的所有快照，新到舊。"""
-    return sorted((file.parent / ".history").glob("*.py"), key=_order, reverse=True)
+    found = (p for p in (file.parent / ".history").glob("*.py") if NAME.fullmatch(p.stem))
+    return sorted(found, key=_order, reverse=True)
 
 
 def snapshot(file: Path, keep: int) -> Path | None:

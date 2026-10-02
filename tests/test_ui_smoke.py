@@ -111,3 +111,28 @@ def test_unreadable_root_has_note_and_no_plus(home, panel):
     labels = [w.cget("text") for w in widgets(panel.body, tkinter.Label)]
     assert T["empty_group"] in labels and any("/nonexistent" in t for t in labels)
     assert [b.cget("text") for b in widgets(panel.body, tkinter.Button)].count("＋") == 1
+
+
+def test_report_keeps_plain_sentence_at_the_end(home, panel):
+    make_module(home / "modules", "A", "def run(app):\n    x = 1\n    1/0\n")
+    started(home, panel)
+    button(panel.body, "A").invoke()
+    panel.window.update()
+    tail = panel.messages.get("end-3l", "end")  # see("end") 之後看得到的是最後幾行
+    assert "模組『A』第 3 行出錯" in tail
+    assert "Traceback" not in tail
+
+
+def test_enter_child_breadcrumb_and_warning_mark(home, panel):
+    make_module(make_module(home / "modules", "A"), "C")
+    make_module(home / "modules", "Bad", "def run(app)\n    pass\n")
+    started(home, panel)
+    assert button(panel.body, "⚠ Bad")
+    button(panel.body, "▸").invoke()
+    panel.window.update()
+    assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT", "A"]
+    assert button(panel.body, "C")
+    button(panel.crumbs, "iPLoT").invoke()
+    panel.window.update()
+    assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT"]
+    assert button(panel.body, "A") and button(panel.body, "⚠ Bad")

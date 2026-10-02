@@ -5,7 +5,7 @@
 PY="${PYTHON:-python3}"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$WORK"' EXIT   # 不留下任何 iPLoT 視窗
 FAIL=0
 
 fresh() {  # 乾淨副本：只有 main.py、config.py、core/、空的 modules/；上一層只有它自己
@@ -20,7 +20,7 @@ fresh() {  # 乾淨副本：只有 main.py、config.py、core/、空的 modules/
 check() {  # check 編號 說明 資料夾 指令...
     local n="$1" what="$2" dir="$3"; shift 3
     local err="$WORK/$n.stderr" status
-    (cd "$dir" && "$@" >/dev/null 2>"$err") &
+    (cd "$dir" && exec "$@" >/dev/null 2>"$err") &   # exec：$! 才是 Python 本身，kill 得到它
     local pid=$!
     sleep 8
     if kill -0 "$pid" 2>/dev/null; then

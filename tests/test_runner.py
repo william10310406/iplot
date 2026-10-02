@@ -80,3 +80,8 @@ def test_eval_syntax_error_points_at_module_line(home):
     info = mod(home, "def run(app):\n    x = 1\n    eval('1+')\n")
     r = run_module(info, None)
     assert (r.error.kind, r.error.file, r.error.line) == ("SyntaxError", info.file, 3)
+
+
+def test_stderr_is_captured_too(home):
+    src = "import sys\ndef run(app):\n    print('out')\n    sys.stderr.write('err\\n')\n"
+    assert run_module(mod(home, src), None).output == "out\nerr\n"

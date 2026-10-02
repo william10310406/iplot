@@ -60,7 +60,10 @@ def roots_from_config(home: Path, roots: Iterable[str]) -> list[Root]:
         elif s == "..":
             root = Root(T["parent"], "parent", home.parent.resolve())
         else:
-            p = Path(s).expanduser()
+            try:
+                p = Path(s).expanduser()
+            except RuntimeError:  # 「~Desktop」少了斜線：pathlib 找不到叫 Desktop 的使用者，當成相對路徑
+                p = Path(s)
             root = Root(s, "extra", (p if p.is_absolute() else home / p).resolve())
         if not any(_same(root.path, r.path) for r in result):
             result.append(root)

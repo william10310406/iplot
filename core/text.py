@@ -28,6 +28,7 @@ T: dict[str, str] = {
     "create_failed": "無法在 {path} 建立模組：{message}",
     "snapshot_failed": "無法存上一版：{message}",
     "config_type": "{name} 的型別不對，應該是 {expected}",
+    "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
 }
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""

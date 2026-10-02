@@ -62,3 +62,15 @@ def test_restore_oldest_when_full(tmp_path):
     history.restore(f, history.versions(f)[-1], 2)
     assert f.read_text(encoding="utf-8") == "v1"
     assert contents(f) == ["edited", "v2"]
+
+
+def test_foreign_files_in_history_are_ignored(tmp_path):
+    hist = tmp_path / ".history"
+    hist.mkdir()
+    for n in range(5):
+        (hist / f"notes_{n}.py").write_text("foreign", encoding="utf-8")
+    f = write(tmp_path, "mine")
+    snap = history.snapshot(f, 3)
+    assert snap.exists() and history.versions(f) == [snap]
+    assert sorted(p.name for p in hist.glob("notes_*.py")) == [f"notes_{n}.py" for n in range(5)]
+    assert history.snapshot(write(tmp_path, "foreign"), 3) is not None  # 去重只跟自己的快照比

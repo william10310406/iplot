@@ -112,3 +112,9 @@ def test_unreadable_child_folder_is_skipped(home):
     finally:
         locked.chmod(0o755)
     assert names(g) == ["A"] and g.note is None
+
+
+def test_bad_tilde_root_becomes_missing_not_crash(home):
+    [root] = roots_from_config(home, ["~Desktop"])
+    [g] = find_modules([root])
+    assert g.modules == () and g.note is not None

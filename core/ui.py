@@ -123,12 +123,12 @@ class Panel:
         self._write(text + "\n")
 
     def report(self, error: ErrorInfo) -> None:
-        """訊息區顯示白話錯誤和完整 traceback；有檔案時附一顆「打開檔案」。"""
+        """訊息區顯示完整 traceback，最後才是白話那一句和「打開檔案」：捲到底看到的是人話，不是 traceback。"""
         button = None
         if error.file is not None:
             button = tk.Button(self.messages, text=T["open_file"], command=lambda: actions.edit(
                 error.file, self.core.config.editor, error.line))
-        self._write(describe(error) + "\n" + error.traceback_text, button)
+        self._write(error.traceback_text + describe(error) + "\n", button)
 
     def _write(self, text: str, button: tk.Button | None = None) -> None:
         self.messages.configure(state="normal")

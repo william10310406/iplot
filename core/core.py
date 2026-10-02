@@ -48,6 +48,11 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
         if not ok:
             message = T["config_type"].format(name=name, expected=expected)
             return d, ErrorInfo("TypeError", message, path, None, "", "config", None)
+    for s in roots:
+        try:
+            Path(s).expanduser()
+        except RuntimeError:  # 「~Desktop」：少了斜線，pathlib 會在掃描時丟例外，這裡先攔下來
+            return d, ErrorInfo("ValueError", T["bad_root"].format(entry=s), path, None, "", "config", None)
     return Config(tuple(roots), None if editor is None else tuple(editor), keep), None
 
 
