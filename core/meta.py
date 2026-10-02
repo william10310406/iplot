@@ -1,7 +1,5 @@
 """不執行地讀模組資訊：只用 ast 解析 iplot.py，不跑任何模組程式碼。"""
 
-from __future__ import annotations
-
 import ast
 from itertools import takewhile
 from pathlib import Path

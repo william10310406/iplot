@@ -1,7 +1,5 @@
 """新增模組：照範本寫一個 iplot.py。"""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from .text import TEMPLATE

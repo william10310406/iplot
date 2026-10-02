@@ -1,7 +1,5 @@
 """唯一碰 macOS 的地方。全部用 subprocess.run 傳清單，不拼字串；換作業系統只換這個檔。"""
 
-from __future__ import annotations
-
 import shutil
 import subprocess
 from pathlib import Path

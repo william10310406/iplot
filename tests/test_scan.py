@@ -1,6 +1,7 @@
 import unicodedata
 from pathlib import Path
 
+import pytest
 from conftest import make_module
 
 from core.scan import find_children, find_modules, is_module, module_info, roots_from_config
@@ -85,6 +86,8 @@ def test_roots_levels(home):
 def test_case_must_match_exactly(home):
     old = home / "modules" / "old"
     old.mkdir()
+    if not (home / "Modules").exists():
+        pytest.skip("只在不分大小寫的檔案系統（macOS 預設）上有意義")
     (old / "iPLoT.py").write_text("print('old')\n", encoding="utf-8")
     assert not is_module(old)
     [g] = find_modules([here(home)])

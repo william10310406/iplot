@@ -1,7 +1,5 @@
 """找模組：資料夾裡有 iplot.py 就是模組。只看檔名和 ast，不執行任何模組程式碼。"""
 
-from __future__ import annotations
-
 import os
 import unicodedata
 from collections.abc import Iterable

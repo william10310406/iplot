@@ -1,7 +1,5 @@
 """錯誤是資料：例外變成 ErrorInfo，ErrorInfo 變成面板上的一句話。"""
 
-from __future__ import annotations
-
 import dataclasses
 import traceback
 from pathlib import Path

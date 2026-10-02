@@ -1,7 +1,5 @@
 """記住上一版：模組 iplot.py 的快照存在模組自己的 .history/，可以復原。"""
 
-from __future__ import annotations
-
 import hashlib
 from datetime import datetime
 from pathlib import Path

@@ -1,7 +1,5 @@
 """組裝與編排：持有設定、畫面與記憶，把面板上的動作接到底層的檔案。"""
 
-from __future__ import annotations
-
 import runpy
 import time
 import unicodedata

@@ -1,7 +1,5 @@
 """執行模組：進入模組程式碼唯一的門。每次按下都在乾淨的命名空間重新執行 iplot.py。"""
 
-from __future__ import annotations
-
 import contextlib
 import dataclasses
 import io

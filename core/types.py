@@ -1,7 +1,5 @@
 """核心共用的資料結構（規格附錄 B）。全部是 frozen dataclass，沒有邏輯。"""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
