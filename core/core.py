@@ -44,7 +44,8 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
     roots, editor = ns.get("ROOTS", d.roots), ns.get("EDITOR", d.editor)
     keep = ns.get("HISTORY_KEEP", d.history_keep)
     for name, ok, expected in [("ROOTS", _strs(roots), "list[str]"),
-                               ("EDITOR", editor is None or _strs(editor), "None | list[str]"),
+                               ("EDITOR", editor is None or (_strs(editor) and len(editor) > 0),
+                                "None | non-empty list[str]"),
                                ("HISTORY_KEEP", type(keep) is int and keep >= 1, "int >= 1")]:
         if not ok:
             message = T["config_type"].format(name=name, expected=expected)

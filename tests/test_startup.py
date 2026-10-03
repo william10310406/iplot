@@ -84,6 +84,7 @@ def test_load_config_bad_tilde_falls_back(tmp_path):
     ('ROOTS = "modules"\n', "ROOTS"), ('ROOTS = ["modules", 1]\n', "ROOTS"),
     ('EDITOR = "code"\n', "EDITOR"), ('HISTORY_KEEP = "20"\n', "HISTORY_KEEP"),
     ("HISTORY_KEEP = 0\n", "HISTORY_KEEP"), ("HISTORY_KEEP = True\n", "HISTORY_KEEP"),
+    ("EDITOR = []\n", "EDITOR"), ("EDITOR = ()\n", "EDITOR"),
 ])
 def test_load_config_type_errors_name_the_variable(tmp_path, src, name):
     f = tmp_path / "config.py"
