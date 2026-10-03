@@ -1,5 +1,7 @@
 # iPLoT — 需要 Python ≥ 3.10（[python.org](https://www.python.org/downloads/macos/) 的版本，內含 tkinter）
 
+老闆請先看 [docs/06_給老闆的說明.md](docs/06_給老闆的說明.md)。
+
 一個可以放在任何位置的資料夾。啟動後把周圍含有 `iplot.py` 的資料夾變成按鈕；按下去就執行那個檔案，錯了在面板上說清楚；按「＋」用滑鼠長出新按鈕。核心本身不內建任何用途，連 iPLoT 自己的工具都是模組。
 
 ## 安裝
