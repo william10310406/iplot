@@ -55,10 +55,18 @@ def test_syntax_error_reported(home):
 
 
 def test_exit_is_error_not_fatal(home):
-    info = mod(home, "def run(app):\n    exit()\n")
+    info = mod(home, "def run(app):\n    exit(1)\n")
     r = run_module(info, None)
-    assert (r.ok, r.error.kind, r.error.message) == (False, "SystemExit", T["module_exit"])
+    assert (r.ok, r.error.kind) == (False, "SystemExit")
+    assert r.error.message == T["module_exit"].format(code=1) == "模組以 exit(1) 結束"
     assert (r.error.file, r.error.line) == (info.file, 2)
+
+
+def test_exit_zero_is_ok(home):
+    # python3 iplot.py 跑到 exit() 是正常結束，狀態 0（D49）
+    for src in ('print("a")\nexit()\n', 'import sys\nprint("a")\nsys.exit(0)\n', 'print("a")\nquit()\n'):
+        r = run_module(mod(home, src), None)
+        assert (r.ok, r.error, r.output) == (True, None, "a\n"), src
 
 
 def test_on_files_handler(home):
@@ -187,6 +195,17 @@ def test_env_restored_after_error(home, fake_core):
     info = mod(home, 'raise ValueError("boom")\n')
     r = run_module(info, App(fake_core, info))
     assert r.error.kind == "ValueError"
+    assert env() == before
+
+
+def test_exit_after_exit_env_restored(home, fake_core):
+    def env():
+        return os.getcwd(), sys.argv, builtins.input, list(sys.path), sys.dont_write_bytecode
+
+    before = env()
+    info = mod(home, 'print("a")\nexit()\n')
+    r = run_module(info, App(fake_core, info))
+    assert (r.ok, r.output) == (True, "a\n")
     assert env() == before
 
 

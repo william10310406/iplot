@@ -50,7 +50,7 @@ def test_only_broken_module_listed(home, view):
 
 
 def test_module_exit_keeps_core_alive(home, view):
-    make_module(home / "modules", "A", "def run(app):\n    exit()\n")
+    make_module(home / "modules", "A", "def run(app):\n    exit(1)\n")
     c = started(home, view)
     [info] = c.scope.groups[0].modules
     assert not c.press(info).ok

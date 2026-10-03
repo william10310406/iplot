@@ -76,7 +76,9 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
                 error = ErrorInfo("MissingHandler", T["missing_handler"].format(handler=handler),
                                   info.file, None, "", "module", info.name)
     except SystemExit as exc:
-        error = dataclasses.replace(from_exception(exc, info, "module"), message=T["module_exit"])
+        if exc.code not in (None, 0):  # exit()、sys.exit(0) 是正常結束，就像 python3 iplot.py（D49）
+            error = dataclasses.replace(from_exception(exc, info, "module"),
+                                        message=T["module_exit"].format(code=exc.code))
     except Exception as exc:  # noqa: BLE001  規格 §7 允許的兩處之一
         error = from_exception(exc, info, "module")
     finally:
