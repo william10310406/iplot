@@ -15,7 +15,7 @@ M1.3「修補」：把 0.2.0 腳本語意裡兩處不像 `python3 iplot.py` 的�
 - `exit()` / `sys.exit(0)` / `quit()` 現在是正常結束，不再顯示錯誤；0.2.0 一律算錯誤（「模組呼叫了 exit()，已忽略」）。代碼非零（`exit(1)`、`sys.exit("壞了")`）仍是錯誤，訊息改為「模組以 exit(1) 結束」。
 
 ### 修正
-- `while True:` 裡 `int(input())` 配 `except ValueError` 這種課本的驗證迴圈，按取消不再出不去（0.2.0 只能強制結束 iPLoT）。
+- `while True:` 裡 `int(input())` 配 `except ValueError` 這種課本的驗證迴圈，按取消不再出不去（0.2.0 只能強制結束 iPLoT）。迴圈裡寫 `except:` 或 `except Exception:`（什麼都接）的仍然出不去，見規格 §7 已知限制。
 
 ### 文件
 - 規格 §5.2、§7（第 4 條、腳本語意表；拿掉「驗證迴圈出不去」的已知限制）、§10、§12、`docs/api.md` 同步；D49；D47 的「老闆裁定」更正為研究助理裁定。
