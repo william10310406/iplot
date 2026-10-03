@@ -20,9 +20,14 @@ class FakeView:
     """不開視窗的 View：依序記錄事件，對話框回固定答案。"""
 
     window = None
+    answer = ...  # ask 的答案：... 表示回 default；測試可以設成字串，或 None（按了取消）
 
     def __init__(self):
         self.events = []
+
+    @property
+    def asks(self):
+        return [e[1] for e in self.events if e[0] == "ask"]
 
     @property
     def logs(self):
@@ -46,7 +51,8 @@ class FakeView:
         self.events.append(("report", error))
 
     def ask(self, prompt, default=""):
-        return default
+        self.events.append(("ask", prompt))
+        return default if self.answer is ... else self.answer
 
     def choose_files(self):
         return [Path("/f")]

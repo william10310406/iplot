@@ -1,3 +1,4 @@
+import builtins
 import os
 import sys
 from pathlib import Path
@@ -5,6 +6,7 @@ from types import ModuleType, SimpleNamespace
 
 from conftest import make_module
 
+from core.app import App
 from core.runner import run_module
 from core.scan import module_info
 from core.text import T
@@ -141,3 +143,37 @@ def test_toplevel_script_without_run_is_ok(home):
 def test_on_files_missing_still_errors(home):
     r = run_module(mod(home, 'print("hi")\n'), None, "on_files", ([Path("a")],))
     assert not r.ok and r.error.kind == "MissingHandler"
+
+
+def test_input_becomes_dialog(home, fake_core):
+    fake_core.view.answer = "10"
+    info = mod(home, 'x = input("年齡")\nprint(x)\n')
+    r = run_module(info, App(fake_core, info))
+    assert (r.output, r.error) == ("10\n", None)
+    assert fake_core.view.asks == ["年齡"]
+
+
+def test_input_cancel_gives_empty(home, fake_core):
+    fake_core.view.answer = None
+    info = mod(home, 'x = input("年齡")\nprint(x)\n')
+    r = run_module(info, App(fake_core, info))
+    assert (r.output, r.error) == ("\n", None)
+
+
+def test_env_restored_after_error(home, fake_core):
+    def env():
+        return os.getcwd(), sys.argv, builtins.input, list(sys.path), sys.dont_write_bytecode
+
+    before = env()
+    info = mod(home, 'raise ValueError("boom")\n')
+    r = run_module(info, App(fake_core, info))
+    assert r.error.kind == "ValueError"
+    assert env() == before
+
+
+def test_input_in_helper_also_dialog(home, fake_core):
+    fake_core.view.answer = "yes"
+    info = mod(home, "import helper\nprint(helper.f())\n")
+    (info.folder / "helper.py").write_text('def f():\n    return input("q")\n', encoding="utf-8")
+    r = run_module(info, App(fake_core, info))
+    assert (r.output, r.error, fake_core.view.asks) == ("yes\n", None, ["q"])
