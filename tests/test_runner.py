@@ -36,9 +36,9 @@ def test_sees_file_changes(home):
     assert app.seen == [1, 2]
 
 
-def test_missing_run(home):
+def test_missing_run_is_not_an_error(home):
     r = run_module(mod(home, "def on_files(app, paths):\n    pass\n"), None)
-    assert not r.ok and r.error.kind == "MissingHandler"
+    assert r.ok and r.error is None
 
 
 def test_exception_has_file_and_line(home):
@@ -131,3 +131,13 @@ def test_purge_spares_modules_loaded_before_the_run(home, monkeypatch):
     monkeypatch.setitem(sys.modules, "early", early)
     run_module(info, None)
     assert sys.modules.get("early") is early
+
+
+def test_toplevel_script_without_run_is_ok(home):
+    r = run_module(mod(home, 'print("hi")\n'), None)
+    assert (r.ok, r.error, r.output) == (True, None, "hi\n")
+
+
+def test_on_files_missing_still_errors(home):
+    r = run_module(mod(home, 'print("hi")\n'), None, "on_files", ([Path("a")],))
+    assert not r.ok and r.error.kind == "MissingHandler"

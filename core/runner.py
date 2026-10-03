@@ -33,7 +33,7 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
             fn = ns.get(handler)
             if callable(fn):
                 fn(app, *args)
-            else:
+            elif handler != "run":  # 沒有 run 不是錯：最外層程式碼就是按下的動作（D47）
                 error = ErrorInfo("MissingHandler", T["missing_handler"].format(handler=handler),
                                   info.file, None, "", "module", info.name)
     except SystemExit as exc:

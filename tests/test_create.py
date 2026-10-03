@@ -50,3 +50,7 @@ def test_never_overwrites_differently_cased_iplot(tmp_path):
     with contextlib.suppress(AlreadyExists):
         new_module(tmp_path, "old")
     assert (old / "iPLoT.py").read_text(encoding="utf-8") == "original"
+
+
+def test_template_says_run_is_optional():
+    assert "可省略" in template()

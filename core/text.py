@@ -38,6 +38,7 @@ T: dict[str, str] = {
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
 # TITLE = "顯示名稱"   # 要讓按鈕文字跟資料夾名稱不同時才打開這一行
 
+# run 可省略：沒有 run 時，最外層程式碼就是按下的動作（input()、print() 照常用）
 def run(app):
     """按下按鈕時執行。app 的用法見 docs/api.md"""
     app.log(f"{app.module.title} 執行了")
