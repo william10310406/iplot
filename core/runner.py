@@ -37,7 +37,10 @@ def _dialog(app: Any, out: io.StringIO) -> Callable[..., str]:
     def ask(prompt: object = "") -> str:
         nonlocal shown
         text, shown = out.getvalue()[shown:] + str(prompt), len(out.getvalue())
-        return app.ask(text.strip()) or ""
+        answer = app.ask(text.strip())
+        if answer is None:  # 按了取消：真的 input() 在鍵盤關掉（Ctrl-D）時也是 EOFError（D49）
+            raise EOFError(T["input_cancelled"])
+        return answer
 
     return ask
 

@@ -16,6 +16,7 @@ T: dict[str, str] = {
     "config_error": "config.py 壞了，已用預設值啟動：{message}",
     "missing_handler": "iplot.py 沒有定義 {handler}(app)",
     "module_exit": "模組呼叫了 exit()，已忽略",
+    "input_cancelled": "在提問時按了取消",
     "not_found": "找不到模組『{name}』",
     "ambiguous": "有兩個以上的模組叫『{name}』：{paths}",
     "bad_name": "名稱不能是空白、含 /、或以 . 開頭",

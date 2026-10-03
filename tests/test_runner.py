@@ -153,11 +153,30 @@ def test_input_becomes_dialog(home, fake_core):
     assert fake_core.view.asks == ["年齡"]
 
 
-def test_input_cancel_gives_empty(home, fake_core):
+def test_input_cancel_raises_eoferror(home, fake_core):
+    # 真的 input() 在鍵盤關掉（Ctrl-D）時就是 EOFError（D49）
     fake_core.view.answer = None
-    info = mod(home, 'x = input("年齡")\nprint(x)\n')
+    info = mod(home, 'print("hi")\nx = input("年齡")\nprint(x)\n')
     r = run_module(info, App(fake_core, info))
-    assert (r.output, r.error) == ("\n", None)
+    assert (r.ok, r.error.kind, r.error.message) == (False, "EOFError", T["input_cancelled"])
+    assert (r.error.file, r.error.line, r.output) == (info.file, 2, "hi\n")
+
+
+def test_validation_loop_exits_on_cancel(home, fake_core):
+    # 課本的驗證迴圈：取消要是回空字串，int("") 是 ValueError，永遠出不去
+    fake_core.view.answer = None
+    src = 'while True:\n    try:\n        n = int(input("數字"))\n        break\n    except ValueError:\n        pass\n'
+    info = mod(home, src)
+    r = run_module(info, App(fake_core, info))
+    assert (r.ok, r.error.kind, r.error.line) == (False, "EOFError", 3)
+    assert len(fake_core.view.asks) == 1
+
+
+def test_module_can_catch_cancel(home, fake_core):
+    fake_core.view.answer = None
+    info = mod(home, 'try:\n    x = input("q")\nexcept EOFError:\n    x = "預設"\nprint(x)\n')
+    r = run_module(info, App(fake_core, info))
+    assert (r.ok, r.error, r.output) == (True, None, "預設\n")
 
 
 def test_env_restored_after_error(home, fake_core):
