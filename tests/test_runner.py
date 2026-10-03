@@ -177,3 +177,41 @@ def test_input_in_helper_also_dialog(home, fake_core):
     (info.folder / "helper.py").write_text('def f():\n    return input("q")\n', encoding="utf-8")
     r = run_module(info, App(fake_core, info))
     assert (r.output, r.error, fake_core.view.asks) == ("yes\n", None, ["q"])
+
+
+# ── 最終審查的修正 ──
+
+
+def test_helper_in_subfolder_reloads_after_edit(home, monkeypatch):
+    # utils/ 沒有 __init__.py 時是 namespace package：沒有 __file__，要看 __path__ 才清得掉
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    info = mod(home, "from utils import tools\nprint(tools.V)\n")
+    (info.folder / "utils").mkdir()
+    (info.folder / "utils" / "tools.py").write_text("V = 1\n", encoding="utf-8")
+    assert run_module(info, None).output == "1\n"
+    (info.folder / "utils" / "tools.py").write_text("V = 2\n", encoding="utf-8")
+    assert run_module(info, None).output == "2\n"
+    assert "utils" not in sys.modules
+
+
+def test_nested_run_gets_its_own_helper(home):
+    # A 的 helper.py 已經 import 了，A 再用 app.run 跑 B：B 的 import helper 要拿到 B 自己的
+    a = mod(home, "import helper\ndef run(app):\n    app.run('B')\n    print(helper.NAME)\n", "A")
+    b = mod(home, "import helper\nprint(helper.NAME)\n", "B")
+    (a.folder / "helper.py").write_text("NAME = 'A-helper'\n", encoding="utf-8")
+    (b.folder / "helper.py").write_text("NAME = 'B-helper'\n", encoding="utf-8")
+    inner = []
+    app = SimpleNamespace(run=lambda name: inner.append(run_module(b, None).output))
+    r = run_module(a, app)
+    assert (inner, r.output, r.error) == (["B-helper\n"], "A-helper\n", None)
+    assert "helper" not in sys.modules
+
+
+def test_dialog_shows_what_was_printed_since_last_question(home, fake_core):
+    # 猜數字這種腳本：print("太大") 之後再 input()，回饋要在下一個對話框裡看得到
+    fake_core.view.answer = "50"
+    src = 'x = input("猜一個數字")\nprint("太大")\ny = input("再猜")\nprint("請按確定")\ninput()\n'
+    info = mod(home, src)
+    r = run_module(info, App(fake_core, info))
+    assert fake_core.view.asks == ["猜一個數字", "太大\n再猜", "請按確定"]
+    assert (r.output, r.error) == ("太大\n請按確定\n", None)

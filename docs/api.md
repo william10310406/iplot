@@ -25,7 +25,7 @@
 
 - 同步執行，在主視窗的執行緒上。長時間工作（`time.sleep`、長迴圈）會凍住視窗；背景執行是之後的事。
 - 按下按鈕 ＝ 在模組自己的資料夾裡執行 `python3 iplot.py`：執行期間工作目錄是模組資料夾（`open("x.txt")` 讀寫的是模組資料夾裡的檔案）、`import helper` 找旁邊的 `helper.py`（改了下次會重讀）、`__name__` 是 `"__main__"`、`sys.argv` 是 `[iplot.py 的路徑]`；跑完全部還原。`app.module.folder / "x.txt"` 照樣可用。
-- `input("提示")` 會跳對話框，等同 `app.ask("提示")`，差別只在按取消：`input()` 得到空字串、模組繼續跑；`app.ask` 回 `None`，要分辨「取消」就用它。
+- `input("提示")` 會跳對話框，等同 `app.ask("提示")`；上次問完之後 `print` 的東西會放在提示前面。按取消時 `input()` 得到空字串、模組繼續跑；`app.ask` 回 `None`，要分辨「取消」就用它（`while True:` 的驗證迴圈請用 `app.ask`，不然按取消出不去）。
 - 跨次執行要保留的東西放 `app.memory`；跨次啟動要保留的寫成檔案放 `app.module.folder`。
 - `exit()` / `sys.exit()` 算錯誤，iPLoT 不會關掉。
 - `app.module` 是 `ModuleInfo`：`name`（資料夾名稱）、`title`（`TITLE` 或 name）、`description`（docstring 第一段）、`folder`、`file`、`root`、`level`、`has_run`、`accepts_files`、`has_children`、`error`。

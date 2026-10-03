@@ -8,12 +8,38 @@ import io
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from .errors import from_exception
 from .text import T
 from .types import ErrorInfo, ModuleInfo, Result
+
+# 正在執行的模組：（資料夾，開始時已經載入的模組名稱）。模組用 app.run 跑別的模組時不只一個
+_running: list[tuple[Path, set[str]]] = []
+
+
+def _local(folder: Path, loaded: set[str]) -> list[str]:
+    """loaded 之後才從 folder 底下載入的模組名稱。沒有 __init__.py 的子資料夾沒有 __file__，看 __path__。"""
+    def inside(module: Any) -> bool:
+        files = [getattr(module, "__file__", None), *getattr(module, "__path__", ())]
+        return any(isinstance(f, str) and Path(f).is_relative_to(folder) for f in files)
+
+    return [name for name in set(sys.modules) - loaded if inside(sys.modules[name])]
+
+
+def _dialog(app: Any, out: io.StringIO) -> Callable[..., str]:
+    """代替 input() 的函式：跳對話框問，按取消回空字串。上次問完之後 print 的東西放在提示前面，
+    就像螢幕上問題前面的那幾行（猜數字的「太大」要在下一次問之前看得到）。"""
+    shown = 0
+
+    def ask(prompt: object = "") -> str:
+        nonlocal shown
+        text, shown = out.getvalue()[shown:] + str(prompt), len(out.getvalue())
+        return app.ask(text.strip()) or ""
+
+    return ask
 
 
 def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = ()) -> Result:
@@ -27,7 +53,9 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
     start, out, error = time.perf_counter(), io.StringIO(), None
     cwd, argv, pyc, ask = os.getcwd(), sys.argv, sys.dont_write_bytecode, builtins.input
     folder = str(info.folder)
-    loaded = set(sys.modules)
+    # 外層模組（app.run 的呼叫者）自己的 helper 先收起來：這個模組 import 同名的檔案才會拿到自己的
+    hidden = {name: sys.modules.pop(name) for run in _running for name in _local(*run)}
+    _running.append((info.folder, set(sys.modules)))
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             code = compile(info.file.read_text(encoding="utf-8-sig"), str(info.file), "exec")
@@ -36,7 +64,7 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
             sys.argv = [str(info.file)]
             sys.path.insert(0, folder)
             sys.dont_write_bytecode = True
-            builtins.input = lambda prompt="": app.ask(str(prompt)) or ""
+            builtins.input = _dialog(app, out)
             exec(code, ns)  # noqa: S102  規格 §7 第 2 條：進入模組程式碼唯一的門
             fn = ns.get(handler)
             if callable(fn):
@@ -52,9 +80,8 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
         sys.argv, sys.dont_write_bytecode, builtins.input = argv, pyc, ask
         if folder in sys.path:
             sys.path.remove(folder)
-        for name in set(sys.modules) - loaded:
-            file = getattr(sys.modules[name], "__file__", None)
-            if file and Path(file).is_relative_to(info.folder):
-                del sys.modules[name]
+        for name in _local(*_running.pop()):
+            del sys.modules[name]
+        sys.modules.update(hidden)
         os.chdir(cwd)
     return Result(error is None, error, time.perf_counter() - start, out.getvalue())
