@@ -175,3 +175,18 @@ def test_create_already_exists_logs(home, view):
     c = started(home, view)
     assert c.create(home / "modules", "A") is None
     assert view.logs[-1] == T["already_exists"].format(name="A")
+
+
+def test_logs_as_file_does_not_block_startup(home, view):
+    (home / "logs").write_text("x", encoding="utf-8")
+    c = started(home, view)                       # 以前這行在 __init__ 的 mkdir 炸
+    assert c.scope.groups
+
+
+def test_report_internal_without_logs_still_reports(home, view):
+    (home / "logs").write_text("x", encoding="utf-8")
+    c = started(home, view)
+    with pytest.raises(RuntimeError) as ei:
+        raise RuntimeError("壞了")
+    c.report_internal(ei.type, ei.value, ei.tb)   # 以前這行在 open() 炸
+    assert view.reports[-1].source == "core"
