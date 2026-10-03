@@ -29,6 +29,7 @@ T: dict[str, str] = {
     "snapshot_failed": "無法存上一版：{message}",
     "config_type": "{name} 的型別不對，應該是 {expected}",
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
+    "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
 }
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
