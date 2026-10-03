@@ -1,5 +1,7 @@
+import os
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 from conftest import make_module
 
@@ -85,3 +87,47 @@ def test_eval_syntax_error_points_at_module_line(home):
 def test_stderr_is_captured_too(home):
     src = "import sys\ndef run(app):\n    print('out')\n    sys.stderr.write('err\\n')\n"
     assert run_module(mod(home, src), None).output == "out\nerr\n"
+
+
+# ── 腳本語意（M1.2，D47）：按下 ＝ 在模組自己的資料夾裡執行 python3 iplot.py ──
+
+
+def test_main_guard_runs(home):
+    r = run_module(mod(home, 'if __name__ == "__main__":\n    print("main")\n'), None)
+    assert r.output == "main\n"
+
+
+def test_cwd_is_module_folder_and_restored(home):
+    before = os.getcwd()
+    info = mod(home, 'open("x.txt", "w").write("1")\n')
+    run_module(info, None)
+    assert (info.folder / "x.txt").exists()
+    assert os.getcwd() == before
+
+
+def test_sys_argv_is_module_file(home):
+    before = sys.argv
+    info = mod(home, "import sys\nprint(sys.argv)\n")
+    r = run_module(info, None)
+    assert r.output == f"{[str(info.file)]}\n"
+    assert sys.argv is before
+
+
+def test_sibling_import_reloads_after_edit(home, monkeypatch):
+    # 同一秒內改成同樣大小的內容，舊的 .pyc 會被當成有效：執行期間不寫 .pyc 才保證重讀
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    info = mod(home, "import helper\nprint(helper.V)\n")
+    (info.folder / "helper.py").write_text("V = 1\n", encoding="utf-8")
+    assert run_module(info, None).output == "1\n"
+    (info.folder / "helper.py").write_text("V = 2\n", encoding="utf-8")
+    assert run_module(info, None).output == "2\n"
+
+
+def test_purge_spares_modules_loaded_before_the_run(home, monkeypatch):
+    # iPLoT 放在某個模組的資料夾裡時，core 自己的 __file__ 也在那個資料夾底下：不能被清掉
+    info = mod(home, "x = 1\n")
+    early = ModuleType("early")
+    early.__file__ = str(info.folder / "early.py")
+    monkeypatch.setitem(sys.modules, "early", early)
+    run_module(info, None)
+    assert sys.modules.get("early") is early
