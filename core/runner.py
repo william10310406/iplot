@@ -30,7 +30,7 @@ def _local(folder: Path, loaded: set[str]) -> list[str]:
 
 
 def _dialog(app: Any, out: io.StringIO) -> Callable[..., str]:
-    """代替 input() 的函式：跳對話框問，按取消回空字串。上次問完之後 print 的東西放在提示前面，
+    """代替 input() 的函式：跳對話框問，按取消丟 EOFError。上次問完之後 print 的東西放在提示前面，
     就像螢幕上問題前面的那幾行（猜數字的「太大」要在下一次問之前看得到）。"""
     shown = 0
 
@@ -49,10 +49,11 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
     """讀檔、編譯、在乾淨的 dict 裡執行，有定義 handler 就再呼叫 handler(app, *args)。
 
     執行期間是腳本的樣子：__name__ 是 "__main__"、工作目錄與 sys.path[0] 是模組資料夾、
-    sys.argv 是 [iplot.py]、input() 變成對話框（按取消得到空字串）；結束時一定還原，
+    sys.argv 是 [iplot.py]、input() 變成對話框（按取消丟 EOFError）；結束時一定還原，
     並把這次從模組資料夾載入的模組清掉，helper.py 改了下次會重讀（所以執行期間也不寫 .pyc）。
     沒有 run 不是錯，最外層程式碼就是動作；指定了別的 handler 而模組沒定義才是 MissingHandler。
-    print 的輸出收進 Result.output；任何錯誤（包括 exit()）都變成 Result.error，不會往外丟。"""
+    print 的輸出收進 Result.output；exit()、sys.exit(0) 是正常結束；任何錯誤（包括沒接住的 EOFError、
+    非零的 exit）都變成 Result.error，不會往外丟。"""
     start, out, error = time.perf_counter(), io.StringIO(), None
     cwd, argv, pyc, ask = os.getcwd(), sys.argv, sys.dont_write_bytecode, builtins.input
     folder = str(info.folder)

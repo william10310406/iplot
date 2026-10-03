@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-03
+
+M1.3「修補」：把 0.2.0 腳本語意裡兩處不像 `python3 iplot.py` 的地方改對（D49）。`app.*` 沒有變，`api_version` 仍是 1。
+
+**與 0.2.0 不相容：按取消的模組現在會以 EOFError 停止；`exit()` 不再顯示錯誤。**
+
+### 變更
+- `input()` 的對話框按取消，現在丟 `EOFError`（訊息「在提問時按了取消」），就像真的 `input()` 遇到 Ctrl-D；0.2.0 是回空字串、模組繼續跑。不接的話模組停在那一行，面板顯示「模組『X』第 N 行出錯：EOFError，在提問時按了取消」；模組可以自己 `except EOFError`。`app.ask` 不變，按取消照舊回 `None`。
+- `exit()` / `sys.exit(0)` / `quit()` 現在是正常結束，不再顯示錯誤；0.2.0 一律算錯誤（「模組呼叫了 exit()，已忽略」）。代碼非零（`exit(1)`、`sys.exit("壞了")`）仍是錯誤，訊息改為「模組以 exit(1) 結束」。
+
+### 修正
+- `while True:` 裡 `int(input())` 配 `except ValueError` 這種課本的驗證迴圈，按取消不再出不去（0.2.0 只能強制結束 iPLoT）。
+
+### 文件
+- 規格 §5.2、§7（第 4 條、腳本語意表；拿掉「驗證迴圈出不去」的已知限制）、§10、§12、`docs/api.md` 同步；D49；D47 的「老闆裁定」更正為研究助理裁定。
+
 ## [0.2.0] - 2026-10-03
 
 M1.2「腳本語意」：課本寫的 Python 腳本不改一行就能當模組。按下按鈕 ＝ 在模組自己的資料夾裡執行 `python3 iplot.py`，只是鍵盤和螢幕換成了視窗（D47）。模組合約只放寬，`api_version` 仍是 1；既有模組照舊能跑，要注意的兩點見「變更」。
@@ -57,6 +73,7 @@ M1「種子」：取代原版 `iPLoT.py` + `iPLoT.txt` 的全新實作，`api_ve
 - 老闆的 `iPLoT.py`／`iPLoT.txt` 存檔在 `docs/original/`，tag `v0.0-original`。原版 `X/X.txt` 模組的匯入工具在 M2。
 
 [Unreleased]: https://github.com/
+[0.2.1]: https://github.com/
 [0.2.0]: https://github.com/
 [0.1.1]: https://github.com/
 [0.1.0]: https://github.com/
