@@ -1,8 +1,12 @@
+import builtins
+import os
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 from conftest import make_module
 
+from core.app import App
 from core.runner import run_module
 from core.scan import module_info
 from core.text import T
@@ -34,9 +38,9 @@ def test_sees_file_changes(home):
     assert app.seen == [1, 2]
 
 
-def test_missing_run(home):
+def test_missing_run_is_not_an_error(home):
     r = run_module(mod(home, "def on_files(app, paths):\n    pass\n"), None)
-    assert not r.ok and r.error.kind == "MissingHandler"
+    assert r.ok and r.error is None
 
 
 def test_exception_has_file_and_line(home):
@@ -85,3 +89,129 @@ def test_eval_syntax_error_points_at_module_line(home):
 def test_stderr_is_captured_too(home):
     src = "import sys\ndef run(app):\n    print('out')\n    sys.stderr.write('err\\n')\n"
     assert run_module(mod(home, src), None).output == "out\nerr\n"
+
+
+# ── 腳本語意（M1.2，D47）：按下 ＝ 在模組自己的資料夾裡執行 python3 iplot.py ──
+
+
+def test_main_guard_runs(home):
+    r = run_module(mod(home, 'if __name__ == "__main__":\n    print("main")\n'), None)
+    assert r.output == "main\n"
+
+
+def test_cwd_is_module_folder_and_restored(home):
+    before = os.getcwd()
+    info = mod(home, 'open("x.txt", "w").write("1")\n')
+    run_module(info, None)
+    assert (info.folder / "x.txt").exists()
+    assert os.getcwd() == before
+
+
+def test_sys_argv_is_module_file(home):
+    before = sys.argv
+    info = mod(home, "import sys\nprint(sys.argv)\n")
+    r = run_module(info, None)
+    assert r.output == f"{[str(info.file)]}\n"
+    assert sys.argv is before
+
+
+def test_sibling_import_reloads_after_edit(home, monkeypatch):
+    # 同一秒內改成同樣大小的內容，舊的 .pyc 會被當成有效：執行期間不寫 .pyc 才保證重讀
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    info = mod(home, "import helper\nprint(helper.V)\n")
+    (info.folder / "helper.py").write_text("V = 1\n", encoding="utf-8")
+    assert run_module(info, None).output == "1\n"
+    (info.folder / "helper.py").write_text("V = 2\n", encoding="utf-8")
+    assert run_module(info, None).output == "2\n"
+
+
+def test_purge_spares_modules_loaded_before_the_run(home, monkeypatch):
+    # iPLoT 放在某個模組的資料夾裡時，core 自己的 __file__ 也在那個資料夾底下：不能被清掉
+    info = mod(home, "x = 1\n")
+    early = ModuleType("early")
+    early.__file__ = str(info.folder / "early.py")
+    monkeypatch.setitem(sys.modules, "early", early)
+    run_module(info, None)
+    assert sys.modules.get("early") is early
+
+
+def test_toplevel_script_without_run_is_ok(home):
+    r = run_module(mod(home, 'print("hi")\n'), None)
+    assert (r.ok, r.error, r.output) == (True, None, "hi\n")
+
+
+def test_on_files_missing_still_errors(home):
+    r = run_module(mod(home, 'print("hi")\n'), None, "on_files", ([Path("a")],))
+    assert not r.ok and r.error.kind == "MissingHandler"
+
+
+def test_input_becomes_dialog(home, fake_core):
+    fake_core.view.answer = "10"
+    info = mod(home, 'x = input("年齡")\nprint(x)\n')
+    r = run_module(info, App(fake_core, info))
+    assert (r.output, r.error) == ("10\n", None)
+    assert fake_core.view.asks == ["年齡"]
+
+
+def test_input_cancel_gives_empty(home, fake_core):
+    fake_core.view.answer = None
+    info = mod(home, 'x = input("年齡")\nprint(x)\n')
+    r = run_module(info, App(fake_core, info))
+    assert (r.output, r.error) == ("\n", None)
+
+
+def test_env_restored_after_error(home, fake_core):
+    def env():
+        return os.getcwd(), sys.argv, builtins.input, list(sys.path), sys.dont_write_bytecode
+
+    before = env()
+    info = mod(home, 'raise ValueError("boom")\n')
+    r = run_module(info, App(fake_core, info))
+    assert r.error.kind == "ValueError"
+    assert env() == before
+
+
+def test_input_in_helper_also_dialog(home, fake_core):
+    fake_core.view.answer = "yes"
+    info = mod(home, "import helper\nprint(helper.f())\n")
+    (info.folder / "helper.py").write_text('def f():\n    return input("q")\n', encoding="utf-8")
+    r = run_module(info, App(fake_core, info))
+    assert (r.output, r.error, fake_core.view.asks) == ("yes\n", None, ["q"])
+
+
+# ── 最終審查的修正 ──
+
+
+def test_helper_in_subfolder_reloads_after_edit(home, monkeypatch):
+    # utils/ 沒有 __init__.py 時是 namespace package：沒有 __file__，要看 __path__ 才清得掉
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    info = mod(home, "from utils import tools\nprint(tools.V)\n")
+    (info.folder / "utils").mkdir()
+    (info.folder / "utils" / "tools.py").write_text("V = 1\n", encoding="utf-8")
+    assert run_module(info, None).output == "1\n"
+    (info.folder / "utils" / "tools.py").write_text("V = 2\n", encoding="utf-8")
+    assert run_module(info, None).output == "2\n"
+    assert "utils" not in sys.modules
+
+
+def test_nested_run_gets_its_own_helper(home):
+    # A 的 helper.py 已經 import 了，A 再用 app.run 跑 B：B 的 import helper 要拿到 B 自己的
+    a = mod(home, "import helper\ndef run(app):\n    app.run('B')\n    print(helper.NAME)\n", "A")
+    b = mod(home, "import helper\nprint(helper.NAME)\n", "B")
+    (a.folder / "helper.py").write_text("NAME = 'A-helper'\n", encoding="utf-8")
+    (b.folder / "helper.py").write_text("NAME = 'B-helper'\n", encoding="utf-8")
+    inner = []
+    app = SimpleNamespace(run=lambda name: inner.append(run_module(b, None).output))
+    r = run_module(a, app)
+    assert (inner, r.output, r.error) == (["B-helper\n"], "A-helper\n", None)
+    assert "helper" not in sys.modules
+
+
+def test_dialog_shows_what_was_printed_since_last_question(home, fake_core):
+    # 猜數字這種腳本：print("太大") 之後再 input()，回饋要在下一個對話框裡看得到
+    fake_core.view.answer = "50"
+    src = 'x = input("猜一個數字")\nprint("太大")\ny = input("再猜")\nprint("請按確定")\ninput()\n'
+    info = mod(home, src)
+    r = run_module(info, App(fake_core, info))
+    assert fake_core.view.asks == ["猜一個數字", "太大\n再猜", "請按確定"]
+    assert (r.output, r.error) == ("太大\n請按確定\n", None)

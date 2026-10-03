@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-03
+
+M1.2「腳本語意」：課本寫的 Python 腳本不改一行就能當模組。按下按鈕 ＝ 在模組自己的資料夾裡執行 `python3 iplot.py`，只是鍵盤和螢幕換成了視窗（D47）。模組合約只放寬，`api_version` 仍是 1；既有模組照舊能跑，要注意的兩點見「變更」。
+
+### 新增
+- `input()` 跳對話框（等同 `app.ask`），不再凍住視窗；上次問完之後 `print` 的東西放在提示前面；按取消得到空字串，模組繼續跑。模組 import 的 helper 裡的 `input()` 也一樣。
+- `def run(app)` 可省略：沒有 `run` 時最外層程式碼就是按下的動作。`if __name__ == "__main__":` 底下的會跑。
+- 執行期間工作目錄是模組自己的資料夾（`open("x.txt")` 讀寫模組資料夾）、`import helper` 找旁邊的 `helper.py`（子資料夾裡的也算）而且改了下次會重讀、`sys.argv` 是 `[iplot.py 的路徑]`；跑完（含出錯、含 `exit()`）全部還原。
+
+### 變更
+- 既有模組裡的 `if __name__ == "__main__":` 區塊現在會在按下時執行（先最外層、再 `run(app)`）；以前 `__name__` 是資料夾名稱，那一段不會跑。
+- 模組執行期間的工作目錄從「iPLoT 啟動時的那個」變成模組自己的資料夾；用相對路徑讀 iPLoT 資料夾的模組請改用 `app.home`。執行期間不寫 `.pyc`。
+- 拖放／「選擇檔案後執行」指定 `on_files` 而模組沒定義，仍是錯誤（`MissingHandler`）；只有缺 `run` 不再是錯誤。
+- 核心邏輯行數上限 450 → 500（D48）。
+
+### 修正
+- 隨附的「重新啟動」在 `execv` 前先回 iPLoT 資料夾，新的 iPLoT 不會以模組資料夾當工作目錄起來。
+
+### 文件
+- 規格 §7 加「腳本語意」與已知限制（`time.sleep`、長迴圈會凍住視窗，M2 用背景執行緒）；§3、§5.1、§5.2、§6.3、§10、附錄 A、`docs/api.md`、`README.md` 同步；新增 `docs/05_使用紀錄.md`。
+
 ## [0.1.1] - 2026-10-03
 
 M1.1「修補」：把 M1 最終審查留下的三個洞補上——「怎麼改壞都能啟動並說哪裡壞」在 `logs/`、`EDITOR`、Python 版本三處的缺口。不加功能、不改介面，`api_version` 仍是 1。
@@ -36,5 +57,6 @@ M1「種子」：取代原版 `iPLoT.py` + `iPLoT.txt` 的全新實作，`api_ve
 - 老闆的 `iPLoT.py`／`iPLoT.txt` 存檔在 `docs/original/`，tag `v0.0-original`。原版 `X/X.txt` 模組的匯入工具在 M2。
 
 [Unreleased]: https://github.com/
+[0.2.0]: https://github.com/
 [0.1.1]: https://github.com/
 [0.1.0]: https://github.com/

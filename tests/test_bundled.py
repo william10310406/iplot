@@ -60,3 +60,11 @@ def test_open_core_and_terminal_argv(fake_core, quiet):
     assert ("open", (fake_core.home / "core",)) in quiet
     assert run_bundled("開Terminal", fake_core).ok
     assert ("subprocess", ["open", "-a", "Terminal", str(fake_core.home)]) in quiet
+
+
+def test_restart_execs_from_home_not_module_folder(fake_core, monkeypatch):
+    # 腳本語意（D47）下執行期間的工作目錄是模組資料夾；execv 換掉程序前要先回 iPLoT 資料夾
+    seen = []
+    monkeypatch.setattr(os, "execv", lambda exe, argv: seen.append(os.getcwd()))
+    assert run_bundled("重新啟動", fake_core).ok
+    assert seen == [str(fake_core.home)]
