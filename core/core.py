@@ -1,5 +1,6 @@
 """組裝與編排：持有設定、畫面與記憶，把面板上的動作接到底層的檔案。"""
 
+import contextlib
 import runpy
 import time
 import unicodedata
@@ -43,7 +44,8 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
     roots, editor = ns.get("ROOTS", d.roots), ns.get("EDITOR", d.editor)
     keep = ns.get("HISTORY_KEEP", d.history_keep)
     for name, ok, expected in [("ROOTS", _strs(roots), "list[str]"),
-                               ("EDITOR", editor is None or _strs(editor), "None | list[str]"),
+                               ("EDITOR", editor is None or (_strs(editor) and len(editor) > 0),
+                                "None | non-empty list[str]"),
                                ("HISTORY_KEEP", type(keep) is int and keep >= 1, "int >= 1")]:
         if not ok:
             message = T["config_type"].format(name=name, expected=expected)
@@ -65,7 +67,6 @@ class Core:
         self.memories: dict[Path, dict] = {}
         self._stack: list[ModuleInfo] = []
         self._depth, self._pending = 0, False
-        (home / "logs").mkdir(exist_ok=True)
 
     def roots(self) -> list[Root]:
         """要掃的根目錄；安全模式只掃 modules。"""
@@ -149,8 +150,10 @@ class Core:
         return folder
 
     def report_internal(self, exc_type: type, exc: BaseException, tb: Any) -> None:
-        """核心自己的錯誤（tkinter 回呼裡丟出來的）：寫進 logs/iplot.log，再進面板。"""
+        """核心自己的錯誤（tkinter 回呼裡丟出來的）：寫進 logs/iplot.log，再進面板。記錄檔寫不了就只進面板。"""
         error = from_exception(exc, None, "core")
-        with (self.home / "logs" / "iplot.log").open("a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n{error.traceback_text}\n")
+        with contextlib.suppress(OSError):
+            (self.home / "logs").mkdir(exist_ok=True)
+            with (self.home / "logs" / "iplot.log").open("a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n{error.traceback_text}\n")
         self.view.report(error)

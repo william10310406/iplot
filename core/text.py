@@ -1,5 +1,8 @@
 """所有畫面文字，與新模組範本。要換語言只換這個檔。"""
 
+# main.py 的版本防線之前就會 import 這個檔：型別註記不能在舊版 Python 求值（D46）
+from __future__ import annotations
+
 T: dict[str, str] = {
     "here": "這一層",
     "parent": "上一層",
@@ -29,6 +32,7 @@ T: dict[str, str] = {
     "snapshot_failed": "無法存上一版：{message}",
     "config_type": "{name} 的型別不對，應該是 {expected}",
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
+    "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
 }
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
