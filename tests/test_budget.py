@@ -1,4 +1,4 @@
-"""行數預算（規格 §4.2、D41）：核心邏輯 ≤ 450 有效行、ui.py ≤ 150。
+"""行數預算（規格 §4.2、D48）：核心邏輯 ≤ 500 有效行、ui.py ≤ 150。
 
 有效行 = 非空白、非純註解、非 docstring 所在的行。"""
 
@@ -38,10 +38,10 @@ def test_effective_lines_definition(tmp_path):
     assert effective_lines(f) == 4
 
 
-def test_core_logic_within_450():
+def test_core_logic_within_500():
     logic = {k: v for k, v in counts().items() if k not in ("ui.py", "text.py")}
     total = sum(logic.values())
-    assert total <= 450, f"核心邏輯 {total} 行 > 450：{logic}"
+    assert total <= 500, f"核心邏輯 {total} 行 > 500：{logic}"
 
 
 def test_ui_within_150():
