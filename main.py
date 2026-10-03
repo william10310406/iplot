@@ -1,7 +1,8 @@
 """iPLoT 入口：python3 main.py [--safe]。組裝設定、核心與面板，然後進入事件迴圈。
 
-核心的 import 放在 main() 裡、版本檢查之後：core/ 用了 3.10 的語法，在太舊的 Python 上
-一 import 就炸，使用者得先看到「請裝新版 Python」那一句，而不是一段 traceback。"""
+core.core 與 core.ui 的 import 放在 main() 裡、版本檢查之後：core/ 用了 3.10 的語法，在太舊的
+Python 上一 import 就炸，使用者得先看到「請裝新版 Python」那一句，而不是一段 traceback。
+檢查之前只 import core.text（它和 core/__init__.py 必須在舊版也 import 得起來，見 D46）。"""
 
 import sys
 from pathlib import Path

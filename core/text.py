@@ -1,5 +1,8 @@
 """所有畫面文字，與新模組範本。要換語言只換這個檔。"""
 
+# main.py 的版本防線之前就會 import 這個檔：型別註記不能在舊版 Python 求值（D46）
+from __future__ import annotations
+
 T: dict[str, str] = {
     "here": "這一層",
     "parent": "上一層",
