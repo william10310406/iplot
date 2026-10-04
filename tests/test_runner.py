@@ -4,12 +4,13 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-from conftest import make_module
+from conftest import FakeCore, FakeView, make_module
 
 from core.app import App
 from core.runner import run_module
 from core.scan import module_info
 from core.text import T
+from core.types import DEFAULT_CONFIG
 
 
 def mod(home, src, name="A"):
@@ -253,3 +254,16 @@ def test_dialog_shows_what_was_printed_since_last_question(home, fake_core):
     r = run_module(info, App(fake_core, info))
     assert fake_core.view.asks == ["猜一個數字", "太大\n再猜", "請按確定"]
     assert (r.output, r.error) == ("太大\n請按確定\n", None)
+
+
+def test_handler_return_value_in_result(home):
+    info = module_info(make_module(home / "modules", "A", "def run(app):\n    return 42\n"), home / "modules", "here")
+    assert run_module(info, App(FakeCore(home, DEFAULT_CONFIG, FakeView()), info)).value == 42
+
+
+def test_on_files_return_value_and_missing_run_is_none(home):
+    src = "def on_files(app, paths):\n    return len(paths)\n"
+    info = module_info(make_module(home / "modules", "B", src), home / "modules", "here")
+    app = App(FakeCore(home, DEFAULT_CONFIG, FakeView()), info)
+    assert run_module(info, app, "on_files", (["a", "b"],)).value == 2
+    assert run_module(info, app).value is None

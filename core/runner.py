@@ -54,7 +54,7 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
     沒有 run 不是錯，最外層程式碼就是動作；指定了別的 handler 而模組沒定義才是 MissingHandler。
     print 的輸出收進 Result.output；exit()、sys.exit(0) 是正常結束；任何錯誤（包括沒接住的 EOFError、
     非零的 exit）都變成 Result.error，不會往外丟。"""
-    start, out, error = time.perf_counter(), io.StringIO(), None
+    start, out, error, value = time.perf_counter(), io.StringIO(), None, None
     cwd, argv, pyc, ask = os.getcwd(), sys.argv, sys.dont_write_bytecode, builtins.input
     folder = str(info.folder)
     # 外層模組（app.run 的呼叫者）自己的 helper 先收起來：這個模組 import 同名的檔案才會拿到自己的
@@ -72,7 +72,7 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
             exec(code, ns)  # noqa: S102  規格 §7 第 2 條：進入模組程式碼唯一的門
             fn = ns.get(handler)
             if callable(fn):
-                fn(app, *args)
+                value = fn(app, *args)
             elif handler != "run":  # 沒有 run 不是錯：最外層程式碼就是按下的動作（D47）
                 error = ErrorInfo("MissingHandler", T["missing_handler"].format(handler=handler),
                                   info.file, None, "", "module", info.name)
@@ -90,4 +90,4 @@ def run_module(info: ModuleInfo, app: Any, handler: str = "run", args: tuple = (
             del sys.modules[name]
         sys.modules.update(hidden)
         os.chdir(cwd)
-    return Result(error is None, error, time.perf_counter() - start, out.getvalue())
+    return Result(error is None, error, time.perf_counter() - start, out.getvalue(), value)
