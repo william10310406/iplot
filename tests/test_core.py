@@ -199,7 +199,7 @@ def test_action_runs_system_module_handler_and_returns_value(home, view):
     make_module(home / "modules", SYS, FAKE_OS)
     c = started(home, view)
     assert c.action("open", Path("/x")) == "ok"
-    assert "opened /x" in view.logs and not any("完成（" in line for line in view.logs)
+    assert f"opened {Path('/x')}" in view.logs and not any("完成（" in line for line in view.logs)
 
 
 def test_action_broken_system_module_reports_once(home, view):

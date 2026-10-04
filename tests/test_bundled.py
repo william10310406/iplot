@@ -77,9 +77,10 @@ def test_mac_argv(launches):
     m.edit(None, p, None, 7)
     m.edit(None, p, ("code", "-g", "{file}:{line}"), 7)
     m.edit(None, p, ("code", "-g", "{file}:{line}"), None)
+    s = str(p)  # 不寫死 "/x/a.txt"：在 Windows 的 runner 上 str(Path) 是反斜線
     assert [a for a, _ in launches] == [
-        ["open", "/x/a.txt"], ["open", "-R", "/x/a.txt"], ["open", "-a", "Terminal", "/x/a.txt"],
-        ["open", "-t", "/x/a.txt"], ["code", "-g", "/x/a.txt:7"], ["code", "-g", "/x/a.txt:1"]]
+        ["open", s], ["open", "-R", s], ["open", "-a", "Terminal", s],
+        ["open", "-t", s], ["code", "-g", f"{s}:7"], ["code", "-g", f"{s}:1"]]
 
 
 def test_mac_edit_folder_falls_back_to_open(launches, tmp_path):
@@ -161,10 +162,11 @@ def test_linux_argv(launches, monkeypatch):
     lx.reveal(None, p)
     lx.edit(None, p, None, 1)
     lx.edit(None, p, ("code", "-g", "{file}:{line}"), 7)
-    lx.terminal(None, Path("/x"))
-    assert launches == [(["xdg-open", "/x/a.txt"], {}), (["xdg-open", "/x"], {}),
-                        (["xdg-open", "/x/a.txt"], {}), (["code", "-g", "/x/a.txt:7"], {}),
-                        (["gnome-terminal", "--working-directory=/x"], {"cwd": "/x"})]
+    lx.terminal(None, p.parent)
+    s, d = str(p), str(p.parent)
+    assert launches == [(["xdg-open", s], {}), (["xdg-open", d], {}),
+                        (["xdg-open", s], {}), (["code", "-g", f"{s}:7"], {}),
+                        (["gnome-terminal", f"--working-directory={d}"], {"cwd": d})]
 
 
 def test_linux_edit_folder_falls_back_to_open(launches, tmp_path):

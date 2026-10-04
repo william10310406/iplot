@@ -1,4 +1,4 @@
-"""規格 §12 從零啟動情境 1–5，用 FakeView 不開視窗。情境 6 由 tests/smoke.sh 負責。"""
+"""規格 §12 從零啟動情境 1–5，用 FakeView 不開視窗。情境 6 由 tests/smoke.py 負責。"""
 
 import dataclasses
 
