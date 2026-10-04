@@ -32,11 +32,17 @@ def test_already_exists(tmp_path):
         new_module(tmp_path, "A")
 
 
-@pytest.mark.parametrize("bad", ["", "  ", "a/b", ".hidden"])
+@pytest.mark.parametrize("bad", ["", "  ", "a/b", ".hidden", "a\\b", "a:b", "a*b", "a?b", 'a"b', "a<b",
+                                 "a>b", "a|b", "x.", "x ", "a\tb", "CON", "con", "nul.txt", "COM1", "LPT9"])
 def test_bad_name(tmp_path, bad):
     with pytest.raises(BadName):
         new_module(tmp_path, bad)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("good", ["整理 桌面", "a.b", "COM10", "CONTEXT", "nul2", " a"])
+def test_good_name(tmp_path, good):
+    assert new_module(tmp_path, good) == tmp_path / good
 
 
 def test_chinese_name_ok(tmp_path):

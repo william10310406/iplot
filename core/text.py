@@ -19,7 +19,8 @@ T: dict[str, str] = {
     "input_cancelled": "在提問時按了取消",
     "not_found": "找不到模組『{name}』",
     "ambiguous": "有兩個以上的模組叫『{name}』：{paths}",
-    "bad_name": "名稱不能是空白、含 /、或以 . 開頭",
+    "bad_name": "名稱不能是空白、以 . 開頭、結尾是 . 或空白、含 / \\ : * ? \" < > |，"
+                "也不能是 CON、NUL 這類 Windows 保留字（模組要能複製到任何系統）",
     "already_exists": "『{name}』已經是模組了",
     "ask_name": "新模組的名稱",
     "open_file": "打開檔案",
