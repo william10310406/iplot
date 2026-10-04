@@ -211,11 +211,25 @@ def test_action_broken_system_module_reports_once(home, view):
 
 def test_action_from_inside_module(home, view):
     make_module(home / "modules", SYS, FAKE_OS)
-    make_module(home / "modules", "A", "def run(app):\n    app.open(app.module.folder)\n")
+    make_module(home / "modules", "A",
+                "def run(app):\n    app.rescan()\n    app.open(app.module.folder)\n")
+    c = started(home, view)
+    view.events.clear()
+    assert c.press(find(c, "A")).ok
+    kinds = [e[1] if e[0] == "log" else e[0] for e in view.events]
+    assert kinds[0].startswith("opened ")
+    assert "完成（" in kinds[-2] and "A" in kinds[-2]        # A 自己的「完成」是最後一行訊息
+    assert kinds.count("show") == 1 and kinds[-1] == "show"  # 重掃延到 A 結束才做，只做一次
+
+
+def test_action_relative_path_means_the_calling_modules_folder(home, view):
+    # 執行期間工作目錄是模組自己的資料夾；交給作業系統模組時工作目錄會換掉，所以路徑要先變成絕對的
+    make_module(home / "modules", SYS, FAKE_OS)
+    src = 'from pathlib import Path\n\ndef run(app):\n    app.open(Path("notes.txt"))\n'
+    make_module(home / "modules", "A", src)
     c = started(home, view)
     assert c.press(find(c, "A")).ok
-    assert any(line.startswith("opened ") for line in view.logs)
-    assert "完成（" in view.logs[-1] and "A" in view.logs[-1]
+    assert f"opened {find(c, 'A').folder / 'notes.txt'}" in view.logs
 
 
 def test_create_opens_editor_via_action(home, view):

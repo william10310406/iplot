@@ -49,25 +49,28 @@ class App:
         """寫一行到面板下方的訊息區。"""
         self._core.view.log(text)
 
+    # 以下五個動作交給 modules/作業系統 執行（core.action）。那個模組執行時工作目錄是它自己的資料夾，
+    # 所以路徑在這裡先變成絕對的：相對路徑指的是呼叫的模組自己的資料夾，跟 open("x.txt") 一樣
+
     def open(self, path: Path) -> None:
         """打開：資料夾用檔案總管、檔案用預設程式。由 modules/作業系統 執行。"""
-        self._core.action("open", path)
+        self._core.action("open", Path(path).absolute())
 
     def edit(self, path: Path, line: int | None = None) -> None:
         """用 config.py 的 EDITOR 打開檔案（None 時用系統預設文字編輯器）；資料夾改用 open。"""
-        self._core.action("edit", path, self._core.config.editor, line)
+        self._core.action("edit", Path(path).absolute(), self._core.config.editor, line)
 
     def reveal(self, path: Path) -> None:
         """在檔案總管裡顯示並選取這個檔案或資料夾。"""
-        self._core.action("reveal", path)
+        self._core.action("reveal", Path(path).absolute())
 
     def terminal(self, path: Path) -> None:
         """在終端機打開這個資料夾。"""
-        self._core.action("terminal", path)
+        self._core.action("terminal", Path(path).absolute())
 
     def trash(self, path: Path) -> Path | None:
         """搬到系統垃圾桶，永遠不直接刪除；回傳搬到哪裡（Windows 的資源回收筒沒有路徑，回 None）。"""
-        return self._core.action("trash", path)
+        return self._core.action("trash", Path(path).absolute())
 
     def run(self, name: str | ModuleInfo) -> Result:
         """執行目前範圍內另一個模組；找不到或有兩個同名時丟 LookupError，不猜。"""
