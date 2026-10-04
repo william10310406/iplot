@@ -3,11 +3,14 @@ modules/作業系統 的後端（mac、win、linux）直接 import 進來驗參�
 
 import ctypes
 import importlib.util
+import inspect
 import os
+import re
 import shutil
 import subprocess
 import sys
 import types
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -148,6 +151,68 @@ def test_win_trash_nonzero_is_oserror(monkeypatch):
     monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(shell32=Shell32()), raising=False)
     with pytest.raises(OSError, match="資源回收筒拒絕：2"):
         backend("win").trash(None, Path("C:\\x\\y"))
+
+
+def test_linux_argv(launches, monkeypatch):
+    lx, p = backend("linux"), Path("/x/a.txt")
+    monkeypatch.setattr(shutil, "which",
+                        lambda name: "/usr/bin/gnome-terminal" if name == "gnome-terminal" else None)
+    lx.open(None, p)
+    lx.reveal(None, p)
+    lx.edit(None, p, None, 1)
+    lx.edit(None, p, ("code", "-g", "{file}:{line}"), 7)
+    lx.terminal(None, Path("/x"))
+    assert launches == [(["xdg-open", "/x/a.txt"], {}), (["xdg-open", "/x"], {}),
+                        (["xdg-open", "/x/a.txt"], {}), (["code", "-g", "/x/a.txt:7"], {}),
+                        (["gnome-terminal", "--working-directory=/x"], {"cwd": "/x"})]
+
+
+def test_linux_edit_folder_falls_back_to_open(launches, tmp_path):
+    backend("linux").edit(None, tmp_path, ("code", "{file}"), 3)
+    assert launches == [(["xdg-open", str(tmp_path)], {})]
+
+
+def test_linux_no_terminal_is_oserror(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(OSError, match="xterm"):
+        backend("linux").terminal(None, Path("/x"))
+
+
+def test_linux_trash_writes_files_and_info(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    lx = backend("linux")
+    trash = tmp_path / ".local" / "share" / "Trash"
+    a = tmp_path / "x"
+    a.write_text("1")
+    d1 = lx.trash(None, a)
+    b = tmp_path / "x"
+    b.write_text("2")
+    d2 = lx.trash(None, b)
+    assert (d1, d2) == (trash / "files" / "x", trash / "files" / "x 2")
+    info = (trash / "info" / "x.trashinfo").read_text(encoding="utf-8").splitlines()
+    assert info[0] == "[Trash Info]" and info[1] == f"Path={urllib.parse.quote(str(tmp_path / 'x'))}"
+    assert re.fullmatch(r"DeletionDate=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", info[2])
+    assert (trash / "info" / "x 2.trashinfo").exists() and d2.read_text() == "2"
+
+
+def test_backends_have_same_five_functions():
+    sigs = [{n: str(inspect.signature(getattr(backend(b), n))) for n in NAMES}
+            for b in ("mac", "win", "linux")]
+    assert sigs[0] == sigs[1] == sigs[2]
+    assert all(isinstance(backend(b).NAME, str) for b in ("mac", "win", "linux"))
+
+
+def test_backend_error_points_into_backend_file(fake_core, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    def boom(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    info = bundled("作業系統")
+    r = run_module(info, App(fake_core, info), "open", (Path("/x"),))
+    assert not r.ok and r.error.kind == "FileNotFoundError"
+    assert r.error.file.name == "linux.py" and r.error.line and "xdg-open" in r.error.message
 
 
 def test_selector_picks_backend_by_platform(fake_core, monkeypatch):
