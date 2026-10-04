@@ -3,6 +3,7 @@
 import dataclasses
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -18,7 +19,7 @@ from conftest import make_module  # noqa: E402
 
 from core.core import Core  # noqa: E402
 from core.text import T  # noqa: E402
-from core.types import DEFAULT_CONFIG  # noqa: E402
+from core.types import DEFAULT_CONFIG, ErrorInfo  # noqa: E402
 from core.ui import Panel  # noqa: E402
 
 
@@ -136,3 +137,26 @@ def test_enter_child_breadcrumb_and_warning_mark(home, panel):
     panel.window.update()
     assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT"]
     assert button(panel.body, "A") and button(panel.body, "⚠ Bad")
+
+
+def test_open_file_button_uses_core_action(home, panel, monkeypatch):
+    started(home, panel)
+    seen = []
+    monkeypatch.setattr(panel.core, "action", lambda name, *a: seen.append((name, *a)))
+    panel.report(ErrorInfo("NameError", "x", Path("/m/iplot.py"), 7, "", "module", "m"))
+    [opener] = [panel.messages.nametowidget(n) for n in panel.messages.window_names()]
+    opener.invoke()
+    assert seen == [("edit", Path("/m/iplot.py"), panel.core.config.editor, 7)]
+
+
+def test_right_click_menu_uses_core_action(home, panel, monkeypatch):
+    make_module(home / "modules", "A")
+    core = started(home, panel)
+    seen = []
+    monkeypatch.setattr(core, "action", lambda name, *a: seen.append((name, *a)))
+    [menu] = widgets(button(panel.body, "A"), tkinter.Menu)
+    assert [menu.entrycget(i, "label") for i in range(3)] == ["打開程式碼", "在資料夾中顯示", "在終端機打開"]
+    for i in range(3):
+        menu.invoke(i)
+    [info] = core.scope.groups[0].modules
+    assert seen == [("edit", info.file, None, None), ("reveal", info.folder), ("terminal", info.folder)]

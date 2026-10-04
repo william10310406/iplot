@@ -4,7 +4,6 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, simpledialog
 
-from . import actions
 from .core import Core
 from .errors import describe
 from .text import T
@@ -101,10 +100,11 @@ class Panel:
         if info.has_children:
             tk.Button(row, text="▸", command=lambda: self.core.enter(info)).pack(side="left")
         menu = tk.Menu(button, tearoff=False)
-        menu.add_command(label=T["menu_edit"],
-                         command=lambda: actions.edit(info.file, self.core.config.editor))
-        menu.add_command(label=T["menu_reveal"], command=lambda: actions.reveal(info.folder))
-        menu.add_command(label=T["menu_terminal"], command=lambda: actions.terminal(info.folder))
+        menu.add_command(label=T["menu_edit"], command=lambda: self.core.action(
+            "edit", info.file, self.core.config.editor, None))
+        menu.add_command(label=T["menu_reveal"], command=lambda: self.core.action("reveal", info.folder))
+        menu.add_command(label=T["menu_terminal"],
+                         command=lambda: self.core.action("terminal", info.folder))
 
         def popup(event: tk.Event) -> str:
             menu.tk_popup(event.x_root, event.y_root)
@@ -126,8 +126,8 @@ class Panel:
         """訊息區顯示完整 traceback，最後才是白話那一句和「打開檔案」：捲到底看到的是人話，不是 traceback。"""
         button = None
         if error.file is not None:
-            button = tk.Button(self.messages, text=T["open_file"], command=lambda: actions.edit(
-                error.file, self.core.config.editor, error.line))
+            button = tk.Button(self.messages, text=T["open_file"], command=lambda: self.core.action(
+                "edit", error.file, self.core.config.editor, error.line))
         self._write(error.traceback_text + describe(error) + "\n", button)
 
     def _write(self, text: str, button: tk.Button | None = None) -> None:
