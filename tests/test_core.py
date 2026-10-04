@@ -1,10 +1,11 @@
 import shutil
 import unicodedata
+from pathlib import Path
 
 import pytest
 from conftest import make_module
 
-from core import actions, history
+from core import history
 from core.core import Core
 from core.text import T
 from core.types import DEFAULT_CONFIG
@@ -18,6 +19,11 @@ def started(home, view, **kw):
 
 def find(c, name):
     return next(m for m in c.all_modules() if m.name == name)
+
+
+SYS = "作業系統"
+FAKE_OS = ('def open(app, path):\n    print("opened", path)\n    return "ok"\n\n'
+           'def edit(app, path, editor, line):\n    print("edit", path.name, editor, line)\n')
 
 
 def test_rescan_shows_two_groups(home, view):
@@ -93,15 +99,6 @@ def test_enter_and_back(home, view):
     assert (g.level, g.label, g.root, [m.name for m in g.modules]) == ("here", "A", a.folder, ["C"])
     c.back(0)
     assert c.scope.crumbs == ("iPLoT",) and len(c.scope.groups) == 2
-
-
-def test_create_opens_editor(home, view, monkeypatch):
-    seen = []
-    monkeypatch.setattr(actions, "edit", lambda *a: seen.append(a))
-    c = started(home, view)
-    folder = c.create(c.scope.groups[0].root, "新的")
-    assert seen == [(folder / "iplot.py", None)]
-    assert [m.name for m in c.scope.groups[0].modules] == ["新的"]
 
 
 def test_create_bad_name_logs(home, view):
@@ -190,3 +187,37 @@ def test_report_internal_without_logs_still_reports(home, view):
         raise RuntimeError("壞了")
     c.report_internal(ei.type, ei.value, ei.tb)   # 以前這行在 open() 炸
     assert view.reports[-1].source == "core"
+
+
+def test_action_without_system_module_logs_and_returns_none(home, view):
+    c = started(home, view)
+    assert c.action("open", Path("/x")) is None
+    assert view.logs[-1] == T["no_system"].format(module=SYS, name="open")
+
+
+def test_action_runs_system_module_handler_and_returns_value(home, view):
+    make_module(home / "modules", SYS, FAKE_OS)
+    c = started(home, view)
+    assert c.action("open", Path("/x")) == "ok"
+    assert "opened /x" in view.logs and not any("完成（" in line for line in view.logs)
+
+
+def test_action_broken_system_module_reports_once(home, view):
+    make_module(home / "modules", SYS, "def open(app, path)\n")
+    c = started(home, view)
+    assert c.action("open", Path("/x")) is None
+    assert len(view.reports) == 1 and view.reports[0].module == SYS
+
+
+def test_create_opens_editor_via_action(home, view):
+    make_module(home / "modules", SYS, FAKE_OS)
+    c = started(home, view)
+    assert c.create(home / "modules", "新") == home / "modules" / "新"
+    assert "edit iplot.py None None" in view.logs
+
+
+def test_press_quiet_skips_done_line(home, view):
+    make_module(home / "modules", "A")
+    c = started(home, view)
+    c.press(find(c, "A"), quiet=True)
+    assert not any("完成（" in line for line in view.logs)
