@@ -239,6 +239,15 @@ def test_create_opens_editor_via_action(home, view):
     assert "edit iplot.py None None" in view.logs
 
 
+def test_create_under_a_module_gives_it_its_first_child(home, view):
+    a = make_module(home / "modules", "A")
+    c = started(home, view)
+    assert not find(c, "A").has_children
+    assert c.create(a, "子") == a / "子"
+    assert (a / "子" / "iplot.py").is_file()
+    assert find(c, "A").has_children
+
+
 def test_press_quiet_skips_done_line(home, view):
     make_module(home / "modules", "A")
     c = started(home, view)

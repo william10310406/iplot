@@ -27,6 +27,7 @@ T: dict[str, str] = {
     "menu_edit": "打開程式碼",
     "menu_reveal": "在資料夾中顯示",
     "menu_terminal": "在終端機打開",
+    "menu_add_child": "在這裡新增下一層模組…",
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",

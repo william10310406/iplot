@@ -105,6 +105,7 @@ class Panel:
         menu.add_command(label=T["menu_reveal"], command=lambda: self.core.action("reveal", info.folder))
         menu.add_command(label=T["menu_terminal"],
                          command=lambda: self.core.action("terminal", info.folder))
+        menu.add_command(label=T["menu_add_child"], command=lambda: self._create(info.folder))
 
         def popup(event: tk.Event) -> str:
             menu.tk_popup(event.x_root, event.y_root)

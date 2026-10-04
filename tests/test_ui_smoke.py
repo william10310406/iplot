@@ -1,6 +1,8 @@
 """有顯示器才跑：真的建 Panel，按按鈕，看訊息區。"""
 
 import dataclasses
+import os
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -160,3 +162,60 @@ def test_right_click_menu_uses_core_action(home, panel, monkeypatch):
         menu.invoke(i)
     [info] = core.scope.groups[0].modules
     assert seen == [("edit", info.file, None, None), ("reveal", info.folder), ("terminal", info.folder)]
+
+
+def row_menu(panel, text):
+    """某一列按鈕的右鍵選單，和它每一項的標籤。"""
+    [menu] = widgets(button(panel.body, text), tkinter.Menu)
+    return menu, [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)]
+
+
+def lone_module(home, panel, monkeypatch, answer=None):
+    """模組 A（沒有子模組）。會碰到外面的全部換掉：啟動外部程式算失敗、core.action 只記錄、ask 回固定答案。"""
+    def boom(*args, **kw):
+        raise AssertionError("測試不該啟動外部程式")
+
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    monkeypatch.setattr(os, "execv", boom)
+    make_module(home / "modules", "A")
+    core = started(home, panel)
+    seen = []
+    monkeypatch.setattr(core, "action", lambda name, *a: seen.append((name, *a)))
+    monkeypatch.setattr(panel, "ask", lambda prompt, default="": answer)
+    return core, seen
+
+
+def add_child(panel, text):
+    """按某一列右鍵選單的第四項。先確認它在：索引超出範圍時 Tk 可能改按最後一項（在終端機打開）。"""
+    menu, labels = row_menu(panel, text)
+    assert labels[3:] == ["在這裡新增下一層模組…"]
+    menu.invoke(3)
+    panel.window.update()
+
+
+def test_right_click_menu_has_add_child(home, panel, monkeypatch):
+    lone_module(home, panel, monkeypatch)
+    _, labels = row_menu(panel, "A")
+    assert labels == ["打開程式碼", "在資料夾中顯示", "在終端機打開", "在這裡新增下一層模組…"]
+    assert labels[3] == T["menu_add_child"]
+
+
+def test_add_child_creates_under_module_and_shows_arrow(home, panel, monkeypatch):
+    core, seen = lone_module(home, panel, monkeypatch, answer="子")
+    assert "▸" not in [b.cget("text") for b in widgets(panel.body, tkinter.Button)]
+    add_child(panel, "A")
+    child = home / "modules" / "A" / "子" / "iplot.py"
+    assert child.is_file()
+    assert seen == [("edit", child, core.config.editor, None)]  # 建好照舊交給編輯器
+    button(panel.body, "▸").invoke()
+    panel.window.update()
+    assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT", "A"]
+    assert button(panel.body, "子")
+
+
+def test_add_child_bad_name_does_not_create(home, panel, monkeypatch):
+    _, seen = lone_module(home, panel, monkeypatch, answer="a/b")
+    add_child(panel, "A")
+    assert [p.name for p in (home / "modules" / "A").rglob("*")] == ["iplot.py"]
+    assert T["bad_name"] in messages(panel)
+    assert seen == []
