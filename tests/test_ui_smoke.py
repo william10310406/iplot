@@ -171,15 +171,13 @@ def row_menu(panel, text):
 
 
 def lone_module(home, panel, monkeypatch, answer=None):
-    """模組 A（沒有子模組）。會碰到外面的全部換掉：啟動外部程式算失敗、core.action 只記錄、ask 回固定答案。"""
-    def boom(*args, **kw):
-        raise AssertionError("測試不該啟動外部程式")
-
-    monkeypatch.setattr(subprocess, "Popen", boom)
-    monkeypatch.setattr(os, "execv", boom)
+    """模組 A（沒有子模組）。會碰到外面的全部換成只記進 seen：core.action、啟動外部程式（Popen、execv）；ask 回固定答案。
+    記錄而不是丟例外：Tk 回呼裡丟的例外會被 tkinter 吞掉，測試不會紅；seen 多一筆，比對 seen 的測試才會紅。"""
+    seen = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: seen.append(("Popen", *a)))
+    monkeypatch.setattr(os, "execv", lambda *a: seen.append(("execv", *a)))
     make_module(home / "modules", "A")
     core = started(home, panel)
-    seen = []
     monkeypatch.setattr(core, "action", lambda name, *a: seen.append((name, *a)))
     monkeypatch.setattr(panel, "ask", lambda prompt, default="": answer)
     return core, seen
@@ -207,6 +205,7 @@ def test_add_child_creates_under_module_and_shows_arrow(home, panel, monkeypatch
     child = home / "modules" / "A" / "子" / "iplot.py"
     assert child.is_file()
     assert seen == [("edit", child, core.config.editor, None)]  # 建好照舊交給編輯器
+    assert row_menu(panel, "A")[1][3:] == [T["menu_add_child"]]  # 有了子模組，這一項還在
     button(panel.body, "▸").invoke()
     panel.window.update()
     assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT", "A"]
