@@ -79,6 +79,10 @@ class FakeCore:
     def rescan(self):
         self.calls.append(("rescan",))
 
+    def action(self, name, *args):
+        self.calls.append(("action", name, *args))
+        return "value"
+
 
 @pytest.fixture
 def home(tmp_path):

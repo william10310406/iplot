@@ -44,7 +44,7 @@ def test_bundled_meta(name):
 def test_kaigong_runs_with_fake_core(fake_core, quiet):
     r = run_bundled("開工", fake_core)
     assert r.ok, r.error
-    assert sum(1 for kind, _ in quiet if kind == "open") >= 2
+    assert sum(1 for c in fake_core.calls if c[:2] == ("action", "open")) >= 2
     assert ("subprocess", ["open", "-a", "Terminal", str(fake_core.home)]) in quiet
     assert fake_core.view.logs
 
@@ -57,7 +57,7 @@ def test_restart_calls_execv(fake_core, quiet):
 
 def test_open_core_and_terminal_argv(fake_core, quiet):
     assert run_bundled("打開核心原始碼", fake_core).ok
-    assert ("open", (fake_core.home / "core",)) in quiet
+    assert ("action", "open", fake_core.home / "core") in fake_core.calls
     assert run_bundled("開Terminal", fake_core).ok
     assert ("subprocess", ["open", "-a", "Terminal", str(fake_core.home)]) in quiet
 

@@ -209,6 +209,15 @@ def test_action_broken_system_module_reports_once(home, view):
     assert len(view.reports) == 1 and view.reports[0].module == SYS
 
 
+def test_action_from_inside_module(home, view):
+    make_module(home / "modules", SYS, FAKE_OS)
+    make_module(home / "modules", "A", "def run(app):\n    app.open(app.module.folder)\n")
+    c = started(home, view)
+    assert c.press(find(c, "A")).ok
+    assert any(line.startswith("opened ") for line in view.logs)
+    assert "完成（" in view.logs[-1] and "A" in view.logs[-1]
+
+
 def test_create_opens_editor_via_action(home, view):
     make_module(home / "modules", SYS, FAKE_OS)
     c = started(home, view)
