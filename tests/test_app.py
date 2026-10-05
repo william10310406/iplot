@@ -2,7 +2,6 @@ import dataclasses
 import re
 from pathlib import Path
 
-from core import actions
 from core.app import App
 
 CJK = re.compile(r"[一-鿿]")
@@ -18,12 +17,31 @@ def test_log_goes_to_view(fake_core, info):
     assert fake_core.view.logs == ["hi"]
 
 
-def test_edit_uses_config_editor(fake_core, info, monkeypatch):
-    seen = []
-    monkeypatch.setattr(actions, "edit", lambda *a: seen.append(a))
+def test_edit_uses_config_editor(fake_core, info):
     fake_core.config = dataclasses.replace(fake_core.config, editor=("code", "{file}"))
     App(fake_core, info).edit(Path("/x"), 3)
-    assert seen == [(Path("/x"), ("code", "{file}"), 3)]
+    assert fake_core.calls == [("action", "edit", Path("/x").absolute(), ("code", "{file}"), 3)]
+
+
+def test_open_reveal_terminal_trash_delegate(fake_core, info):
+    app, p = App(fake_core, info), Path("/x").absolute()
+    app.open(p)
+    app.reveal(p)
+    app.terminal(p)
+    assert app.trash(p) == "value"
+    assert fake_core.calls == [("action", "open", p), ("action", "reveal", p),
+                               ("action", "terminal", p), ("action", "trash", p)]
+
+
+def test_relative_paths_become_absolute_in_the_callers_folder(fake_core, info, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app = App(fake_core, info)
+    app.open(Path("a.txt"))
+    app.edit(Path("b.txt"))
+    app.reveal(Path("c"))
+    app.terminal(Path("d"))
+    app.trash(Path("e"))
+    assert [c[2] for c in fake_core.calls] == [Path.cwd() / n for n in ("a.txt", "b.txt", "c", "d", "e")]
 
 
 def test_run_delegates(fake_core, info):
@@ -50,7 +68,7 @@ def test_all_members_have_docstrings():
     members = {k: v for k, v in vars(App).items()
                if not k.startswith("_") and (callable(v) or isinstance(v, property))}
     assert set(members) >= {"module", "home", "modules", "memory", "window", "log", "open",
-                            "edit", "run", "rescan", "ask", "choose_files", "choose_folder"}
+                            "edit", "reveal", "terminal", "trash", "run", "rescan", "ask", "choose_files", "choose_folder"}
     for name, member in members.items():
         assert CJK.search(member.__doc__ or ""), name
     assert CJK.search(App.__doc__) and "api_version" in App.__doc__

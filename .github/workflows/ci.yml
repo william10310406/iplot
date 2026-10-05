@@ -4,16 +4,22 @@ on: [push, pull_request]
 
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
         python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
-      - run: python3 -m pytest -q --cov=core --cov-report=term
-      - run: bash tests/smoke.sh
+      - run: python -m pytest -q --cov=core --cov-report=term
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a python tests/smoke.py
+      - if: runner.os != 'Linux'
+        run: python tests/smoke.py

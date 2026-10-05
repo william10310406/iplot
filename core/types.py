@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 Level = Literal["here", "parent", "extra", "child"]
 Source = Literal["module", "core", "config"]
@@ -94,6 +94,7 @@ class Result:
     error: ErrorInfo | None
     duration: float
     output: str
+    value: Any = None
 
 
 DEFAULT_CONFIG = Config(roots=("modules", ".."), editor=None, history_keep=20)

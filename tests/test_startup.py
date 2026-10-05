@@ -1,4 +1,4 @@
-"""規格 §12 從零啟動情境 1–5，用 FakeView 不開視窗。情境 6 由 tests/smoke.sh 負責。"""
+"""規格 §12 從零啟動情境 1–5，用 FakeView 不開視窗。情境 6 由 tests/smoke.py 負責。"""
 
 import dataclasses
 
@@ -6,6 +6,7 @@ import pytest
 from conftest import make_module
 
 from core.core import Core, load_config
+from core.text import T
 from core.types import DEFAULT_CONFIG
 
 
@@ -92,3 +93,12 @@ def test_load_config_type_errors_name_the_variable(tmp_path, src, name):
     config, err = load_config(f)
     assert config == DEFAULT_CONFIG and err.kind == "TypeError"
     assert err.message.startswith(name)
+
+
+def test_plus_without_system_module(home, view):
+    c = Core(home, DEFAULT_CONFIG, view)
+    c.rescan()
+    folder = c.create(home / "modules", "整理桌面")
+    assert (folder / "iplot.py").exists()
+    assert any(m.name == "整理桌面" for m in c.all_modules())
+    assert view.logs[-1] == T["no_system"].format(module="作業系統", name="edit")

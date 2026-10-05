@@ -19,13 +19,15 @@ T: dict[str, str] = {
     "input_cancelled": "在提問時按了取消",
     "not_found": "找不到模組『{name}』",
     "ambiguous": "有兩個以上的模組叫『{name}』：{paths}",
-    "bad_name": "名稱不能是空白、含 /、或以 . 開頭",
+    "bad_name": "名稱不能是空白、以 . 開頭、結尾是 . 或空白、含 / \\ : * ? \" < > |，"
+                "也不能是 CON、NUL 這類 Windows 保留字（模組要能複製到任何系統）",
     "already_exists": "『{name}』已經是模組了",
     "ask_name": "新模組的名稱",
     "open_file": "打開檔案",
     "menu_edit": "打開程式碼",
-    "menu_reveal": "在 Finder 顯示",
-    "menu_terminal": "在 Terminal 打開",
+    "menu_reveal": "在資料夾中顯示",
+    "menu_terminal": "在終端機打開",
+    "menu_add_child": "在這裡新增下一層模組…",
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",
@@ -34,7 +36,12 @@ T: dict[str, str] = {
     "config_type": "{name} 的型別不對，應該是 {expected}",
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
     "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
+    "no_system": "沒有『{module}』模組，無法執行 {name}。要有這個功能，在 modules/ 新增一個叫『{module}』的模組"
+                 "並定義 {name}(app, …)；見 docs/07_接口與邊界.md",
 }
+
+# 碰作業系統的事（打開、編輯、顯示、終端機、垃圾桶）由 modules/ 裡叫這個名字的模組做（D50、D52）
+SYSTEM_MODULE = "作業系統"
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
 # TITLE = "顯示名稱"   # 要讓按鈕文字跟資料夾名稱不同時才打開這一行

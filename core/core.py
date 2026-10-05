@@ -7,11 +7,11 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import actions, history, runner, scan
+from . import history, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
 from .errors import from_exception
-from .text import T
+from .text import SYSTEM_MODULE, T
 from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result, Root, Scope
 
 
@@ -102,8 +102,10 @@ class Core:
         """目前範圍內的所有模組。"""
         return tuple(m for g in self.scope.groups for m in g.modules)
 
-    def press(self, info: ModuleInfo, handler: str = "run", args: tuple = ()) -> Result:
-        """執行模組：先存快照再交給 runner，結果寫進訊息區；執行中收到的重掃延到結束才做。"""
+    def press(self, info: ModuleInfo, handler: str = "run", args: tuple = (),
+              quiet: bool = False) -> Result:
+        """執行模組：先存快照再交給 runner，結果寫進訊息區；執行中收到的重掃延到結束才做。
+        quiet 只省掉「完成」那一行，快照、輸出、錯誤照舊。"""
         self._depth += 1
         try:
             try:
@@ -115,7 +117,7 @@ class Core:
                 self.view.log(line)
             if result.error:
                 self.view.report(result.error)
-            else:
+            elif not quiet:
                 self.view.log(T["done"].format(title=info.title, seconds=result.duration))
             return result
         finally:
@@ -135,6 +137,15 @@ class Core:
             name = found[0]
         return self.press(name)
 
+    def action(self, name: str, *args: Any) -> Any:
+        """交給 modules/ 裡的「作業系統」模組做：執行它的 name(app, *args)，回傳值傳回來。
+        沒有那個模組就在訊息區記一行、回 None；壞了就像任何模組一樣在面板報錯。"""
+        folder = self.home / "modules" / SYSTEM_MODULE
+        if not scan.is_module(folder):
+            return self.view.log(T["no_system"].format(module=SYSTEM_MODULE, name=name))
+        info = scan.module_info(folder, (self.home / "modules").resolve(), "here")
+        return self.press(info, name, args, quiet=True).value
+
     def create(self, parent: Path, name: str) -> Path | None:
         """新增模組：建好後重掃並打開編輯器；名稱不對、已存在或建不了時寫進訊息區、回 None。"""
         try:
@@ -146,7 +157,7 @@ class Core:
         except OSError as exc:
             return self.view.log(T["create_failed"].format(path=parent, message=exc))
         self.rescan()
-        actions.edit(folder / "iplot.py", self.config.editor)
+        self.action("edit", folder / "iplot.py", self.config.editor, None)
         return folder
 
     def report_internal(self, exc_type: type, exc: BaseException, tb: Any) -> None:
