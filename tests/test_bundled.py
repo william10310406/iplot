@@ -1,4 +1,4 @@
-"""隨附的五個模組：靜態讀得到，用假的 Core 跑得通，不真的開檔案總管、編輯器、終端機。
+"""隨附的七個模組：靜態讀得到，用假的 Core 跑得通，不真的開檔案總管、編輯器、終端機，也不連網。
 modules/作業系統 的後端（mac、win、linux）直接 import 進來驗參數，不真的啟動任何程式。"""
 
 import contextlib
@@ -64,7 +64,7 @@ def quiet(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統"])
+@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊"])
 def test_bundled_meta(name):
     m = read_meta(MODULES / name / "iplot.py")
     assert (m.error, m.has_run) == (None, True) and m.description
@@ -255,8 +255,36 @@ def test_restart_execs_from_home_not_module_folder(fake_core, monkeypatch):
 
 
 def test_bundled_modules_have_icons():
-    icons = {name: bundled(name).icon for name in ("開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統")}
-    assert icons == {"開工": "🧭", "打開核心原始碼": "🧬", "開Terminal": "⌨️", "重新啟動": "🔄", "作業系統": "🖥️"}
+    icons = {name: bundled(name).icon for name in ("開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統",
+                                                   "更新", "工作坊")}
+    assert icons == {"開工": "🧭", "打開核心原始碼": "🧬", "開Terminal": "⌨️", "重新啟動": "🔄", "作業系統": "🖥️",
+                     "更新": "⬆️", "工作坊": "🧰"}
+
+
+@pytest.mark.parametrize("name, setting", [("更新", "UPDATE_URL"), ("工作坊", "WORKSHOP_URL")])
+def test_update_and_workshop_do_nothing_until_a_url_is_set(name, setting, home, monkeypatch):
+    """平常使用不需要網路：來源網址沒設定時，按下去只說一句怎麼設定，不連網、不開頁面、不寫任何檔案。"""
+    import urllib.request
+
+    from conftest import FakeApp
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("沒設定網址卻去連網了")
+
+    monkeypatch.setattr(urllib.request, "urlopen", no_network)
+    app = FakeApp(home)
+    info = bundled(name)
+    result = run_module(info, app)
+    assert result.ok, result.error
+    assert len(app.logs) == 1 and setting in app.logs[0] and "config.py" in app.logs[0]
+    assert app.pages == [] and app.confirms == [] and list(home.rglob("*")) == [home / "modules"]
+
+
+def test_update_and_workshop_keep_their_logic_beside_iplot_py():
+    """兩個模組都是「iplot.py 只串起來，做法在旁邊的檔」；工作坊的頁面零外部資源。"""
+    assert (MODULES / "更新" / "update.py").is_file() and (MODULES / "工作坊" / "workshop.py").is_file()
+    page = (MODULES / "工作坊" / "page.html").read_text(encoding="utf-8")
+    assert "{rows}" in page and "http://" not in page and "https://" not in page
 
 
 class FakeWinreg(types.ModuleType):
