@@ -4,6 +4,44 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-05
+
+M3「更新與工作坊」：多了兩個隨附模組——「更新」把核心換成新版（D69），「工作坊」從一份清單安裝、更新別人做的模組（D70）——以及開發端的發佈工具 `tools/publish.py`。兩個來源網址寫在 `config.py`（D71）；沒設定就不連網，平常使用不需要網路。`app` 多 `page`、`config`、`version`，`api_version` 2 → 3（D72）。從工作坊裝進來的模組，第一次執行前先問一次（D59 採用、D73）。
+
+**與 0.4.0 相容：既有模組不用改，`api_version` 2 → 3 只加不減。從 0.4.0 更新：換掉 `core/`、`ui/`、`main.py`、`requirements/`，把 `modules/更新`、`modules/工作坊` 複製進 `modules/`，在 `config.py` 加 `UPDATE_URL`、`WORKSHOP_URL` 兩行（不加也能用，等於沒設定）；`config.py` 原有的內容、`custom.css`、自己的模組不動。從 0.5.0 起，下一版可以直接按「更新」。** 要能按「更新」，得先有人把新版的檔案放上去、`UPDATE_URL` 填好。這一版的 `requirements/` 跟 0.4.0 的一樣，換上來之後不會重裝 `lib/`、不需要網路。0.4.0 就有的隨附模組（開工、打開核心原始碼、開Terminal、重新啟動、作業系統）沒有變，不用換。另外有兩件 0.4.0 的行為改了：網頁面板開不起來時退到的 tkinter 面板不再是安全模式（D75，見「變更」）；需求檔變了，下次啟動會重裝 `lib/`（D76，見「新增」）。
+
+**「更新」與「工作坊」只在 macOS 驗過，而且只有一台機器（macOS 26.5、arm64、python.org 的 Python 3.14.7），來源用的都是本機的 `file://` 網址。放檔案的地方定為 GitHub 公開 repo 的 raw 網址，但那個 repo 還沒建，raw 網址還沒有真的放過檔案，從網路下載這一段沒有實際走過。Windows 未經實機驗證。Linux 這一版仍然沒有網頁面板，所以也沒有工作坊的清單頁，而且沒有在真的 Linux 桌面上跑過。CI 設了 macOS、Windows、Ubuntu 三個平台，但這個 repo 沒有遠端，CI 一次都沒有跑過。**
+
+量出來的數字：測試 323 → 401 個；核心邏輯 490 → 499 有效行（上限 500，只剩 1 行）；`core/` 仍是 11 個檔；隨附模組 5 → 7 個；`core/text.py` 的文字 50 → 55 個 key。預算仍是七項，有效行／上限：核心邏輯 499/500、`ui/web.py` 199/220、`ui/tk.py` 120/180、`ui/install.py` 57/80、`ui/index.html` 30/120、`ui/app.js` 256/400、`ui/style.css` 126/300。`ui/web.py` 的上限這一版從 200 調到 220（D68 修訂）：0.4.0 已經用到 194，這一版的 `page` 要 5 行，另外替日後「關閉前確認」留 8 行。不在預算內的新檔（有效行）：`tools/publish.py` 78；`modules/更新/` 的 `update.py` 83、`iplot.py` 30；`modules/工作坊/` 的 `workshop.py` 144、`iplot.py` 18、`page.html` 71。`tests/smoke.py` 的七個情境在上面那一台機器上全過。
+
+這一版沒有做：模組執行中關視窗先確認（決定延後）；中途停掉執行中的模組（D56 仍延後）；工作坊的移除、降版、評分、留言、自動更新、多個索引；更新的自動檢查、差異比較、一鍵回溯；套件的 hash 釘死；Linux 的網頁面板（所以在 Linux 上按「工作坊」，讀完索引只會在訊息區看到「安全模式沒有頁面，這個功能要用一般模式開」那一句，沒有清單頁）；拖放；自動啟動；匯入原版模組。寫這一節的時候，0.4.0 與 0.5.0 的人工驗收（`docs/plans/2026-10-05-M2-網頁面板與更新.md` 第 11 節的 (a)–(m)、13.6 的 (a)–(g)）都還沒做。
+
+### 新增
+- 隨附模組「更新」（`modules/更新`，圖示 ⬆️，D69）：把核心換成新版。`config.py` 的 `UPDATE_URL` 指到一個 `update.json`（`version`、`zip_url`、`sha256`、`notes`），zip 就是交付用的那一包（最上層是 `iPLoT-vX.Y.Z/`）。按了才連網，不會自己去檢查有沒有新版。來源的版本比較新時，先用「確定／取消」顯示版本與這一版改了什麼；確定之後下載到 `.backup/download-<版本>.zip` 並驗 sha256，把現在的 `core/`、`ui/`、`main.py`、`requirements/` 複製到 `.backup/<舊版本>-<日期時間>/`，再把包裡的這四樣換上去（先解到 `.update-tmp/`，四樣各自搬成 `<名稱>.new`，再逐一改名換上去，做完清掉暫存）。訊息區說「已更新到 x.y.z，執行「重新啟動」就會用新版。舊版備份在 .backup/…/」。不是熱更新：換完要執行「重新啟動」才會用新版，`app.memory` 會清空。來源的版本沒有比較新時說「已是最新（x.y.z）」；剛換完、還沒重新啟動又按一次，說「已經換成 x.y.z 了，執行「重新啟動」就會用新版」，不會再下載、再備份、再換一次。
+- 「更新」只換那四樣：`config.py`、`custom.css`、`modules/`（含各模組的 `.history/`）、`logs/`、`lib/` 逐位元組不變，iPLoT 資料夾以外沒有任何寫入（`tests/test_update.py::test_apply_replaces_only_parts_and_keeps_rest`）。sha256 對不上：刪掉下載的檔、說一句、什麼都不動（`::test_sha_mismatch_touches_nothing`）。包不完整（四樣少一樣）或最上層不只一個資料夾：一樣都不換。連不上來源、`update.json` 缺項或不是 JSON、下載的檔不是 zip：訊息區一句話，不是 traceback。隨附模組在 `modules/` 裡，「更新」不碰它們，它們的新版從工作坊來。要回到舊版：把 `.backup/<舊版本>-…/` 裡的四樣用手搬回去。
+- 隨附模組「工作坊」（`modules/工作坊`，圖示 🧰，D70）：從一份清單安裝、更新別人做的模組。`config.py` 的 `WORKSHOP_URL` 指到一個 `index.json`（`modules` 清單，每一筆有 `name`、`version`、`zip_url`、`sha256`、`description`、`icon`），每個 zip 的最上層是 `<name>/`。按了才連網：讀完索引，用 `app.page` 開一頁清單（`page.html`，零外部資源），每個模組一列——圖示、名稱、說明、索引的版本、在這台電腦上的狀態、一顆按鈕。五種狀態：未安裝（沒有這個資料夾）→「安裝」；已安裝（內容沒變、索引的版本不比它新）→ 沒有按鈕；可更新（內容沒變、索引比較新）→「更新」；已修改（內容跟安裝完當下不一樣，或 `.origin` 壞了）→「覆蓋」；版本未知（資料夾在但沒有 `.origin`：自己建的同名模組，或隨附模組，D74）→「覆蓋」。「覆蓋」先在同一列問一次：按鈕變成「確定覆蓋」與「取消」，旁邊一句「這會覆蓋現有的模組，舊版會整個存進它的 .history/」，再按才做。關掉清單頁，面板重掃，新裝的格子出現。索引裡的字（名稱、說明、版本、圖示）在清單頁一律當文字顯示，不當 HTML。
+- 工作坊的安裝：下載到 `modules/.workshop-tmp/`、驗 sha256；資料夾已經在的話，先把整個資料夾（`.history/` 自己除外）壓成 `modules/<name>/.history/<日期時間>-folder.zip`；把包裡的檔案蓋上去（包裡沒有的舊檔案留著）；寫來源記錄 `.origin`（一行一個 `key: value`：`url`、`version`、`sha256`、`digest`、`installed`）；建空檔案 `.unconfirmed`；清掉暫存。`digest` 是資料夾內容的摘要，用來判斷「已修改」；`.history/`、`.origin`、`.unconfirmed`、`__pycache__`、`.DS_Store` 不算進去，所以執行過、確認過都不算已修改。不變量：只寫進 `modules/<name>/` 與暫存，其他資料夾逐位元組不變（`tests/test_workshop.py::test_install_writes_only_its_folder`）；覆蓋前有快照（`::test_install_snapshots_existing_folder`）。不裝、資料夾不動、清單那一列顯示一句「無法安裝：…」的情況：sha256 對不上；zip 的最上層不是 `<name>/`；包裡沒有 `iplot.py`；路徑裡有 `..`；索引裡的名稱不是單純的資料夾名（含 `/`、`\`，或以 `.` 開頭）。
+- 發佈工具 `tools/publish.py`（開發端用，不在核心裡）：`python3 tools/publish.py --version 0.5.0 --base-url <放檔案的地方> --modules 整理桌面 開工`，在 `交付/發佈/` 產生 `iPLoT-v0.5.0.zip`（`git archive` 那個 tag；還沒打 tag 時加 `--ref HEAD`）、`update.json`（`notes` 取自本檔那一版的那一節）、`模組/<名稱>.zip`、`index.json`，並印出要填進 `config.py` 的兩行。模組的版本預設跟 `--version` 一樣，要另外指定寫「名稱=版本」。寫進 JSON 的網址，中文與空白會寫成 %XX。打包模組時略過的東西跟工作坊算摘要時略過的是同一組（`tests/test_workshop.py::test_publish_and_workshop_agree`）。放檔案的地方定為 GitHub 公開 repo 的 raw 網址（`--base-url https://raw.githubusercontent.com/<帳號>/<repo>/<分支>/<路徑>`）；在本機試用 `file://` 網址；Google Drive 的分享連結不是直接取檔，不行。
+- `config.py` 多兩行（D71）：`UPDATE_URL = None`（`update.json` 的網址）、`WORKSHOP_URL = None`（`index.json` 的網址）。`Config` 對應多 `update_url`、`workshop_url`；型別不對（不是 `None` 也不是字串）時跟 `ROOTS` 一樣，整份用預設值啟動並說哪裡不對。兩個網址沒設定時，「更新」「工作坊」各說一句怎麼設定，不連網、不寫任何檔（`tests/test_bundled.py::test_update_and_workshop_do_nothing_until_a_url_is_set`）。
+- `app` 多三個成員（`api_version` 2 → 3，D72）：`app.config`（唯讀的 `Config`：`roots`、`editor`、`history_keep`、`update_url`、`workshop_url`）、`app.version`（核心的版本字串）、`app.page(title, html, api=None)`——開第二個視窗顯示一頁 HTML，關掉才回來（像對話框）；`api` 的公開方法給那一頁的 JS 用 `pywebview.api.<方法>` 呼叫。安全模式與後備的 tkinter 面板沒有頁面，`page` 只在訊息區記一行。`View` 對應多一個 `page`，現在八個方法：`show`、`log`、`report`、`ask`、`confirm`、`page`、`choose_files`、`choose_folder`。用法與要注意的事見 `docs/api.md`。
+- 外來模組第一次執行前確認（D59 採用、D73）：模組資料夾裡有空檔案 `.unconfirmed`（工作坊裝完會放）時，執行之前先問「『<名稱>』是從外面裝進來的，第一次執行前確認：要執行嗎？」。取消：不執行、不存快照，訊息區記一行，標記留著，下次還問。確定：拿掉標記、照常執行，之後不再問。標記只是一個空檔案，核心只看它在不在（`tests/test_core.py::test_unconfirmed_module_asks_first`、`::test_unconfirmed_cancel_does_not_run`）。
+- 需求檔變了，下次啟動重裝 `lib/`（D76，補上 0.4.0 沒接的那一段）：`lib/.installed` 記的 sha256 對不上 `requirements/` 裡任何一份時（「更新」換過需求檔），`main.py` 在開網頁面板之前先用 pip 重裝，裝好直接開面板，不用再重啟。沒有網路、裝不成時（pip 連不上就馬上放棄，不重試），主控台與面板的訊息區都說「介面的套件這次沒有換成新的：…先用現有的開；有網路之後重新啟動 iPLoT 會再試一次。」，照常用現有的 `lib/` 開網頁面板；記號沒動，所以之後每次啟動都會再試，直到裝成。還沒裝過（沒有記號）不算，那是第一次安裝的事；`--safe` 完全不碰 `lib/`（`tests/test_main.py::test_changed_requirements_reinstall_before_the_panel_opens`、`::test_changed_requirements_offline_opens_the_old_panel_and_keeps_trying`、`tests/test_install.py::test_stale_means_lib_was_installed_from_other_requirements`）。
+- `core/text.py` 多 5 個文字 key：`confirm_foreign`、`cancelled`、`page_unsupported`、`refreshing`、`refresh_failed`。兩個新模組自己說的話寫在模組裡，不在 `core/text.py`。
+- 測試：新檔 `tests/test_update.py`（16 個測試函式）、`tests/test_workshop.py`（24 個）、`tests/test_publish.py`（9 個）。前兩個用 `file://` 網址與暫存資料夾裡假的 iPLoT；第三個在暫存資料夾裡自己建一個小 repo 來跑 `git archive`。三個都不連網。既有的檔：`tests/test_main.py` 21 → 26、`tests/test_install.py` 14 → 16、`tests/test_web.py` 44 → 45、`tests/test_core.py` 28 → 31、`tests/test_app.py` 13 → 15、`tests/test_bundled.py` 23 → 25、`tests/test_startup.py` 11 → 13、`tests/test_tk_smoke.py` 16 → 17。清單頁（`page.html`）裡的 JS 在 repo 裡沒有自動測試；實際開視窗試過的（macOS、`file://`）是：清單頁列出索引、安裝後狀態變「已安裝」、覆蓋先問再存快照、關掉清單頁後格子出現、第一次雙擊先問、取消不執行、確定後執行而且標記消失、之後不再問。
+
+### 變更
+- 後備面板不是安全模式（D75）：網頁面板開不起來（這個平台沒有網頁面板、缺前置條件、pip 失敗、裝完重啟還是不行）時退到的 tkinter 面板，現在照常掃上一層與 `ROOTS`，標題沒有「（安全模式）」；只有 `python3 main.py --safe` 才是安全模式、只掃 `modules/`。0.4.0 是兩種情況都只掃 `modules/`。那一句說明從「網頁面板開不起來：…。已改用安全模式」改成「…已改用備用面板」（`web_failed`）。所以在 Linux 上不加 `--safe` 啟動，看到的是完整範圍的 tkinter 面板。
+- `ui/web.py` 的預算上限 200 → 220（D68 修訂），理由見上面的數字；其他六項上限不變。
+- `main.py`：`safe_mode(home, config, err, note=None)` 改名 `tk_or_exit(home, config, err, safe, note=None)`，多一個 `safe` 參數決定是不是安全模式；`run_web` 多一個 `note` 參數；新增 `refresh`（上面「需求檔變了」那一段）。`ui/install.py` 的 `install` 多一個 `quick` 參數，新增 `stale`。
+- `core/scan.py` 整理，行為不變：找圖示檔併進 `module_info`，三處 `try/except OSError` 改成 `contextlib.suppress`。省下的行數讓核心邏輯放得下這一版加的十幾行。
+
+### 移除
+- 模組用得到的東西一樣都沒有拿掉：`app` 的成員、`View` 的方法、`core/text.py` 的 key 都只有增加。程式內部有兩個名字不在了，都寫在上面的「變更」：`main.py` 的 `safe_mode`（改名 `tk_or_exit`）、`core/scan.py` 的 `_icon_file`（併進 `module_info`）。
+
+### 文件
+- 規格 v2.1（`docs/02_重構設計.md`）；`docs/03_設計決定.md`（D59 從延後改為採用，D68、D69、D70 補上這一版的細節，新增 D71–D76）；`docs/06_架構說明與試用.md`、`docs/07_接口與邊界.md`（新增第 10 節「更新」、第 11 節「工作坊」）、`docs/api.md`、`README.md`（新增「更新與工作坊」：怎麼設定、怎麼發佈、怎麼回到舊版）同步。
+- 這一版的設計在 `docs/plans/2026-10-05-M2-網頁面板與更新.md` 第 13 節，實作計畫在 `docs/plans/2026-10-05-M2-M3-實作計畫.md` 的第二部分。
+
 ## [0.4.0] - 2026-10-05
 
 M2「圖示面板」：面板從 tkinter 的按鈕清單換成 pywebview 視窗裡的網頁面板（D61、D63）——分組的圖示格，單擊選取、雙擊執行（D64），每個模組有自己的圖示（D65）。網頁面板要用的套件在第一次啟動時自動裝進 iPLoT 自己的 `lib/`（D62）。`app.window` 拿掉，`api_version` 1 → 2（D66）。
@@ -160,6 +198,7 @@ M1「種子」：取代原版 `iPLoT.py` + `iPLoT.txt` 的全新實作，`api_ve
 - 老闆的 `iPLoT.py`／`iPLoT.txt` 存檔在 `docs/original/`，tag `v0.0-original`。原版 `X/X.txt` 模組的匯入工具在 M2。
 
 [Unreleased]: https://github.com/
+[0.5.0]: https://github.com/
 [0.4.0]: https://github.com/
 [0.3.0]: https://github.com/
 [0.2.1]: https://github.com/
