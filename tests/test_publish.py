@@ -36,7 +36,7 @@ def test_changelog_notes_extracts_section(publish, tmp_path):
     f = tmp_path / "CHANGELOG.md"
     f.write_text("# Changelog\n\n## [Unreleased]\n\n## [0.5.0] - 2026-10-05\n\n摘要一句。\n\n### 新增\n- 一\n\n"
                  "## [0.4.0] - 2026-10-05\n\n舊的。\n", encoding="utf-8")
-    assert publish.changelog_notes(f, "0.5.0") == "摘要一句。\n\n### 新增\n- 一"
+    assert publish.changelog_notes(f, "0.5.0") == "摘要一句。"
     assert publish.changelog_notes(f, "0.4.0") == "舊的。"
     assert publish.changelog_notes(f, "9.9.9") == "", "找不到那一版：空字串，不是錯"
 
@@ -137,6 +137,63 @@ def test_main_unknown_module_is_a_plain_error(publish, repo, capsys):
 
 
 def test_main_ref_defaults_to_the_version_tag(publish, repo):
-    assert publish.main(["--version", "1.0.0", "--base-url", "https://example.invalid/x", "--ref", "HEAD"], root=repo) == 0
-    assert (repo / "交付" / "發佈" / "iPLoT-v1.0.0.zip").exists()
-    assert publish.main(["--version", "1.0.0", "--base-url", "https://example.invalid/x"], root=repo) == 1, "沒有 v1.0.0 這個 tag"
+    git(repo, "tag", "-d", "v9.9.9")
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 1, "沒有 v9.9.9 這個 tag 了"
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--ref", "HEAD"], root=repo) == 0
+    assert (repo / "交付" / "發佈" / "iPLoT-v9.9.9.zip").exists()
+
+
+# 最終審查的修正
+
+def test_notes_are_the_summary_paragraph(publish, tmp_path):
+    """update.json 的 notes 會整段顯示在「要更新嗎」的對話框裡：只取那一版的第一段（摘要），不是整節。"""
+    f = tmp_path / "CHANGELOG.md"
+    f.write_text("## [0.5.0] - 2026-10-05\n\n摘要第一行，\n摘要第二行。\n\n**粗體一段**\n\n### 新增\n- 一\n\n## [0.4.0]\n舊。\n", encoding="utf-8")
+    assert publish.changelog_notes(f, "0.5.0") == "摘要第一行，\n摘要第二行。"
+
+
+def test_main_refuses_a_package_whose_core_is_another_version(publish, repo, capsys):
+    """打包的那個 ref 裡，core 的版本不是 --version：update.json 會宣稱一個包裡沒有的版本，裝了永遠「還有新版」。"""
+    out = repo / "交付" / "發佈"
+    assert publish.main(["--version", "1.0.0", "--base-url", "https://example.invalid/x", "--ref", "HEAD"], root=repo) == 1
+    assert "9.9.9" in capsys.readouterr().out and not (out / "iPLoT-v1.0.0.zip").exists() and not (out / "update.json").exists()
+
+
+def test_failed_archive_does_not_destroy_the_previous_zip(publish, repo):
+    out = repo / "交付" / "發佈"
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
+    good = (out / "iPLoT-v9.9.9.zip").read_bytes()
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--ref", "no-such-ref"], root=repo) == 1
+    assert (out / "iPLoT-v9.9.9.zip").read_bytes() == good and not list(out.glob("*.part"))
+
+
+def test_printed_config_lines_can_be_pasted(publish, repo, capsys):
+    """印出來要填進 config.py 的兩行前面不能有空白：原樣貼上會是 IndentationError。"""
+    import re
+    publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo)
+    out = capsys.readouterr().out
+    assert re.search(r'^UPDATE_URL = "https://example.invalid/x/update.json"$', out, re.M)
+    assert re.search(r'^WORKSHOP_URL = "https://example.invalid/x/index.json"$', out, re.M)
+
+
+def test_core_only_run_keeps_the_index(publish, repo, capsys):
+    out = repo / "交付" / "發佈"
+    publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面"], root=repo)
+    before = (out / "index.json").read_bytes()
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
+    assert (out / "index.json").read_bytes() == before, "沒給 --modules：不動原本的 index.json"
+
+
+def test_uncommitted_changes_are_mentioned(publish, repo, capsys):
+    (repo / "main.py").write_text("print('還沒 commit')\n", encoding="utf-8")
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
+    assert "commit" in capsys.readouterr().out
+
+
+def test_skip_ignores_case(publish, tmp_path):
+    folder = make_module(tmp_path / "modules", "A")
+    for junk in (".History/a.py", ".Origin", ".DS_STORE"):
+        (folder / junk).parent.mkdir(exist_ok=True)
+        (folder / junk).write_text("x", encoding="utf-8")
+    with zipfile.ZipFile(publish.pack_module(folder, tmp_path / "out")) as z:
+        assert z.namelist() == ["A/iplot.py"]

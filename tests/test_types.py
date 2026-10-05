@@ -42,11 +42,14 @@ def test_panel_text_keys():
               "running", "tk_in_web", "confirm_foreign", "cancelled", "page_unsupported", "refreshing", "refresh_failed"]:
         assert T.get(k), k
     assert "{roots}" in T["scanned"] and "{count}" in T["scanned"] and "{title}" in T["icon_unusable"]
-    assert "{size}" in T["installing"] and "--safe" in T["install_failed"] and "{message}" in T["web_failed"]
+    assert "{size}" in T["installing"] and "{message}" in T["install_failed"] and "{message}" in T["web_failed"]
     assert "網路" in T["installing"] and "網路" in T["install_failed"], "裝不起來多半是沒網路：兩句都要講"
     assert "{title}" in T["running"] and "--safe" in T["tk_in_web"]
     assert "{title}" in T["confirm_foreign"] and "{title}" in T["cancelled"]
-    assert "安全模式" not in T["web_failed"], "後備面板不是安全模式：它掃完整範圍"
+    for key in ("web_failed", "install_failed"):
+        assert "安全模式" not in T[key], f"{key}：後備面板不是安全模式（它掃完整範圍），這句話後面開的就是後備面板"
+    assert "備用面板" in T["page_unsupported"], "這句話在安全模式與備用面板上都會出現"
+    assert "安全模式" in T["no_tk"] and "備用面板" in T["no_tk"], "沒有 tkinter：安全模式與備用面板都開不了"
 
 
 def test_template_mentions_icon_after_title():

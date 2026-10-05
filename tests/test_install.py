@@ -113,7 +113,7 @@ def test_requirements_file_and_ready_ask_the_system_module(home, monkeypatch, ca
     assert install.ready(core) is None
     monkeypatch.setattr(sys, "platform", "linux")
     assert install.requirements_file(home, core) is None, "Linux 這一版沒有網頁面板"
-    assert "--safe" in install.ready(core)
+    assert "Linux" in install.ready(core)
     assert capsys.readouterr().out == "", "問這兩件事不在主控台留下「完成」之類的字"
 
 
@@ -180,3 +180,12 @@ def test_quick_install_gives_up_fast(home, req):
     popen = FakePopen([], 1)
     install.install(home, req, lambda line: None, popen)
     assert "--retries" not in popen.calls[0][0]
+
+
+def test_stale_survives_a_garbled_marker_and_a_missing_requirements_folder(home, req):
+    """記號檔不是文字（壞掉了）：當作過期、重裝一次，不是啟動時的 traceback。requirements/ 整個不見：沒得比，不重裝。"""
+    (home / "lib").mkdir()
+    (home / "lib" / ".installed").write_bytes(b"\xff\xfe\x00garbage")
+    assert install.stale(home) is True
+    shutil.rmtree(home / "requirements")
+    assert install.stale(home) is False

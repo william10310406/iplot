@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- 工作坊的清單頁。{rows} 由 workshop.render 換成一列列的模組；按鈕呼叫 Python 的 workshop.Api.install。
+<!-- 工作坊的清單頁。表格裡的那個記號由 workshop.render 換成一列列的模組；按鈕呼叫 Python 的 workshop.Api.install。
      沒有任何外部資源。 -->
 <html>
 <head>
@@ -41,34 +41,44 @@ const list = document.getElementById("list");
 document.getElementById("empty").hidden = list.rows.length > 0;
 
 // 按鈕：安裝／更新直接做；「覆蓋」先在同一列問一次（再按一次才真的覆蓋）
+function ask(button, act) {
+  button.dataset.ask = "0";
+  button.dataset.sure = "1";
+  button.textContent = "確定覆蓋";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "plain";
+  cancel.dataset.cancel = "1";
+  cancel.textContent = "取消";
+  const note = document.createElement("div");
+  note.className = "note";
+  note.textContent = "這會覆蓋現有的模組，舊版會整個存進它的 .history/";
+  act.append(cancel, note);
+}
+
 list.addEventListener("click", (e) => {
   const button = e.target.closest("button");
   if (!button) return;
   const row = button.closest("tr"), cell = row.querySelector(".state"), act = row.querySelector(".act");
-  if (button.dataset.cancel) { location.reload(); return; }
-  if (button.dataset.ask === "1") {  // 第一次按「覆蓋」：改成「確定覆蓋」與「取消」
-    button.dataset.ask = "0";
-    button.dataset.sure = "1";
-    button.textContent = "確定覆蓋";
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "plain";
-    cancel.dataset.cancel = "1";
-    cancel.textContent = "取消";
-    act.append(cancel);
-    const note = document.createElement("div");
-    note.className = "note";
-    note.textContent = "這會覆蓋現有的模組，舊版會整個存進它的 .history/";
-    act.append(note);
+  const main = act.querySelector("button[data-name]");
+  if (button.dataset.cancel) {  // 取消：回到只有一顆「覆蓋」的樣子
+    main.dataset.ask = "1";
+    delete main.dataset.sure;
+    main.textContent = "覆蓋";
+    act.replaceChildren(main);
     return;
   }
-  for (const b of act.querySelectorAll("button")) b.disabled = true;
-  window.pywebview.api.install(button.dataset.name, button.dataset.sure === "1").then((answer) => {
+  if (button.dataset.ask === "1") { ask(button, act); return; }
+  const enable = (on) => { for (const b of act.querySelectorAll("button")) b.disabled = !on; };
+  const failed = (text) => { cell.textContent = text; cell.classList.add("bad"); enable(true); };
+  enable(false);
+  window.pywebview.api.install(main.dataset.name, main.dataset.sure === "1").then((answer) => {
+    if (answer === "需要確認") { enable(true); if (main.dataset.sure !== "1") ask(main, act); return; }
+    if (answer.startsWith("無法安裝")) { failed(answer); return; }
     cell.textContent = answer;
-    const failed = answer.startsWith("無法安裝");
-    cell.classList.toggle("bad", failed);
-    if (failed) { for (const b of act.querySelectorAll("button")) b.disabled = false; } else act.replaceChildren();
-  });
+    cell.classList.remove("bad");
+    act.replaceChildren();
+  }).catch((error) => failed("無法安裝：" + error));
 });
 </script>
 </body>

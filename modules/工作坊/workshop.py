@@ -5,36 +5,57 @@
 從這裡裝進來的模組帶著空檔案 .unconfirmed，第一次執行前 iPLoT 會先問一次。"""
 import hashlib
 import html
+import http.client
 import json
+import os
 import shutil
-import urllib.error
+import ssl
+import threading
 import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime
 
 ORIGIN, UNCONFIRMED = ".origin", ".unconfirmed"
-# 各台電腦自己的東西：不進包、不算進摘要、包裡夾帶了也不裝（跟 tools/publish.py 的 SKIP 要一樣）
-SKIP = {".history", ".origin", ".unconfirmed", "__pycache__", ".DS_Store"}
+# 各台電腦自己的東西：不進包、包裡夾帶了也不裝（跟 tools/publish.py 的 SKIP 要一樣）。
+# 比對時不分大小寫：macOS 的檔案系統上「.Origin」跟「.origin」是同一個名字
+SKIP = {".history", ".origin", ".unconfirmed", "__pycache__", ".ds_store"}
+NETWORK = (OSError, http.client.HTTPException)  # 連不上、逾時、連到一半斷掉、伺服器沒回話
 LABELS = {"absent": "未安裝", "installed": "已安裝", "update": "可更新", "modified": "已修改", "unknown": "版本未知"}
 BUTTONS = {"absent": "安裝", "update": "更新", "modified": "覆蓋", "unknown": "覆蓋"}  # 已安裝的沒有按鈕
 CONFIRM = "需要確認"  # 已修改、版本未知的要先確認才覆蓋：page.html 看到這個回答就不會當成裝好了
 NEEDED = ("name", "version", "zip_url", "sha256")  # 索引的每一筆至少要有這幾項
 
 
+def _context():
+    """驗證 https 憑證用的設定。python.org 的 macOS Python 預設沒有根憑證（要另外執行 Install Certificates.command），
+    那樣每個 https 網址都會驗證失敗；憑證庫是空的時候，改用 macOS 自己的那一份。驗證本身不關。"""
+    context = ssl.create_default_context()
+    if not context.cert_store_stats()["x509_ca"] and os.path.exists("/etc/ssl/cert.pem"):
+        context.load_verify_locations("/etc/ssl/cert.pem")
+    return context
+
+
 def _open(url, timeout):
     """打開網址（https://、file:// 都行）。網址裡的中文與空白先寫成 %XX：urllib 只收 ASCII 的網址。"""
-    return urllib.request.urlopen(urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%~"), timeout=timeout)
+    return urllib.request.urlopen(urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%~"), timeout=timeout,
+                                  context=_context())
 
 
 def read_index(url, timeout=15):
-    """讀 index.json，回裡面的 modules 清單；格式不對（不是 JSON、沒有 modules、某一筆缺項）丟 ValueError。"""
+    """讀 index.json，回裡面的 modules 清單（版本一律當字串；同名的只留第一筆）。
+    格式不對（不是 JSON、沒有 modules、某一筆缺項或型別不對）丟 ValueError。"""
     with _open(url, timeout) as r:
         data = json.loads(r.read().decode("utf-8"))
     entries = data.get("modules") if isinstance(data, dict) else None
     if not isinstance(entries, list) or not all(isinstance(e, dict) and all(k in e for k in NEEDED) for e in entries):
         raise ValueError("index.json 的格式不對")
-    return entries
+    if not all(isinstance(e[k], str) for e in entries for k in ("name", "zip_url", "sha256")):
+        raise ValueError("index.json 裡的名稱、網址、sha256 應該都是文字")
+    seen = {}
+    for e in entries:
+        seen.setdefault(e["name"], {**e, "version": str(e["version"])})
+    return list(seen.values())
 
 
 def read_origin(folder):
@@ -48,7 +69,7 @@ def read_origin(folder):
         return {}
     pairs = [line.partition(": ") for line in lines if line.strip()]
     data = {key: value for key, sep, value in pairs if sep}
-    complete = len(data) == len(pairs) and all(k in data for k in ("url", "version", "sha256", "digest"))
+    complete = len(data) == len(pairs) and all(k in data for k in ("url", "version", "sha256", "digest", "files"))
     return data if complete else {}
 
 
@@ -56,18 +77,25 @@ def write_origin(folder, data):
     (folder / ORIGIN).write_text("".join(f"{key}: {value}\n" for key, value in data.items()), encoding="utf-8")
 
 
+def _local(parts):
+    """路徑裡有沒有哪一段是各台電腦自己的名字（SKIP）；不分大小寫。"""
+    return any(part.casefold() in SKIP for part in parts)
+
+
 def _files(folder):
     """folder 裡算數的檔案（相對路徑, 路徑），照相對路徑排序；SKIP 裡的名字不管在哪一層都不算。"""
     found = [(p.relative_to(folder).as_posix(), p) for p in folder.rglob("*")
-             if p.is_file() and not SKIP & set(p.relative_to(folder).parts)]
+             if p.is_file() and not _local(p.relative_to(folder).parts)]
     return sorted(found)
 
 
-def digest(folder):
-    """資料夾內容的摘要：照相對路徑的順序，把「路徑＋內容」一個個餵進 sha256。改一個字、多一個檔都會變。"""
+def digest(folder, files):
+    """files（相對路徑的清單）這些檔在 folder 裡現在的摘要：照路徑的順序，把「路徑＋內容」一個個餵進 sha256。
+    改了其中一個、少了其中一個都會變；清單以外的檔（模組自己存的設定、資料）不算。"""
     h = hashlib.sha256()
-    for rel, path in _files(folder):
-        h.update(rel.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    for rel in sorted(files):
+        path = folder / rel
+        h.update(rel.encode("utf-8") + b"\0" + (path.read_bytes() if path.is_file() else b"<missing>") + b"\0")
     return h.hexdigest()
 
 
@@ -81,14 +109,20 @@ def _newer(current, latest):
 def state(entry, modules_dir):
     """索引裡這一筆，在這台電腦上是什麼狀態：
     absent 沒有這個資料夾；unknown 資料夾在但不是從工作坊裝的（沒有 .origin）；
-    modified 裝完之後內容變過（或 .origin 壞了）；update 沒改過、索引的版本比較新；installed 沒改過、已經是這一版。"""
+    modified 當初裝進來的檔有被改過、刪掉（或 .origin 壞了）；update 沒改過、索引的版本比較新；
+    installed 沒改過、已經是這一版。模組自己另外存的檔不算改過。"""
     folder = modules_dir / entry["name"]
     if not folder.exists():
         return "absent"
     origin = read_origin(folder)
     if origin is None:
         return "unknown"
-    if origin.get("digest") != digest(folder):
+    try:
+        files = json.loads(origin.get("files", ""))
+        same = isinstance(files, list) and origin["digest"] == digest(folder, [str(f) for f in files])
+    except (ValueError, OSError):
+        same = False
+    if not same:
         return "modified"
     return "update" if _newer(origin["version"], entry["version"]) else "installed"
 
@@ -129,14 +163,45 @@ def download(url, dest, sha256, timeout=60):
     return dest
 
 
+def _clear(folder, rel):
+    """準備好寫 folder/rel：一路上的資料夾建起來；擋路的東西拿掉——該是資料夾的地方有個檔案、該是檔案的地方有個資料夾，
+    或是符號連結（不順著它寫到模組資料夾外面）。被拿掉的東西都在覆蓋前存的那份快照裡。回要寫的路徑。"""
+    path, parts = folder, rel.split("/")
+    for part in parts[:-1]:
+        path = path / part
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        path.mkdir(exist_ok=True)
+    path = path / parts[-1]
+    if path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    return path
+
+
+def _rollback(folder, saved):
+    """裝到一半出錯：把模組資料夾放回裝之前的樣子。saved 是覆蓋前存的快照；None 表示原本沒有這個資料夾。"""
+    if saved is None:
+        return shutil.rmtree(folder, ignore_errors=True)
+    for path in folder.iterdir():
+        if path.name != ".history":
+            shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
+    with zipfile.ZipFile(saved) as z:
+        z.extractall(folder)
+
+
 def install(entry, modules_dir):
-    """照索引的這一筆安裝（或覆蓋）一個模組，回安裝後的狀態。任何一步不對就丟 ValueError，模組資料夾不動：
+    """照索引的這一筆安裝（或覆蓋）一個模組，回安裝後的狀態。不對就丟 ValueError，模組資料夾不動：
     名稱要是單純的資料夾名；sha256 要對；zip 的最上層要剛好是 <名稱>/，裡面要有 iplot.py。
-    資料夾已經在的話，先整個存進它的 .history/，再把包裡的檔案蓋上去（包裡沒有的舊檔案留著）。"""
+    資料夾已經在的話，先整個存進它的 .history/，再把包裡的檔案蓋上去（包裡沒有的舊檔案留著）；
+    蓋到一半出錯（OSError）就照那份快照放回原樣。包裡每一個有 iplot.py 的資料夾都先放好 .unconfirmed，才開始放程式。"""
     name = entry["name"]
     if not isinstance(name, str) or not name.strip() or name.startswith(".") or set(name) & set("/\\"):
         raise ValueError("索引裡的模組名稱不是單純的資料夾名")
     folder, tmp = modules_dir / name, modules_dir / ".workshop-tmp"
+    if folder.is_symlink():
+        raise ValueError(f"「{name}」是一個符號連結，不裝進去")
     shutil.rmtree(tmp, ignore_errors=True)
     try:
         package = download(entry["zip_url"], tmp / "package.zip", entry["sha256"])
@@ -144,17 +209,25 @@ def install(entry, modules_dir):
             names = z.namelist()
             if any(not n.startswith(name + "/") or ".." in n.split("/") for n in names):
                 raise ValueError(f"zip 的最上層不是「{name}/」")
-            if f"{name}/iplot.py" not in names:
-                raise ValueError("包裡沒有 iplot.py")
             z.extractall(tmp / "unpacked")
-        if folder.exists():
-            snapshot(folder)
-        for rel, source in _files(tmp / "unpacked" / name):
-            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, folder / rel)
-        write_origin(folder, {"url": entry["zip_url"], "version": entry["version"], "sha256": entry["sha256"],
-                              "digest": digest(folder), "installed": f"{datetime.now():%Y-%m-%d %H:%M:%S}"})
-        (folder / UNCONFIRMED).touch()
+        files = _files(tmp / "unpacked" / name)
+        if "iplot.py" not in [rel for rel, _ in files]:
+            raise ValueError("包裡沒有 iplot.py")
+        saved = snapshot(folder) if folder.exists() else None
+        try:
+            folder.mkdir(exist_ok=True)
+            for rel, _ in files:  # 先放標記：每個有 iplot.py 的資料夾第一次執行前都要問
+                if rel.rpartition("/")[2] == "iplot.py":
+                    _clear(folder, rel.rpartition("/")[0] + "/" + UNCONFIRMED if "/" in rel else UNCONFIRMED).touch()
+            for rel, source in files:
+                shutil.copyfile(source, _clear(folder, rel))
+            listed = [rel for rel, _ in files]
+            write_origin(folder, {"url": entry["zip_url"], "version": entry["version"], "sha256": entry["sha256"],
+                                  "digest": digest(folder, listed), "files": json.dumps(listed, ensure_ascii=False),
+                                  "installed": f"{datetime.now():%Y-%m-%d %H:%M:%S}"})
+        except OSError:
+            _rollback(folder, saved)
+            raise
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return state(entry, modules_dir)
@@ -173,7 +246,8 @@ def render(entries, modules_dir, template):
             f'<td><b>{name}</b><div class="desc">{html.escape(str(entry.get("description") or ""))}</div></td>'
             f'<td class="ver">{html.escape(str(entry["version"]))}</td>'
             f'<td class="state">{LABELS[now]}</td><td class="act">{button}</td></tr>')
-    return template.replace("{rows}", "\n".join(rows))
+    head, mark, tail = template.rpartition("{rows}")  # 只換最後一個：前面的說明文字裡提到它也沒關係
+    return head + "\n".join(rows) + tail if mark else template
 
 
 class Api:
@@ -181,6 +255,7 @@ class Api:
 
     def __init__(self, app, entries, modules_dir):
         self._app, self._entries, self._modules_dir = app, entries, modules_dir
+        self._lock = threading.Lock()  # 清單頁可以連按兩列；安裝一次只做一個（它們共用暫存資料夾）
 
     def install(self, name, confirmed=False):
         """安裝、更新或覆蓋 name，回新的狀態（中文）。已修改、版本未知的要 confirmed 才覆蓋，否則回 CONFIRM、什麼都不動。
@@ -189,12 +264,13 @@ class Api:
         if entry is None:
             return f"無法安裝：清單裡沒有「{name}」"
         try:
-            if state(entry, self._modules_dir) in ("modified", "unknown") and not confirmed:
-                return CONFIRM
-            return LABELS[install(entry, self._modules_dir)]
+            with self._lock:
+                if state(entry, self._modules_dir) in ("modified", "unknown") and not confirmed:
+                    return CONFIRM
+                return LABELS[install(entry, self._modules_dir)]
         except zipfile.BadZipFile:
             return "無法安裝：下載的檔案不是 zip"
-        except (urllib.error.URLError, TimeoutError) as exc:
-            return f"無法安裝：連不上來源（{getattr(exc, 'reason', exc)}）"
-        except (ValueError, KeyError, OSError) as exc:
+        except (ValueError, KeyError, TypeError) as exc:  # sha256 不符、包的內容不對、索引那一筆的型別不對
             return f"無法安裝：{exc}"
+        except NETWORK as exc:  # 連不上、下載到一半斷了；也包括寫檔出錯（那時模組資料夾已經放回原樣）
+            return f"無法安裝：{getattr(exc, 'reason', exc)}"

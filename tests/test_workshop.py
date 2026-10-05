@@ -82,18 +82,22 @@ def test_read_index(workshop, src, entry):
             workshop.read_index(index.as_uri())
 
 
-def test_digest_ignores_local_things_and_sees_edits(workshop, mods):
+def test_digest_covers_the_listed_files_only(workshop, mods):
+    """摘要只算當初裝進來的那些檔：改一個字、刪掉一個都會變；清單以外的檔（各台電腦自己的東西、模組自己存的資料）不算。"""
     folder = make_module(mods, "A", "x = 1\n")
-    d = workshop.digest(folder)
-    for junk in (".history/a.py", "__pycache__/a.pyc", ".origin", ".unconfirmed", ".DS_Store"):
+    (folder / "helper.py").write_text("h", encoding="utf-8")
+    listed = ["helper.py", "iplot.py"]
+    d = workshop.digest(folder, listed)
+    assert workshop.digest(folder, list(reversed(listed))) == d, "順序不影響"
+    for junk in (".history/a.py", "__pycache__/a.pyc", ".origin", ".unconfirmed", ".DS_Store", "extra.txt"):
         (folder / junk).parent.mkdir(exist_ok=True)
         (folder / junk).write_text("junk", encoding="utf-8")
-    assert workshop.digest(folder) == d, "各台電腦自己的東西不算進摘要"
+    assert workshop.digest(folder, listed) == d
     (folder / "iplot.py").write_text("x = 2\n", encoding="utf-8")
-    assert workshop.digest(folder) != d
+    assert workshop.digest(folder, listed) != d
     (folder / "iplot.py").write_text("x = 1\n", encoding="utf-8")
-    (folder / "extra.txt").write_text("", encoding="utf-8")
-    assert workshop.digest(folder) != d, "多一個檔也算改過"
+    (folder / "helper.py").unlink()
+    assert workshop.digest(folder, listed) != d, "少了一個也算改過"
 
 
 def test_installed_has_unconfirmed_and_state_installed(workshop, mods, entry):
@@ -104,7 +108,7 @@ def test_installed_has_unconfirmed_and_state_installed(workshop, mods, entry):
     assert (folder / ".unconfirmed").exists() and (folder / ".unconfirmed").read_bytes() == b""
     origin = workshop.read_origin(folder)
     assert (origin["url"], origin["version"], origin["sha256"]) == (entry["zip_url"], "1.0.0", entry["sha256"])
-    assert origin["digest"] == workshop.digest(folder) and origin["installed"]
+    assert origin["digest"] == workshop.digest(folder, ["helper.py", "iplot.py"]) and origin["installed"]
     assert workshop.state(entry, mods) == "installed"
 
 
@@ -315,3 +319,198 @@ def test_run_with_unreadable_index_is_one_sentence(mods, tmp_path):
         app = FakeApp(mods.parent, workshop_url=url)
         run(app)
         assert len(app.logs) == 1 and app.pages == [] and "Traceback" not in app.logs[0]
+
+
+# 最終審查的修正
+
+def test_https_open_brings_a_trust_store(workshop, monkeypatch):
+    import ssl
+    seen = {}
+    monkeypatch.setattr(workshop.urllib.request, "urlopen", lambda url, timeout=None, context=None: seen.update(context=context))
+    workshop._open("https://raw.githubusercontent.com/someone/iplot/main/index.json", 5)
+    assert isinstance(seen["context"], ssl.SSLContext) and seen["context"].verify_mode == ssl.CERT_REQUIRED
+
+
+def test_case_variants_of_local_names_cannot_switch_off_the_question(workshop, mods, src):
+    """macOS 的檔案系統不分大小寫：包裡的「.Origin/x」跟 .origin 是同一個名字。這類成員一律不裝，
+    安裝照常完成，.unconfirmed 一定在（否則下載來的程式不問就能跑）。"""
+    e = pack(src, "整理桌面", {**V1, ".Origin/x": "x", ".UNCONFIRMED/y": "y", ".History/2026-10-05_120000.py": "z",
+                              "sub/.Unconfirmed": "", "__PyCache__/a.pyc": "x", ".ds_store": "x"})
+    assert workshop.install(e, mods) == "installed"
+    folder = mods / "整理桌面"
+    assert (folder / ".unconfirmed").is_file() and (folder / ".origin").is_file()
+    assert sorted(p.name for p in folder.iterdir()) == [".origin", ".unconfirmed", "helper.py", "iplot.py"]
+
+
+def test_nested_modules_are_asked_about_too(workshop, mods, src, tmp_path):
+    """包裡帶著下一層模組：每一個有 iplot.py 的資料夾都放 .unconfirmed，進到下一層執行也會先問。"""
+    from conftest import FakeView
+
+    from core.core import Core
+    from core.types import DEFAULT_CONFIG
+    e = pack(src, "工具箱", {"iplot.py": "x = 1\n", "子工具/iplot.py": "open('ran.txt', 'w').close()\n", "子工具/更深/iplot.py": "y = 1\n",
+                           "資料/a.txt": "a"})
+    workshop.install(e, mods)
+    folder = mods / "工具箱"
+    assert all((folder / d / ".unconfirmed").is_file() for d in ("", "子工具", "子工具/更深"))
+    assert not (folder / "資料" / ".unconfirmed").exists()
+    assert workshop.state(e, mods) == "installed"
+    view = FakeView()
+    view.answers = [False]
+    core = Core(mods.parent, DEFAULT_CONFIG, view)
+    core.rescan()
+    core.enter(next(m for m in core.all_modules() if m.name == "工具箱"))
+    core.press(next(m for m in core.all_modules() if m.name == "子工具"))
+    assert len(view.confirmed) == 1 and not (folder / "子工具" / "ran.txt").exists()
+    (folder / ".unconfirmed").unlink()
+    (folder / "子工具" / ".unconfirmed").unlink()
+    workshop.install(e, mods)
+    assert (folder / ".unconfirmed").is_file() and (folder / "子工具" / ".unconfirmed").is_file(), "覆蓋之後重新要問"
+
+
+def test_failed_install_puts_the_old_folder_back(workshop, mods, src, monkeypatch):
+    """複製到一半出錯：模組資料夾回到安裝前的樣子（靠覆蓋前存的那份快照），不會留下一半新一半舊、又沒有 .unconfirmed。"""
+    folder = make_module(mods, "整理桌面", "print('我自己的')\n")
+    (folder / "helper.py").write_text("mine\n", encoding="utf-8")
+    before = {k: v for k, v in tree(mods).items() if "/.history/" not in k}
+    real, calls = workshop.shutil.copyfile, []
+
+    def copyfile(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError(28, "模擬：磁碟滿了")
+        return real(source, target)
+
+    monkeypatch.setattr(workshop.shutil, "copyfile", copyfile)
+    with pytest.raises(OSError):
+        workshop.install(pack(src, "整理桌面", V2), mods)
+    assert {k: v for k, v in tree(mods).items() if "/.history/" not in k} == before
+    assert not (mods / ".workshop-tmp").exists()
+
+
+def test_failed_first_install_leaves_no_folder(workshop, mods, src, monkeypatch):
+    def copyfile(source, target):
+        raise OSError(28, "模擬：磁碟滿了")
+
+    monkeypatch.setattr(workshop.shutil, "copyfile", copyfile)
+    with pytest.raises(OSError):
+        workshop.install(pack(src, "整理桌面", V1), mods)
+    assert not (mods / "整理桌面").exists()
+
+
+def test_file_versus_folder_between_versions(workshop, mods, src):
+    """舊版的 data 是檔案、新版的 data 是資料夾（或反過來）：照新版的，舊的在快照裡。"""
+    workshop.install(pack(src, "整理桌面", {**V1, "data": "一個檔", "conf/a.txt": "a"}), mods)
+    assert workshop.install(pack(src, "整理桌面", {**V1, "data/x.txt": "x", "conf": "現在是檔"}), mods) == "installed"
+    folder = mods / "整理桌面"
+    assert (folder / "data" / "x.txt").read_text(encoding="utf-8") == "x" and (folder / "conf").read_text(encoding="utf-8") == "現在是檔"
+
+
+def test_symlinks_in_the_target_are_not_followed(workshop, mods, src, tmp_path):
+    """模組資料夾裡本來有指到外面的符號連結：安裝不能順著它寫到 modules/<名稱>/ 以外。"""
+    outside = tmp_path / "外面.txt"
+    outside.write_text("不能動", encoding="utf-8")
+    elsewhere = tmp_path / "外面的資料夾"
+    elsewhere.mkdir()
+    folder = make_module(mods, "整理桌面", "print('我自己的')\n")
+    (folder / "helper.py").symlink_to(outside)
+    (folder / "data").symlink_to(elsewhere, target_is_directory=True)
+    workshop.install(pack(src, "整理桌面", V2), mods)
+    assert outside.read_text(encoding="utf-8") == "不能動" and list(elsewhere.iterdir()) == []
+    assert not (folder / "helper.py").is_symlink() and (folder / "helper.py").read_text(encoding="utf-8") == "x = 2\n"
+    assert (folder / "data" / "new.txt").is_file() and not (folder / "data").is_symlink()
+
+
+def test_a_symlinked_module_folder_is_refused(workshop, mods, src, tmp_path):
+    real = tmp_path / "真的在這"
+    real.mkdir()
+    (mods / "整理桌面").symlink_to(real, target_is_directory=True)
+    with pytest.raises(ValueError):
+        workshop.install(pack(src, "整理桌面", V1), mods)
+    assert list(real.iterdir()) == []
+
+
+def test_a_modules_own_data_does_not_make_it_modified(workshop, mods, entry, src):
+    """模組執行時自己存的檔（設定、資料）不算「已修改」：比的是當初從包裡裝進來的那些檔。改了、刪了其中一個才算。"""
+    workshop.install(entry, mods)
+    folder = mods / "整理桌面"
+    (folder / "settings.json").write_text("{}", encoding="utf-8")
+    (folder / "輸出").mkdir()
+    (folder / "輸出" / "a.txt").write_text("a", encoding="utf-8")
+    assert workshop.state(entry, mods) == "installed"
+    assert workshop.state({**pack(src / "新版", "整理桌面", V2), "version": "1.1.0"}, mods) == "update"
+    (folder / "helper.py").unlink()
+    assert workshop.state(entry, mods) == "modified"
+    workshop.install(entry, mods)
+    assert (folder / "settings.json").exists() and workshop.state(entry, mods) == "installed"
+
+
+def test_origin_lists_the_installed_files(workshop, mods, entry):
+    workshop.install(entry, mods)
+    origin = workshop.read_origin(mods / "整理桌面")
+    assert json.loads(origin["files"]) == ["helper.py", "iplot.py"]
+    text = (mods / "整理桌面" / ".origin").read_text(encoding="utf-8")
+    assert all(": " in line for line in text.splitlines()) and len(text.splitlines()) == 6
+
+
+def test_two_installs_at_once_both_finish(workshop, mods, src, tmp_path):
+    """清單頁可以連按兩列：pywebview 一個呼叫一條執行緒。兩個安裝不能搶同一個暫存檔。"""
+    import threading
+    import time
+    a, b = pack(src, "甲", V1), pack(src, "乙", V2)
+    api = workshop.Api(FakeApp(tmp_path), [a, b], mods)
+    real = workshop.download
+
+    def slow(*args, **kwargs):
+        time.sleep(0.15)
+        return real(*args, **kwargs)
+
+    workshop.download = slow
+    try:
+        answers = {}
+        threads = [threading.Thread(target=lambda n=n: answers.__setitem__(n, api.install(n))) for n in ("甲", "乙")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+    finally:
+        workshop.download = real
+    assert answers == {"甲": workshop.LABELS["installed"], "乙": workshop.LABELS["installed"]}
+    assert (mods / "甲" / "helper.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert (mods / "乙" / "data" / "new.txt").is_file() and not (mods / ".workshop-tmp").exists()
+
+
+def test_api_install_turns_any_download_trouble_into_a_sentence(workshop, mods, entry, tmp_path, monkeypatch):
+    import http.client
+    api = workshop.Api(FakeApp(tmp_path), [entry, {**entry, "name": "型別不對", "zip_url": 5}], mods)
+    for error in (http.client.IncompleteRead(b"abc", 100), ConnectionResetError(54, "reset"), TimeoutError("timed out")):
+        def broken(*args, error=error, **kwargs):
+            raise error
+
+        monkeypatch.setattr(workshop, "download", broken)
+        assert api.install("整理桌面").startswith("無法安裝：")
+    monkeypatch.undo()
+    assert api.install("型別不對").startswith("無法安裝：")
+    assert not (mods / "整理桌面").exists()
+
+
+def test_read_index_checks_the_types(workshop, src, entry):
+    index = src.parent / "index.json"
+    for bad in ({**entry, "name": 5}, {**entry, "zip_url": None}, {**entry, "sha256": 1}):
+        index.write_text(json.dumps({"modules": [bad]}), encoding="utf-8")
+        with pytest.raises(ValueError):
+            workshop.read_index(index.as_uri())
+    index.write_text(json.dumps({"modules": [{**entry, "version": 2}, entry]}), encoding="utf-8")
+    assert [e["version"] for e in workshop.read_index(index.as_uri())] == ["2"], "版本一律當字串；同名的只留第一筆"
+
+
+def test_page_does_not_reload_and_handles_failures():
+    """清單頁是用 html 字串開的，重新載入會變成空白頁：「取消」不能用 location.reload()。"""
+    page = (MODULE / "page.html").read_text(encoding="utf-8")
+    assert "location.reload" not in page and ".catch(" in page
+    assert page.count("{rows}") == 1, "{rows} 只出現在要放清單的地方（註解裡再寫一次，清單會被塞進去兩次）"
+
+
+def test_render_fills_the_rows_once(workshop, mods, entry):
+    html = workshop.render([entry], mods, "<!-- {rows} 在這 -->\n<table>{rows}</table>")
+    assert html.count("整理桌面</b>") == 1

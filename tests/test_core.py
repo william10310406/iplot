@@ -290,3 +290,21 @@ def test_modules_without_the_marker_are_never_asked(home, view):
     c = started(home, view)
     c.press(find(c, "A"))
     assert view.confirmed == []
+
+
+def test_marker_that_cannot_be_removed_does_not_block_the_module(home, view, monkeypatch):
+    """標記拿不掉（唯讀的資料夾）：問過、按了確定就照常執行，只是下次還會再問；不能變成核心錯誤、模組永遠跑不了。"""
+    folder = make_module(home / "modules", "外來", RAN)
+    (folder / ".unconfirmed").touch()
+    real = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        if self.name == ".unconfirmed":
+            raise PermissionError(13, "模擬：唯讀")
+        return real(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    c = started(home, view)
+    assert c.press(find(c, "外來")).ok and (folder / "ran.txt").exists()
+    c.press(find(c, "外來"))
+    assert len(view.confirmed) == 2

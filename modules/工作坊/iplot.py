@@ -3,7 +3,6 @@
 清單的網址寫在 config.py 的 WORKSHOP_URL。
 
 做法都在旁邊的 workshop.py，清單那一頁是 page.html。按了才會連網。"""
-import urllib.error
 from pathlib import Path
 
 import workshop
@@ -17,10 +16,10 @@ def run(app):
         return app.log("尚未設定工作坊的來源：在 config.py 的 WORKSHOP_URL 填 index.json 的網址")
     try:
         entries = workshop.read_index(url)
-    except (urllib.error.URLError, TimeoutError) as exc:
+    except ValueError as exc:  # 不是 JSON、格式不對、網址寫錯
+        return app.log(f"讀不懂工作坊的清單（index.json），或 WORKSHOP_URL 寫錯了：{exc}")
+    except workshop.NETWORK as exc:
         return app.log(f"連不上工作坊的來源：{getattr(exc, 'reason', exc)}")
-    except ValueError as exc:  # 不是 JSON、格式不對
-        return app.log(f"讀不懂工作坊的清單（index.json）：{exc}")
     modules_dir = app.home / "modules"
     template = (Path(__file__).parent / "page.html").read_text(encoding="utf-8")
     app.page("工作坊", workshop.render(entries, modules_dir, template), workshop.Api(app, entries, modules_dir))

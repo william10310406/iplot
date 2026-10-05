@@ -113,7 +113,8 @@ class Core:
         if marker.exists() and not self.view.confirm(T["confirm_foreign"].format(title=info.title)):
             self.view.log(T["cancelled"].format(title=info.title))
             return Result(False, None, 0.0, "")
-        marker.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):  # 拿不掉（唯讀）：照常執行，只是下次還會再問
+            marker.unlink(missing_ok=True)
         self._depth += 1
         try:
             try:

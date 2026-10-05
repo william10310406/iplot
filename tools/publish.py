@@ -16,6 +16,7 @@ https://raw.githubusercontent.com/<帳號>/<repo>/main/發佈；在本機試就�
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -26,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.meta import read_meta  # noqa: E402
 
-SKIP = {".history", ".origin", ".unconfirmed", "__pycache__", ".DS_Store"}  # 不進模組的包：各台電腦自己的東西
+# 不進模組的包：各台電腦自己的東西（跟 modules/工作坊/workshop.py 的 SKIP 一樣；比對時不分大小寫）
+SKIP = {".history", ".origin", ".unconfirmed", "__pycache__", ".ds_store"}
 MODULES = "模組"  # 交付/發佈/ 裡放模組 zip 的資料夾
 
 
@@ -35,7 +37,8 @@ def sha256_of(path: Path) -> str:
 
 
 def changelog_notes(changelog: Path, version: str) -> str:
-    """CHANGELOG.md 裡「## [version]」到下一個「## [」之間的文字；找不到那一版回空字串。"""
+    """CHANGELOG.md 裡「## [version]」那一節的第一段（摘要）；找不到那一版回空字串。
+    它會整段顯示在「要更新嗎」的對話框裡，所以只取摘要，不是整節。"""
     lines, found = [], False
     for line in changelog.read_text(encoding="utf-8").splitlines():
         if line.startswith("## ["):
@@ -43,15 +46,19 @@ def changelog_notes(changelog: Path, version: str) -> str:
                 break
             found = line.startswith(f"## [{version}]")
         elif found:
-            lines.append(line)
-    return "\n".join(lines).strip()
+            if not line.strip() and lines:
+                break
+            if line.strip():
+                lines.append(line)
+    return "\n".join(lines)
 
 
 def pack_module(folder: Path, out_dir: Path) -> Path:
     """把模組資料夾壓成 out_dir/<名稱>.zip，最上層是 <名稱>/；SKIP 裡的名字不管在哪一層都不帶。"""
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{folder.name}.zip"
-    files = sorted(p for p in folder.rglob("*") if p.is_file() and not SKIP & set(p.relative_to(folder).parts))
+    files = sorted(p for p in folder.rglob("*")
+                   if p.is_file() and not SKIP & {part.casefold() for part in p.relative_to(folder).parts})
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for p in files:
             z.write(p, f"{folder.name}/{p.relative_to(folder).as_posix()}")
@@ -92,12 +99,23 @@ def main(argv: list[str], root: Path = ROOT) -> int:
         print("modules/ 裡沒有這些模組：" + "、".join(missing))
         return 1
     out.mkdir(parents=True, exist_ok=True)
-    core_zip = out / f"iPLoT-v{version}.zip"
-    archive = subprocess.run(["git", "archive", "--format=zip", f"--prefix=iPLoT-v{version}/", "-o", str(core_zip),
-                              args.ref or f"v{version}"], cwd=root, capture_output=True, text=True)
-    if archive.returncode != 0:
-        print("git archive 失敗（還沒打 tag 的話加 --ref HEAD）：" + archive.stderr.strip())
+    ref, core_zip = args.ref or f"v{version}", out / f"iPLoT-v{version}.zip"
+    git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)  # noqa: E731
+    shown = git("show", f"{ref}:core/__init__.py")
+    if shown.returncode != 0:
+        print(f"讀不到 {ref} 這個版本（還沒打 tag 的話加 --ref HEAD）：" + shown.stderr.strip())
         return 1
+    packed_version = (re.findall(r'__version__ = "([^"]+)"', shown.stdout) or ["?"])[0]
+    if packed_version != version:  # update.json 會宣稱一個包裡沒有的版本：裝了之後永遠「還有新版」
+        print(f"{ref} 裡的核心是 {packed_version}，不是 --version 的 {version}：先 commit（或打對 tag）再發佈")
+        return 1
+    partial = core_zip.with_suffix(".part")
+    archive = git("archive", "--format=zip", f"--prefix=iPLoT-v{version}/", "-o", str(partial), ref)
+    if archive.returncode != 0:
+        partial.unlink(missing_ok=True)
+        print("git archive 失敗：" + archive.stderr.strip())
+        return 1
+    partial.replace(core_zip)
     notes = changelog_notes(root / "CHANGELOG.md", version)
     made = [core_zip, write_update(core_zip, version, _url(args.base_url, core_zip.name), notes, out)]
     entries = []
@@ -107,10 +125,13 @@ def main(argv: list[str], root: Path = ROOT) -> int:
         entries.append({"name": name, "version": ver, "zip_url": _url(args.base_url, MODULES, packed.name),
                         "sha256": sha256_of(packed), "description": meta.description, "icon": meta.icon})
         made.append(packed)
-    made.append(write_index(entries, out))
+    if wanted:  # 沒給 --modules：只發佈核心，原本的 index.json 不動
+        made.append(write_index(entries, out))
     print("產生了：\n" + "\n".join(f"  {p.relative_to(root)}" for p in made))
-    print(f"上傳 {out.relative_to(root)}/ 之後，在 config.py 填：\n"
-          f'  UPDATE_URL = "{_url(args.base_url, "update.json")}"\n  WORKSHOP_URL = "{_url(args.base_url, "index.json")}"')
+    if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+        print(f"注意：工作目錄有還沒 commit 的改動；核心的包是從 {ref} 打的，不含那些改動（模組的包含）。")
+    print(f"上傳 {out.relative_to(root)}/ 之後，在 config.py 填這兩行（從行首貼上，前面不要留空白）：\n"
+          f'UPDATE_URL = "{_url(args.base_url, "update.json")}"\nWORKSHOP_URL = "{_url(args.base_url, "index.json")}"')
     return 0
 
 

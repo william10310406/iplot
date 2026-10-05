@@ -3,9 +3,12 @@
 
 只換 PARTS 列的四樣。config.py、custom.css、modules/、logs/、lib/ 一律不碰，iPLoT 資料夾以外的東西也不碰（D69）。"""
 import hashlib
+import http.client
 import json
+import os
 import re
 import shutil
+import ssl
 import urllib.parse
 import urllib.request
 import zipfile
@@ -13,11 +16,24 @@ from datetime import datetime
 from pathlib import Path
 
 PARTS = ("core", "ui", "main.py", "requirements")  # 更新會換掉的東西；其他都是使用者的
+ORDER = ("ui", "main.py", "requirements", "core")  # 換上去的順序：core 帶著版本號，最後才換
+# 連線這一段會遇到的錯：連不上、逾時、連到一半斷掉、伺服器沒回話。iplot.py 把它們說成一句話
+NETWORK = (OSError, http.client.HTTPException)
+
+
+def _context():
+    """驗證 https 憑證用的設定。python.org 的 macOS Python 預設沒有根憑證（要另外執行 Install Certificates.command），
+    那樣每個 https 網址都會驗證失敗；憑證庫是空的時候，改用 macOS 自己的那一份。驗證本身不關。"""
+    context = ssl.create_default_context()
+    if not context.cert_store_stats()["x509_ca"] and os.path.exists("/etc/ssl/cert.pem"):
+        context.load_verify_locations("/etc/ssl/cert.pem")
+    return context
 
 
 def _open(url, timeout):
     """打開網址（https://、file:// 都行）。網址裡的中文與空白先寫成 %XX：urllib 只收 ASCII 的網址。"""
-    return urllib.request.urlopen(urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%~"), timeout=timeout)
+    return urllib.request.urlopen(urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%~"), timeout=timeout,
+                                  context=_context())
 
 
 def fetch_json(url, timeout=15):
@@ -79,12 +95,24 @@ def backup(home, old_version):
     return dest
 
 
+def _restore(home):
+    """把換到一半的狀態收回來：還留著 <名稱>.old 的，舊的放回去；<名稱>.new 丟掉。之後四樣是完整的舊版。
+    上一次換到一半程式被關掉、或這一次換到一半出錯，都靠這個。"""
+    for name in PARTS:
+        if (home / f"{name}.old").exists():
+            _remove(home / name)
+            (home / f"{name}.old").rename(home / name)
+        _remove(home / f"{name}.new")
+
+
 def apply(home, zip_path):
     """把 zip 裡的四樣換進 home。zip 的最上層要剛好是一個資料夾（交付用的包是 iPLoT-vX.Y.Z/），裡面四樣都要有，
-    否則丟 ValueError、什麼都不動。先解到 home/.update-tmp/，四樣各自搬到 <名稱>.new，再逐一改名換上去：
-    中途出事也不會留下只換了一半的 core/。做完清掉暫存。"""
+    否則丟 ValueError、什麼都不動。先解到 home/.update-tmp/，四樣各自搬到 <名稱>.new，再逐一改名換上去
+    （舊的先改名成 <名稱>.old，全部換完才刪）。換到一半出錯就全部放回去：要嘛四樣都是新的，要嘛都是舊的。
+    core/ 最後換，所以「磁碟上的版本是新的」就代表四樣都換好了。做完清掉暫存。"""
     tmp = home / ".update-tmp"
     shutil.rmtree(tmp, ignore_errors=True)
+    _restore(home)
     try:
         with zipfile.ZipFile(zip_path) as z:
             z.extractall(tmp)
@@ -94,15 +122,20 @@ def apply(home, zip_path):
         missing = [name for name in PARTS if not (tops[0] / name).exists()]
         if missing:
             raise ValueError("zip 裡少了：" + "、".join(missing))
-        for name in PARTS:
-            _remove(home / f"{name}.new")
-            shutil.move(str(tops[0] / name), str(home / f"{name}.new"))
-        for name in PARTS:
-            _remove(home / f"{name}.old")
-            if (home / name).exists():
-                (home / name).rename(home / f"{name}.old")
-            (home / f"{name}.new").rename(home / name)
-            _remove(home / f"{name}.old")
+        try:
+            for name in PARTS:
+                shutil.move(str(tops[0] / name), str(home / f"{name}.new"))
+            for name in ORDER:
+                if (home / name).exists():
+                    (home / name).rename(home / f"{name}.old")
+                (home / f"{name}.new").rename(home / name)
+        except OSError:
+            _restore(home)
+            raise
+        for name in PARTS:  # 全部換好了，舊的才丟；丟不掉也不算失敗（下次更新開頭會再收一次）
+            shutil.rmtree(home / f"{name}.old", ignore_errors=True)
+            if (home / f"{name}.old").is_file():
+                (home / f"{name}.old").unlink()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

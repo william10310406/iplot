@@ -68,10 +68,11 @@ def stale(home: Path) -> bool:
     """lib/ 是照別的需求檔裝的：lib/.installed 記的 sha256 對不上 requirements/ 裡任何一份（「更新」換過需求檔）。
     沒裝過（沒有記號）不算過期，那是第一次安裝的事。"""
     try:
-        marker = (home / "lib" / ".installed").read_text(encoding="utf-8")
-        return marker not in {_digest(f) for f in (home / "requirements").glob("*.txt")}
+        marker = (home / "lib" / ".installed").read_text(encoding="utf-8", errors="replace")
+        digests = {_digest(f) for f in (home / "requirements").glob("*.txt")}
     except OSError:
         return False
+    return bool(digests) and marker not in digests
 
 
 def install(home: Path, req: Path, say: Callable[[str], None], popen: Any = subprocess.Popen,

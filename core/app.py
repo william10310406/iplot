@@ -93,7 +93,7 @@ class App:
 
     def page(self, title: str, html: str, api: object | None = None) -> None:
         """開一個視窗顯示一頁 HTML，關掉才回來；api 的公開方法給那一頁的 JS 用 pywebview.api.<方法> 呼叫。
-        安全模式沒有頁面，只在訊息區記一行。"""
+        tkinter 面板（安全模式與備用面板）沒有頁面，只在訊息區記一行。"""
         self._core.view.page(title, html, api)
 
     def choose_files(self) -> list[Path]:

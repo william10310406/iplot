@@ -228,3 +228,131 @@ def test_not_a_zip_is_one_plain_sentence(home, source):
     run(app)
     assert tree(home)["core/x.py"] == b"old core\n" and "zip" in app.logs[-1]
     shutil.rmtree(home / ".backup", ignore_errors=True)
+
+
+# 最終審查的修正
+
+def test_https_open_brings_a_trust_store(update, monkeypatch):
+    """python.org 的 macOS Python 預設沒有根憑證（要另外執行 Install Certificates.command），https 會全部驗證失敗
+    （這台機器上實測）。_open 要自己帶一個 context；預設的憑證庫是空的時候，改用 macOS 自己的 /etc/ssl/cert.pem。"""
+    import ssl
+    seen = {}
+    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=None, context=None: seen.update(context=context))
+    update._open("https://raw.githubusercontent.com/someone/iplot/main/update.json", 5)
+    assert isinstance(seen["context"], ssl.SSLContext) and seen["context"].verify_mode == ssl.CERT_REQUIRED
+    assert seen["context"].check_hostname is True, "驗證不能關掉"
+
+    class Empty:
+        loaded = None
+
+        def cert_store_stats(self):
+            return {"x509": 0, "crl": 0, "x509_ca": 0}
+
+        def load_verify_locations(self, cafile):
+            Empty.loaded = cafile
+
+    monkeypatch.setattr(update.ssl, "create_default_context", Empty)
+    monkeypatch.setattr(update.os.path, "exists", lambda path: path == "/etc/ssl/cert.pem")
+    update._context()
+    assert Empty.loaded == "/etc/ssl/cert.pem"
+
+
+def test_fetch_json_from_a_path_with_a_real_space(update, tmp_path):
+    folder = tmp_path / "發 佈"
+    folder.mkdir()
+    (folder / "update.json").write_text('{"version": "1.0.0"}', encoding="utf-8")
+    assert update.fetch_json("file://" + str(folder / "update.json")) == {"version": "1.0.0"}
+
+
+def test_apply_rolls_back_when_a_swap_fails(update, home, source, monkeypatch):
+    """換到一半出錯（檔案被佔著、權限不對）：已經換上去的放回來，四樣都還是舊的，不留 .new／.old。"""
+    before = tree(home)
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name == "main.py.new":
+            raise PermissionError(13, "模擬：main.py 換不上去")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(PermissionError):
+        update.apply(home, source / "iPLoT-v9.9.9.zip")
+    assert tree(home) == before
+    assert update.installed_version(home) == "0.4.9"
+
+
+def test_core_is_swapped_last(update, home, source, monkeypatch):
+    """core/ 帶著版本號：它最後才換，所以「磁碟上的版本是新的」就代表四樣都換好了。"""
+    order, real = [], Path.rename
+
+    def rename(self, target):
+        if self.name.endswith(".new"):
+            order.append(self.name[:-4])
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    update.apply(home, source / "iPLoT-v9.9.9.zip")
+    assert sorted(order) == sorted(update.PARTS) and order[-1] == "core"
+
+
+def test_apply_recovers_from_a_swap_that_was_killed_half_way(update, home, source):
+    """上一次換到一半程式被關掉：ui 已經是新的、舊的還叫 ui.old，旁邊留著別的 .new。再按一次更新要能完成，不留殘餘。"""
+    (home / "ui").rename(home / "ui.old")
+    (home / "ui").mkdir()
+    (home / "ui" / "a.js").write_text("new ui\n", encoding="utf-8")
+    (home / "main.py.new").write_text("new main\n", encoding="utf-8")
+    assert update.installed_version(home) == "0.4.9", "core 還沒換，所以不會被當成已經更新"
+    update.apply(home, source / "iPLoT-v9.9.9.zip")
+    after = tree(home)
+    assert {k: v for k, v in after.items() if k in NEW} == {k: v.encode() for k, v in NEW.items()}
+    assert set(after) == set(NEW) | set(MINE)
+
+
+@pytest.fixture
+def iplot(update, monkeypatch):
+    """modules/更新/iplot.py，它 import 的 update 就是上面那個 fixture：可以換掉裡面的函式來模擬網路出事。"""
+    monkeypatch.setitem(sys.modules, "update", update)
+    spec = importlib.util.spec_from_file_location("iplot_update_entry", MODULE / "iplot.py")
+    module = importlib.util.module_from_spec(spec)
+    old, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = old
+    return module
+
+
+@pytest.mark.parametrize("error", ["reset", "disconnected", "incomplete", "timeout"])
+def test_dropped_connection_is_one_plain_sentence(iplot, update, home, source, monkeypatch, error):
+    """規格 13.2：網路錯誤是一句白話。下載到一半斷線、伺服器沒回話，都不是 URLError。"""
+    import http.client
+    errors = {"reset": ConnectionResetError(54, "Connection reset by peer"), "timeout": TimeoutError("timed out"),
+              "disconnected": http.client.RemoteDisconnected("Remote end closed connection without response"),
+              "incomplete": http.client.IncompleteRead(b"abc", 100)}
+
+    def broken(*args, **kwargs):
+        raise errors[error]
+
+    monkeypatch.setattr(update, "download", broken)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    before = tree(home)
+    iplot.run(app)
+    assert tree(home) == before and len(app.logs) == 1 and "沒有更新" in app.logs[0]
+    monkeypatch.setattr(update, "fetch_json", broken)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    assert len(app.logs) == 1 and "沒有更新" in app.logs[0]
+
+
+def test_mistyped_url_is_blamed_on_the_url(iplot, home):
+    app = FakeApp(home, update_url="https://exa mple.invalid:80a/update.json")
+    iplot.run(app)
+    assert len(app.logs) == 1 and "UPDATE_URL" in app.logs[0] and "Traceback" not in app.logs[0]
+
+
+def test_backup_is_named_after_the_version_on_disk(iplot, home, source):
+    """備份的資料夾用磁碟上那一份的版本命名（剛更新完沒重啟時，程式自己的 app.version 還是更舊的那個）。"""
+    app = FakeApp(home, version="0.4.0", update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [saved] = [p for p in (home / ".backup").iterdir() if p.is_dir()]
+    assert saved.name.startswith("0.4.9-")

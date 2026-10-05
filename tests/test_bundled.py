@@ -311,7 +311,8 @@ WEBVIEW2 = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}
 
 def test_requirements_and_ready_per_backend(monkeypatch):
     assert (backend("mac").requirements(None), backend("mac").webview_ready(None)) == ("web-mac.txt", None)
-    assert backend("linux").requirements(None) == "" and "--safe" in backend("linux").webview_ready(None)
+    assert backend("linux").requirements(None) == "" and "Linux" in backend("linux").webview_ready(None)
+    assert "安全模式" not in backend("linux").webview_ready(None), "這句話後面接的是「已改用備用面板」"
     assert backend("win").requirements(None) == "web-win.txt"
     for present in ({("HKLM", "SOFTWARE\\WOW6432Node\\" + WEBVIEW2): "120.0.1"},
                     {("HKLM", "SOFTWARE\\" + WEBVIEW2): "120.0.1"},
@@ -321,7 +322,7 @@ def test_requirements_and_ready_per_backend(monkeypatch):
     for missing in ({}, {("HKCU", "Software\\" + WEBVIEW2): "0.0.0.0"}, {("HKCU", "Software\\" + WEBVIEW2): ""}):
         monkeypatch.setitem(sys.modules, "winreg", FakeWinreg(missing))
         reason = backend("win").webview_ready(None)
-        assert isinstance(reason, str) and "WebView2" in reason and "--safe" in reason, missing
+        assert isinstance(reason, str) and "WebView2" in reason and "安全模式" not in reason, missing
 
 
 def test_system_module_answers_through_core_action(fake_core, monkeypatch):
