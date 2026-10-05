@@ -1,7 +1,7 @@
 """iPLoT 入口：python3 main.py [--safe]。版本檢查 → 選面板 → 進入事件迴圈（規格 §3）。
 
 預設開網頁面板（ui/web.py，用 lib/ 裡的 pywebview）。第一次啟動、或 lib/ 壞了，就用 pip 裝一次再重啟自己；
-裝不起來就退到 tkinter 面板（ui/tk.py，安全模式）並說明原因。--safe：直接開 tkinter 面板，只掃 modules/。
+裝不起來就退到 tkinter 面板（ui/tk.py，照常掃上一層與 ROOTS）並說明原因。--safe：直接開 tkinter 面板，只掃 modules/。
 
 core 與 ui 的 import 都放在函式裡、版本檢查之後：它們用了 3.10 的語法，在太舊的 Python 上一 import 就炸，
 使用者得先看到「請裝新版 Python」那一句，而不是一段 traceback。
@@ -33,7 +33,7 @@ class NoTk:
 
 
 def run_tk(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: str | None = None) -> None:
-    """tkinter 面板：安全模式，或網頁面板開不起來時的後備。note 有值就先寫進訊息區。
+    """tkinter 面板：安全模式（safe，只掃 modules/），或網頁面板開不起來時的後備（掃完整範圍）。note 有值就先寫進訊息區。
     這個 Python 沒有 tkinter 時丟 ImportError。"""
     from core import __version__
     from core.core import Core
@@ -70,10 +70,10 @@ def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str) -> 
         sys.meta_path.remove(guard)  # 面板關了、或根本沒開起來：後備的 tkinter 面板在同一個程序裡，要 import 得到
 
 
-def safe_mode(home: Path, config: Config, err: ErrorInfo | None, note: str | None = None) -> None:
-    """開 tkinter 面板的安全模式；連 tkinter 都沒有就說一句，以代碼 1 結束。"""
+def tk_or_exit(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: str | None = None) -> None:
+    """開 tkinter 面板；連 tkinter 都沒有就說一句，以代碼 1 結束。"""
     try:
-        run_tk(home, config, err, True, note)
+        run_tk(home, config, err, safe, note)
     except ImportError:
         print(T["no_tk"], flush=True)
         sys.exit(1)
@@ -81,7 +81,7 @@ def safe_mode(home: Path, config: Config, err: ErrorInfo | None, note: str | Non
 
 def bootstrap(home: Path, config: Config, err: ErrorInfo | None, reason: str, rebooted: bool) -> None:
     """網頁面板開不起來（reason）：用 pip 把介面裝進 lib/，裝好就重啟自己（乾淨的程序）。
-    這個平台裝不了、pip 失敗、或剛裝完重啟還是開不起來（rebooted），就說明原因、退到安全模式。
+    這個平台裝不了、pip 失敗、或剛裝完重啟還是開不起來（rebooted），就說明原因、退到 tkinter 面板（不是安全模式）。
     裝哪一份、缺什麼，問 modules/作業系統（ui/install.py）。只重裝一次，不會無限重啟。"""
     from core.core import Core
     from ui import install
@@ -102,7 +102,7 @@ def bootstrap(home: Path, config: Config, err: ErrorInfo | None, reason: str, re
                 os.execv(sys.executable, [sys.executable, str(home / "main.py"), *sys.argv[1:]])
             message = T["install_failed"].format(message=failure)
     print(message, flush=True)
-    safe_mode(home, config, err, message)
+    tk_or_exit(home, config, err, False, message)  # 後備面板不是安全模式：照常掃上一層與 ROOTS
 
 
 def main() -> None:
@@ -118,7 +118,7 @@ def main() -> None:
     rebooted = os.environ.pop("IPLOT_BOOT", None) == "1"  # 這次啟動是不是剛裝完 lib/ 重啟的那一次
     config, err = load_config(home / "config.py")
     if "--safe" in sys.argv[1:]:
-        return safe_mode(home, config, err)
+        return tk_or_exit(home, config, err, True)
     try:
         run_web(home, config, err, __version__)
     except ImportError as exc:

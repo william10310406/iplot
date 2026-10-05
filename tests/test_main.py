@@ -155,12 +155,13 @@ def test_execv_keeps_the_arguments(boot, monkeypatch):
 
 
 def test_install_failure_falls_back_to_tk_with_note(boot, capsys):
-    """裝不起來（例如沒有網路）：主控台與 tk 面板的訊息區都說原因與怎麼再試；後備是安全模式。"""
+    """裝不起來（例如沒有網路）：主控台與 tk 面板的訊息區都說原因與怎麼再試。
+    後備面板不是安全模式：掃完整範圍（上一層與 ROOTS），只有 --safe 才只掃 modules/。"""
     boot.web, boot.pip = ImportError("No module named 'webview'"), "ERROR: Could not fetch URL x"
     boot.main.main()
     assert kinds(boot) == ["web", "pip", "tk"]
     _, safe, note = boot.calls[-1]
-    assert safe is True and note == T["install_failed"].format(message="ERROR: Could not fetch URL x")
+    assert safe is False and note == T["install_failed"].format(message="ERROR: Could not fetch URL x")
     out = capsys.readouterr().out
     assert note in out and "Traceback" not in out
 
@@ -186,7 +187,7 @@ def test_broken_lib_reinstalls_then_falls_back(boot, capsys):
     boot.main.main()  # 重啟後的那一次：還是壞
     assert kinds(boot) == ["web", "pip", "execv", "web", "tk"], "只重裝一次"
     _, safe, note = boot.calls[-1]
-    assert safe is True and note == T["web_failed"].format(message="cannot import name 'AppKit'")
+    assert safe is False and note == T["web_failed"].format(message="cannot import name 'AppKit'")
     assert note in capsys.readouterr().out
 
 
@@ -206,12 +207,13 @@ def test_boot_flag_does_not_leak_into_later_restarts(boot, monkeypatch):
 
 
 def test_platform_without_web_panel_falls_back_without_pip(boot, monkeypatch, capsys):
-    """Linux 這一版沒有網頁面板：不跑 pip，主控台與訊息區說明，開安全模式。"""
+    """Linux 這一版沒有網頁面板：不跑 pip，主控台與訊息區說明，開後備的 tk 面板（完整範圍）。"""
     monkeypatch.setattr(sys, "platform", "linux")
     boot.web = ImportError("No module named 'webview'")
     boot.main.main()
     assert kinds(boot) == ["web", "tk"]
     assert "Linux" in boot.calls[-1][2] and boot.calls[-1][2].startswith(T["web_failed"].split("{")[0])
+    assert boot.calls[-1][1] is False
 
 
 def test_missing_system_module_falls_back_without_pip(boot, capsys):
@@ -219,7 +221,7 @@ def test_missing_system_module_falls_back_without_pip(boot, capsys):
     shutil.rmtree(boot.home / "modules" / SYSTEM_MODULE)
     boot.web = ImportError("No module named 'webview'")
     boot.main.main()
-    assert kinds(boot) == ["web", "tk"] and boot.calls[-1][1] is True
+    assert kinds(boot) == ["web", "tk"] and boot.calls[-1][1] is False
     assert T["no_system"].format(module=SYSTEM_MODULE, name="requirements") in capsys.readouterr().out
 
 

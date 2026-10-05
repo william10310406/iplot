@@ -283,6 +283,13 @@ class WebPanel:
         """面板內的「確定／取消」對話框；按確定回 True。"""
         return self._dialog("confirm", prompt) is True
 
+    def page(self, title: str, html: str, api: object | None) -> None:
+        """開第二個視窗顯示一頁 HTML（app.page），那個視窗關掉才回傳；api 的公開方法給那一頁的 JS 呼叫。"""
+        window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
+        done = threading.Event()
+        window.events.closed += done.set
+        done.wait()
+
     def choose_files(self) -> list[Path]:
         """原生的檔案選擇視窗（D67）；按取消回空清單。"""
         found = self.window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True)

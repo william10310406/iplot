@@ -7,7 +7,7 @@ from conftest import make_module
 
 from core.core import Core, load_config
 from core.text import T
-from core.types import DEFAULT_CONFIG
+from core.types import DEFAULT_CONFIG, Config
 
 
 def started(home, view, roots=("modules", "..")):
@@ -102,3 +102,26 @@ def test_plus_without_system_module(home, view):
     assert (folder / "iplot.py").exists()
     assert any(m.name == "整理桌面" for m in c.all_modules())
     assert view.logs[-1] == T["no_system"].format(module="作業系統", name="edit")
+
+
+def test_config_urls_default_none_and_type_checked(tmp_path):
+    """UPDATE_URL、WORKSHOP_URL：沒寫是 None；寫字串就照用；型別不對整份用預設值並回報（跟 ROOTS 一樣）。"""
+    f = tmp_path / "config.py"
+    f.write_text('ROOTS = ["modules"]\n', encoding="utf-8")
+    config, err = load_config(f)
+    assert (config.update_url, config.workshop_url, err) == (None, None, None)
+    f.write_text('UPDATE_URL = "https://example.invalid/update.json"\nWORKSHOP_URL = "file:///x/index.json"\n',
+                 encoding="utf-8")
+    config, err = load_config(f)
+    assert (config.update_url, config.workshop_url) == ("https://example.invalid/update.json", "file:///x/index.json")
+    assert err is None and config.roots == DEFAULT_CONFIG.roots
+    for key in ("UPDATE_URL", "WORKSHOP_URL"):
+        f.write_text(f'ROOTS = ["modules"]\n{key} = 1\n', encoding="utf-8")
+        config, err = load_config(f)
+        assert config == DEFAULT_CONFIG and err.source == "config"
+        assert err.message == T["config_type"].format(name=key, expected="None | str")
+
+
+def test_default_config_has_no_urls():
+    assert (DEFAULT_CONFIG.update_url, DEFAULT_CONFIG.workshop_url) == (None, None)
+    assert Config(("modules",), None, 20) == Config(("modules",), None, 20, None, None)

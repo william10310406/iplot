@@ -145,6 +145,10 @@ class Panel:
         """跳出「確定／取消」對話框；按確定回 True。"""
         return messagebox.askokcancel(self.title, prompt, parent=self.root)
 
+    def page(self, title: str, html: str, api: object | None) -> None:
+        """tkinter 面板沒有頁面：在訊息區記一行就回來。"""
+        self.log(T["page_unsupported"])
+
     def choose_files(self) -> list[Path]:
         """跳出檔案選擇視窗；按取消回空清單。"""
         return [Path(p) for p in filedialog.askopenfilenames(parent=self.root)]

@@ -31,6 +31,9 @@ class ConsoleView:
     def confirm(self, prompt: str) -> bool:
         return False
 
+    def page(self, title: str, html: str, api: object | None) -> None:
+        """沒有畫面。"""
+
     def choose_files(self) -> list[Path]:
         return []
 

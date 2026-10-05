@@ -61,6 +61,9 @@ class FakeView:
         self.confirmed.append(prompt)
         return self.answers.pop(0) if self.answers else True
 
+    def page(self, title, html, api):
+        self.events.append(("page", (title, html, api)))
+
     def choose_files(self):
         return [Path("/f")]
 

@@ -132,6 +132,7 @@ def test_console_view_is_a_minimal_view(capsys):
     view.report(ErrorInfo("TypeError", "m", None, None, "Traceback…", "config", None))
     assert capsys.readouterr().out == "一行\n" + T["config_error"].format(message="m") + "\n"
     assert (view.ask("q"), view.confirm("q"), view.choose_files(), view.choose_folder()) == (None, False, [], None)
+    assert view.page("t", "<p></p>", None) is None
 
 
 @pytest.mark.parametrize("name", ["web-mac.txt", "web-win.txt"])

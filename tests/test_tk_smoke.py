@@ -255,3 +255,10 @@ def test_run_tk_writes_note_then_config_error(home, monkeypatch):
         close(p.root)
         del made[:], p
         gc.collect()  # 面板有循環參照：在這條執行緒收掉，不要留到別的測試的工作執行緒才收（Tcl 會抱怨）
+
+
+def test_page_logs_unsupported(home, panel):
+    """安全模式的 tk 面板沒有頁面：page 在訊息區記一行就回來，不開視窗、不丟例外。"""
+    started(home, panel)
+    assert panel.page("工作坊", "<p>hi</p>", object()) is None
+    assert T["page_unsupported"] in messages(panel)

@@ -43,7 +43,10 @@ T: dict[str, str] = {
     "install_done": "安裝完成，重新啟動中…",
     "install_failed": "介面安裝失敗：{message}\n安裝需要網路。再試一次：重新啟動 iPLoT。先用安全模式：python3 main.py --safe",
     "no_tk": "這個 Python 沒有 tkinter，安全模式開不了；請用 python.org 的版本",
-    "web_failed": "網頁面板開不起來：{message}。已改用安全模式",
+    "web_failed": "網頁面板開不起來：{message}。已改用備用面板",
+    "confirm_foreign": "『{title}』是從外面裝進來的，第一次執行前確認：要執行嗎？",
+    "cancelled": "已取消執行『{title}』",
+    "page_unsupported": "安全模式沒有頁面，這個功能要用一般模式開",
     "running": "執行中：{title}…",
     "tk_in_web": "這個面板裡的模組不能開 tkinter 的視窗（turtle、tkinter 的對話框都算）。"
                  "要用的話，請用安全模式開 iPLoT：python3 main.py --safe",

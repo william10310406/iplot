@@ -60,8 +60,22 @@ def test_ask_and_choose_delegate(fake_core, info):
     assert app.choose_files() == [Path("/f")] and app.choose_folder() == Path("/d")
 
 
-def test_api_version_is_2(fake_core, info):
-    assert App(fake_core, info).api_version == 2
+def test_api_version_is_3(fake_core, info):
+    assert App(fake_core, info).api_version == 3
+
+
+def test_config_and_version(fake_core, info):
+    """模組讀得到設定（唯讀的 Config）與核心版本：「更新」「工作坊」靠這兩樣。"""
+    import core
+    app = App(fake_core, info)
+    assert app.config is fake_core.config and app.version == core.__version__
+
+
+def test_page_goes_to_view(fake_core, info):
+    api = object()
+    App(fake_core, info).page("標題", "<p>內容</p>", api)
+    App(fake_core, info).page("沒有 api", "<p></p>")
+    assert fake_core.view.events == [("page", ("標題", "<p>內容</p>", api)), ("page", ("沒有 api", "<p></p>", None))]
 
 
 def test_no_window(fake_core, info):
@@ -79,7 +93,7 @@ def test_confirm_goes_to_view(fake_core, info):
 def test_all_members_have_docstrings():
     members = {k: v for k, v in vars(App).items()
                if not k.startswith("_") and (callable(v) or isinstance(v, property))}
-    assert set(members) >= {"module", "home", "modules", "memory", "confirm", "log", "open",
+    assert set(members) >= {"module", "home", "modules", "memory", "confirm", "page", "config", "log", "open",
                             "edit", "reveal", "terminal", "trash", "run", "rescan", "ask", "choose_files", "choose_folder"}
     for name, member in members.items():
         assert CJK.search(member.__doc__ or ""), name
