@@ -31,12 +31,13 @@ started: list[subprocess.Popen] = []
 
 
 def fresh(work: Path, n: int) -> Path:
-    """乾淨副本：只有 main.py、config.py、core/、空的 modules/；上一層只有它自己。"""
+    """乾淨副本：只有 main.py、config.py、core/、ui/、空的 modules/；上一層只有它自己。"""
     home = work / str(n) / "iPLoT"
     (home / "modules").mkdir(parents=True)
     for name in ("main.py", "config.py"):
         shutil.copy(SRC / name, home / name)
-    shutil.copytree(SRC / "core", home / "core", ignore=shutil.ignore_patterns("__pycache__"))
+    for name in ("core", "ui"):
+        shutil.copytree(SRC / name, home / name, ignore=shutil.ignore_patterns("__pycache__"))
     return home
 
 

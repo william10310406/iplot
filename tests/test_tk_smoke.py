@@ -22,7 +22,7 @@ from conftest import make_module  # noqa: E402
 from core.core import Core  # noqa: E402
 from core.text import T  # noqa: E402
 from core.types import DEFAULT_CONFIG, ErrorInfo  # noqa: E402
-from core.ui import Panel  # noqa: E402
+from ui.tk import Panel  # noqa: E402
 
 
 def close(root):
@@ -35,14 +35,14 @@ def close(root):
 def panel():
     p = Panel("9.9", safe=False)
     yield p
-    close(p.window)
+    close(p.root)
 
 
 def started(home, panel, config=DEFAULT_CONFIG):
     core = Core(home, config, panel)
     panel.attach(core)
     core.rescan()
-    panel.window.update()
+    panel.root.update()
     return core
 
 
@@ -74,7 +74,7 @@ def test_panel_reports_error_with_open_button(home, panel):
     make_module(home / "modules", "A", "def run(app):\n    x = 1\n    1/0\n")
     started(home, panel)
     button(panel.body, "A").invoke()
-    panel.window.update()
+    panel.root.update()
     assert "第 3 行" in messages(panel)
     assert button(panel.messages, T["open_file"]).winfo_ismapped()
 
@@ -82,9 +82,9 @@ def test_panel_reports_error_with_open_button(home, panel):
 def test_panel_title_safe_mode():
     p = Panel("9.9", safe=True)
     try:
-        assert p.window.title() == "iPLoT v9.9（安全模式）"
+        assert p.root.title() == "iPLoT v9.9（安全模式）"
     finally:
-        close(p.window)
+        close(p.root)
 
 
 def test_dnd_skipped_in_safe_mode_and_failure_falls_back(monkeypatch):
@@ -98,14 +98,14 @@ def test_dnd_skipped_in_safe_mode_and_failure_falls_back(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "tkinterdnd2", types.SimpleNamespace(
         TkinterDnD=types.SimpleNamespace(Tk=BrokenDnDTk)))
-    close(Panel("9.9", safe=True).window)
+    close(Panel("9.9", safe=True).root)
     assert half_built == []  # 安全模式連 import 都不做
     p = Panel("9.9", safe=False)
     try:
-        assert len(half_built) == 1 and p.window.winfo_exists()
+        assert len(half_built) == 1 and p.root.winfo_exists()
         assert half_built[0].winfo_exists()  # 建到一半的視窗不能被 destroy（見檔頭）
     finally:
-        for root in {p.window, half_built[0]}:
+        for root in {p.root, half_built[0]}:
             close(root)
 
 
@@ -120,7 +120,7 @@ def test_report_keeps_plain_sentence_at_the_end(home, panel):
     make_module(home / "modules", "A", "def run(app):\n    x = 1\n    1/0\n")
     started(home, panel)
     button(panel.body, "A").invoke()
-    panel.window.update()
+    panel.root.update()
     tail = panel.messages.get("end-3l", "end")  # see("end") 之後看得到的是最後幾行
     assert "模組『A』第 3 行出錯" in tail
     assert "Traceback" not in tail
@@ -132,11 +132,11 @@ def test_enter_child_breadcrumb_and_warning_mark(home, panel):
     started(home, panel)
     assert button(panel.body, "⚠ Bad")
     button(panel.body, "▸").invoke()
-    panel.window.update()
+    panel.root.update()
     assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT", "A"]
     assert button(panel.body, "C")
     button(panel.crumbs, "iPLoT").invoke()
-    panel.window.update()
+    panel.root.update()
     assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT"]
     assert button(panel.body, "A") and button(panel.body, "⚠ Bad")
 
@@ -188,7 +188,7 @@ def add_child(panel, text):
     menu, labels = row_menu(panel, text)
     assert labels[3:] == ["在這裡新增下一層模組…"]
     menu.invoke(3)
-    panel.window.update()
+    panel.root.update()
 
 
 def test_right_click_menu_has_add_child(home, panel, monkeypatch):
@@ -207,7 +207,7 @@ def test_add_child_creates_under_module_and_shows_arrow(home, panel, monkeypatch
     assert seen == [("edit", child, core.config.editor, None)]  # 建好照舊交給編輯器
     assert row_menu(panel, "A")[1][3:] == [T["menu_add_child"]]  # 有了子模組，這一項還在
     button(panel.body, "▸").invoke()
-    panel.window.update()
+    panel.root.update()
     assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT", "A"]
     assert button(panel.body, "子")
 
@@ -218,3 +218,20 @@ def test_add_child_bad_name_does_not_create(home, panel, monkeypatch):
     assert [p.name for p in (home / "modules" / "A").rglob("*")] == ["iplot.py"]
     assert T["bad_name"] in messages(panel)
     assert seen == []
+
+
+def test_confirm_uses_messagebox(panel, monkeypatch):
+    seen = []
+    monkeypatch.setattr("tkinter.messagebox.askokcancel",
+                        lambda title, prompt, **kw: seen.append((title, prompt, kw)) or False)
+    assert panel.confirm("q") is False
+    assert seen == [("iPLoT v9.9", "q", {"parent": panel.root})]
+
+
+def test_attach_sends_callback_errors_to_core(home, panel):
+    core = started(home, panel)
+    assert panel.root.report_callback_exception == core.report_internal
+
+
+def test_panel_has_no_window_attribute(panel):
+    assert not hasattr(panel, "window") and panel.root.winfo_exists()

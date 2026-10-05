@@ -16,7 +16,7 @@ from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result,
 
 
 class View(Protocol):
-    """面板要做到的事：ui.Panel 實作，測試用 FakeView。"""
+    """面板要做到的事：ui/ 裡的面板實作，測試用 FakeView。"""
 
     def show(self, scope: Scope) -> None: ...
     def log(self, text: str) -> None: ...
