@@ -1,0 +1,12 @@
+# 網頁面板在 macOS 需要的套件，版本釘死。第一次啟動時由 ui/install.py 裝進 lib/。
+# 要升級：在乾淨的資料夾 pip install --target <資料夾> pywebview，再用 pip freeze --path <資料夾> 重寫這個檔。
+bottle==0.13.4
+proxy_tools==0.1.0
+pyobjc-core==12.2.2
+pyobjc-framework-Cocoa==12.2.2
+pyobjc-framework-Quartz==12.2.2
+pyobjc-framework-Security==12.2.2
+pyobjc-framework-UniformTypeIdentifiers==12.2.2
+pyobjc-framework-WebKit==12.2.2
+pywebview==6.2.1
+typing_extensions==4.16.0
