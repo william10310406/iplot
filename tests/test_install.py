@@ -144,7 +144,14 @@ def test_requirements_are_pinned(name):
 
 def test_windows_requirements_say_unverified():
     text = (ROOT / "requirements" / "web-win.txt").read_text(encoding="utf-8")
-    assert "未經實機驗證" in text.splitlines()[0] and "pythonnet==" in text
+    assert "NOT verified on a real Windows machine" in text.splitlines()[0] and "pythonnet==" in text
+
+
+@pytest.mark.parametrize("name", ["web-mac.txt", "web-win.txt"])
+def test_requirements_files_are_ascii(name):
+    """舊版 pip（Python 3.10、3.11 安裝檔附的）用系統的編碼讀需求檔：在中文 Windows（cp950）上，
+    檔案裡只要有一個 UTF-8 的中文字，pip 還沒開始裝就解碼失敗。所以這兩個檔只寫 ASCII，說明放在文件裡。"""
+    assert (ROOT / "requirements" / name).read_bytes().isascii()
 
 
 def test_lib_is_ignored_by_git():

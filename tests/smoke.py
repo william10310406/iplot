@@ -50,10 +50,11 @@ def fresh(work: Path, n: int, with_lib: bool = False) -> Path:
 
 
 def check(n: int, what: str, cwd: Path, argv: list[str]) -> bool:
-    """在 cwd 啟動 argv，等 8 秒：還活著而且 stderr 是空的才算過。"""
-    err = cwd.parent / "stderr.txt"
-    with err.open("wb") as f:
-        proc = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.DEVNULL, stderr=f)
+    """在 cwd 啟動 argv，等 8 秒：還活著、stderr 與 stdout 都是空的才算過。
+    stdout 也要空：網頁面板開不起來時 iPLoT 會在那裡說明原因、改開安全模式——視窗照樣活著，只看 stderr 分不出來。"""
+    err, out = cwd.parent / "stderr.txt", cwd.parent / "stdout.txt"
+    with err.open("wb") as f, out.open("wb") as o:
+        proc = subprocess.Popen(argv, cwd=cwd, stdout=o, stderr=f)
     started.append(proc)
     time.sleep(SECONDS)
     code = proc.poll()
@@ -61,9 +62,9 @@ def check(n: int, what: str, cwd: Path, argv: list[str]) -> bool:
     with contextlib.suppress(subprocess.TimeoutExpired):
         proc.wait(timeout=5)
     status = "活著" if code is None else f"死了，結束碼 {code}"
-    text = err.read_text(encoding="utf-8", errors="replace")
+    text = err.read_text(encoding="utf-8", errors="replace") + out.read_text(encoding="utf-8", errors="replace")
     if text:
-        print(f"情境 {n}（{what}）：{status}，stderr 不乾淨：")
+        print(f"情境 {n}（{what}）：{status}，stderr／stdout 不乾淨：")
         print("".join(f"    {line}\n" for line in text.splitlines()), end="")
     else:
         print(f"情境 {n}（{what}）：{status}，stderr 乾淨")

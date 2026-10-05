@@ -110,7 +110,7 @@ def test_app_js_defines_every_entry_python_calls():
     web = (UI / "web.py").read_text(encoding="utf-8")
     called = set(re.findall(r"self\._(?:js|dialog)\(\"(\w+)\"", web))
     defined = set(re.findall(r"^iplot\.(\w+) = ", _page("app.js"), re.M))
-    assert called == defined == {"init", "show", "log", "report", "ask", "confirm"}
+    assert called == defined == {"init", "show", "log", "report", "ask", "confirm", "busy"}
 
 
 def test_index_html_loads_style_then_custom_css_then_script():

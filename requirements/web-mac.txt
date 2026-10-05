@@ -1,5 +1,6 @@
-# 網頁面板在 macOS 需要的套件，版本釘死。第一次啟動時由 ui/install.py 裝進 lib/。
-# 要升級：在乾淨的資料夾 pip install --target <資料夾> pywebview，再用 pip freeze --path <資料夾> 重寫這個檔。
+# Packages the iPLoT web panel needs on macOS, versions pinned. Installed into lib/ on first launch (ui/install.py).
+# To upgrade: pip install --target <dir> pywebview, then rewrite this file from pip freeze --path <dir>.
+# Keep this file ASCII-only: older pip reads it with the system encoding (docs/07, section 9).
 bottle==0.13.4
 proxy_tools==0.1.0
 pyobjc-core==12.2.2

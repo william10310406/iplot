@@ -114,6 +114,7 @@ img.icon { object-fit: cover; background: none; }
 .status b { flex: none; font-weight: 600; }
 .status span { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .status .bad { color: var(--danger); }
+.status .busy { flex: none; margin-left: auto; color: var(--accent); }
 .log { display: flex; flex-direction: column; gap: 2px; height: var(--log-height); overflow: auto;
   padding: 6px 14px 10px; font-size: 13px; cursor: auto; -webkit-user-select: text; user-select: text; }
 .entry { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; }

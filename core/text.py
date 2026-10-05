@@ -44,6 +44,9 @@ T: dict[str, str] = {
     "install_failed": "介面安裝失敗：{message}\n安裝需要網路。再試一次：重新啟動 iPLoT。先用安全模式：python3 main.py --safe",
     "no_tk": "這個 Python 沒有 tkinter，安全模式開不了；請用 python.org 的版本",
     "web_failed": "網頁面板開不起來：{message}。已改用安全模式",
+    "running": "執行中：{title}…",
+    "tk_in_web": "這個面板裡的模組不能開 tkinter 的視窗（turtle、tkinter 的對話框都算）。"
+                 "要用的話，請用安全模式開 iPLoT：python3 main.py --safe",
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",

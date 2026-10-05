@@ -38,11 +38,13 @@ def test_module_info_icon_defaults():
 def test_panel_text_keys():
     """規格 §7：新面板的文字都在 T，值是中文。"""
     for k in ["menu_run", "menu_enter", "add_tile", "status_hint", "details", "hide_details", "ok", "cancel",
-              "scanned", "icon_unusable", "installing", "install_done", "install_failed", "no_tk", "web_failed"]:
+              "scanned", "icon_unusable", "installing", "install_done", "install_failed", "no_tk", "web_failed",
+              "running", "tk_in_web"]:
         assert T.get(k), k
     assert "{roots}" in T["scanned"] and "{count}" in T["scanned"] and "{title}" in T["icon_unusable"]
     assert "{size}" in T["installing"] and "--safe" in T["install_failed"] and "{message}" in T["web_failed"]
     assert "網路" in T["installing"] and "網路" in T["install_failed"], "裝不起來多半是沒網路：兩句都要講"
+    assert "{title}" in T["running"] and "--safe" in T["tk_in_web"]
 
 
 def test_template_mentions_icon_after_title():

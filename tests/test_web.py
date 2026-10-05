@@ -332,7 +332,9 @@ def test_page_reload_cancels_pending_ask(panel, window):
 # Bridge 的動作
 
 def test_bridge_exposes_only_its_methods(bridge):
-    """pywebview 會把 js_api 的公開屬性一路攤開給 JS：Bridge 只露出這些方法，面板與核心都藏在底線後面。"""
+    """pywebview 會把 js_api 的公開屬性一路攤開給 pywebview.api：Bridge 攤出去的只有這些方法。
+    這是整潔，不是安全邊界——pywebview 用名字一路 getattr，知道名字的頁面程式碼叫得到底線後面的東西；
+    真正的邊界是頁面零外部資源、模組的輸出一律當文字（tests/test_boundaries.py）。"""
     public = {n for n in dir(bridge) if not n.startswith("_")}
     assert public == {"state", "press", "enter", "back", "create", "add_child", "action", "open_error", "rescan",
                       "answer"}
@@ -465,3 +467,39 @@ def test_file_dialog_returns_paths(panel, window):
     assert window.dialogs[-1] == ((FakeWebview.FileDialog.OPEN,), {"allow_multiple": True})
     window.dialog_result = ("/a",)
     assert panel.choose_folder() == Path("/a") and window.dialogs[-1] == ((FakeWebview.FileDialog.FOLDER,), {})
+
+
+# 最終審查的修正
+
+def test_jobs_queued_behind_a_dialog_do_not_run_after_the_window_closes(panel, bridge, window, home):
+    """A 在等回答、B 排在後面，這時關掉視窗：A 以取消結束，B 不能在使用者已經離開之後才開始跑。"""
+    a = str(make_module(home / "modules", "A", ASK).resolve())
+    b = make_module(home / "modules", "B", "open('ran.txt', 'w').close()\n").resolve()
+    rescan(panel)
+    bridge.press(a)
+    pending(window, "ask")
+    bridge.press(str(b))
+    window.fire("closing")
+    panel.wait()
+    assert not (b / "ran.txt").exists()
+
+
+def test_press_tells_the_page_while_a_module_is_running(panel, bridge, window, home):
+    """模組的輸出要等它結束才進訊息區：執行期間頁面要看得出「還在跑」，不然使用者會以為沒按到、再按一次。"""
+    a = str(make_module(home / "modules", "A", 'TITLE = "甲"\ndef run(app):\n    app.log("mid")\n    1 / 0\n').resolve())
+    rescan(panel)
+    window.js.clear()
+    bridge.press(a)
+    panel.wait()
+    assert window.calls("busy") == [["甲"], [None]]
+    kinds = [j.split("(")[0] for j in window.js]
+    assert kinds == ["iplot.busy", "iplot.log", "iplot.report", "iplot.busy"]
+
+
+def test_empty_icon_file_falls_back(home):
+    """0 位元組的 icon.png（下載到一半、touch 出來的）當作沒有，記一行。"""
+    folder = make_module(home / "modules", "A")
+    (folder / "icon.png").write_bytes(b"")
+    logs = []
+    assert icon_for(DEFAULT_INFO(folder), set(), logs.append) is None
+    assert logs == [T["icon_unusable"].format(title="A")]

@@ -28,10 +28,11 @@ _icons: dict[Path, tuple[tuple[int, int], str]] = {}  # 圖示檔 →（（修�
 
 
 def _data_uri(file: Path) -> str | None:
-    """圖示檔變成 data URI；超過 1 MB 或讀不到回 None。檔案沒變就用上次讀的。"""
+    """圖示檔變成 data URI；空的、超過 1 MB 或讀不到回 None。檔案沒變就用上次讀的。
+    內容是不是一張讀得出來的圖，要到頁面上才知道：讀不出來時頁面自己換成預設圖示（app.js 的 iconEl）。"""
     try:
         stat = file.stat()
-        if stat.st_size > MAX_ICON:
+        if not 0 < stat.st_size <= MAX_ICON:
             return None
         stamp = (stat.st_mtime_ns, stat.st_size)
         if _icons.get(file, (None, ""))[0] != stamp:
@@ -77,8 +78,9 @@ def error_json(error: ErrorInfo) -> dict:
 
 class Bridge:
     """頁面的 JS 用 pywebview.api.<方法> 呼叫的入口。除了 state 與 answer，都只把工作排進工作執行緒、
-    立刻回傳。pywebview 會把公開屬性一路攤開給 JS，所以面板藏在 _panel；頁面傳來的 id、資料夾、
-    動作名稱只認目前面板上有的，其餘一律當作「畫面過期了」重掃。"""
+    立刻回傳。頁面傳來的 id、資料夾、動作名稱只認目前面板上有的，其餘一律當作「畫面過期了」重掃。
+    面板放在 _panel：pywebview 會把公開屬性一路攤開進 pywebview.api，底線讓攤出去的只有下面這些方法。
+    這是整潔，不是安全邊界；真正的邊界是頁面不載入任何外來的內容（零外部資源、模組的輸出一律當文字）。"""
 
     def __init__(self, panel: "WebPanel") -> None:
         self._panel = panel
@@ -99,7 +101,7 @@ class Bridge:
 
     def press(self, id: str) -> None:
         """執行模組。"""
-        self._on(id, lambda core, info: core.press(info))
+        self._on(id, self._panel.press)
 
     def enter(self, id: str) -> None:
         """進入下一層。"""
@@ -199,11 +201,18 @@ class WebPanel:
         while True:
             job = self._jobs.get()
             try:
-                job()
+                if not self._closed:  # 視窗關了：排著還沒做的工作不再做
+                    job()
             except Exception as exc:  # noqa: BLE001  規格 §11 允許的三處之一：一件工作出錯，面板不能就此不動
                 self.core.report_internal(type(exc), exc, exc.__traceback__)
             finally:
                 self._jobs.task_done()
+
+    def press(self, core: Core, info: ModuleInfo) -> None:
+        """執行模組，前後各告訴頁面一聲：輸出要等模組結束才進訊息區，執行期間頁面得看得出它還在跑。"""
+        self._js("busy", info.title)
+        core.press(info)
+        self._js("busy", None)
 
     def submit(self, job: Callable[[], object]) -> None:
         """排一件工作給工作執行緒，立刻回傳。"""

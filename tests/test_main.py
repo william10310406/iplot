@@ -7,11 +7,12 @@ import importlib.util
 import os
 import shutil
 import sys
+import threading
 import types
 from pathlib import Path
 
 import pytest
-from conftest import FakeWebview, until
+from conftest import FakeWebview, make_module, until
 
 from core import __version__
 from core.text import SYSTEM_MODULE, T
@@ -264,3 +265,34 @@ def test_run_web_without_pywebview_is_import_error(home, monkeypatch):
     monkeypatch.setitem(sys.modules, "webview", None)  # import webview → ImportError
     with pytest.raises(ImportError):
         load_main().run_web(home, DEFAULT_CONFIG, None, "9.9")
+
+
+def test_module_using_tkinter_under_the_web_panel_gets_a_plain_error(home, monkeypatch):
+    """網頁面板的程序裡，tkinter（turtle 也是）一開視窗整個程序就被系統中止，沒有任何訊息（實測結束碼 133）。
+    面板開著的期間 import tkinter 要變成一般的模組錯誤，用白話說怎麼辦；面板關掉之後不再擋（後備面板要用）。"""
+    from core.types import DEFAULT_CONFIG
+    for name in [n for n in sys.modules if n.split(".")[0] in ("tkinter", "_tkinter", "turtle")]:
+        monkeypatch.delitem(sys.modules, name)
+    closed = threading.Event()
+
+    class Open(FakeWebview):
+        def start(self):
+            super().start()
+            closed.wait(5)  # 視窗開著
+
+    fake = Open()
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    folder = make_module(home / "modules", "海龜", "import turtle\nprint('reached')\n").resolve()
+    main = load_main()
+    runner = threading.Thread(target=lambda: main.run_web(home, DEFAULT_CONFIG, None, "9.9"), daemon=True)
+    runner.start()
+    until(lambda: fake.windows and fake.windows[0].calls("show"))
+    window = fake.windows[0]
+    window.kw["js_api"].press(str(folder))
+    until(lambda: window.calls("report"))
+    closed.set()
+    runner.join(5)
+    [error] = window.calls("report")[-1]
+    assert error["kind"] == "ImportError" and error["message"] == T["tk_in_web"] and error["module"] == "海龜"
+    assert ["reached"] not in window.calls("log")
+    import tkinter  # noqa: F401  面板關掉之後擋就拿掉了

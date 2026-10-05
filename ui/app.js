@@ -1,11 +1,14 @@
 // iPLoT 的面板。Python 那一頭是 ui/web.py：
-//   Python → 頁面：iplot.init／show／log／report／ask／confirm（這個檔的最下面）
+//   Python → 頁面：iplot.init／show／log／report／ask／confirm／busy（這個檔的最下面）
 //   頁面 → Python：api().press(id) 這類呼叫，名字就是 ui/web.py 裡 Bridge 的方法
 // 畫面上的字全部在 core/text.py，啟動時由 iplot.init 整份送進來放在 T；這個檔只用 key，不寫任何文字。
 "use strict";
 
 let T = {};                                                       // 畫面文字（core/text.py 的 T）
-const state = { scope: { crumbs: [], groups: [] }, shown: "", selected: null };  // 範圍、它的 JSON、選到的模組 id
+// 範圍、它的 JSON、選到的模組 id、正在執行的模組的名稱
+const state = { scope: { crumbs: [], groups: [] }, shown: "", selected: null, busy: null };
+let armed = null;            // 雙擊的第一下按在哪個模組上；第二下還在同一個模組上才算雙擊
+const badIcons = new Set();  // 讀不出來的圖示檔（它的 data URI）：改用預設圖示，訊息區只說一次
 const iplot = window.iplot = {};
 const $ = (id) => document.getElementById(id);
 const api = () => window.pywebview.api;
@@ -68,8 +71,11 @@ function tileEl(m) {
     wrap.append(kids);
   }
   tile.append(wrap, el("div", "label", m.title));
-  tile.onclick = () => select(m.id);
-  tile.ondblclick = () => api().press(m.id);
+  // 雙擊不用瀏覽器的 dblclick：第一下之後畫面可能換過（按 ▸ 進去、選單關掉），第二下落在別的東西上不能算
+  tile.onclick = (e) => {
+    select(m.id);
+    if (e.detail >= 2 && armed === m.id) { armed = null; api().press(m.id); } else armed = m.id;
+  };
   tile.onkeydown = (e) => { if (e.key === "Enter" && e.target === tile) api().press(m.id); };
   tile.oncontextmenu = (e) => { e.preventDefault(); select(m.id); openMenu(e.clientX, e.clientY, menuFor(m)); };
   return tile;
@@ -77,14 +83,20 @@ function tileEl(m) {
 
 // 圖示的來源（D65）：資料夾裡的圖檔 → ICON 常數 → 名字第一個字；底色的色相由資料夾名稱決定，每次都一樣
 function iconEl(m) {
-  if (m.icon && m.icon.file) {
+  if (m.icon && m.icon.file && !badIcons.has(m.icon.file)) {
     const img = el("img", "icon");
     img.src = m.icon.file;
     img.alt = "";
     img.draggable = false;
+    img.onerror = () => {  // 檔案不是一張讀得出來的圖（壞了、下載到一半）：當作沒有圖示檔
+      badIcons.add(m.icon.file);
+      entry(T.icon_unusable.replace("{title}", m.title));
+      img.replaceWith(iconEl(m));
+    };
     return img;
   }
-  const icon = el("div", m.icon ? "icon" : "icon letter", m.icon ? m.icon.text : [...m.title][0].toUpperCase());
+  const text = m.icon && m.icon.text;
+  const icon = el("div", text ? "icon" : "icon letter", text || [...m.title][0].toUpperCase());
   icon.style.setProperty("--h", hue(m.name));
   return icon;
 }
@@ -115,13 +127,14 @@ function select(id) {
   renderStatus();
 }
 
-// 狀態列：選到的模組的名稱與說明（檔案有語法錯誤時顯示錯誤）；沒選就顯示提示
+// 狀態列：選到的模組的名稱與說明（檔案有語法錯誤時顯示錯誤）；沒選就顯示提示。有模組在執行時，右邊說是哪一個
 function renderStatus() {
   const m = find(state.selected);
   const status = $("status");
   status.replaceChildren();
   if (m) status.append(el("b", "", m.title), el("span", m.error ? "bad" : "", m.error || m.description));
   else status.append(el("span", "", T.status_hint));
+  if (state.busy) status.append(el("span", "busy", T.running.replace("{title}", state.busy)));
 }
 
 // ── 右鍵選單 ──
@@ -165,15 +178,19 @@ let lastDialog = Promise.resolve();
 
 function dialog(kind, title, initial = "", check = () => "") {
   lastDialog = lastDialog.then(() => new Promise((resolve) => {
-    const scrim = $("scrim"), input = $("dlgInput"), hint = $("dlgHint");
-    $("dlgTitle").textContent = title;
+    const scrim = $("scrim"), input = $("dlgInput"), hint = $("dlgHint"), heading = $("dlgTitle");
+    const behind = [$("crumbs"), $("area"), $("drawer")];  // 對話框開著的時候，後面的東西不收鍵盤也不收滑鼠
+    heading.textContent = title;
     input.hidden = kind !== "ask";
     input.value = initial;
     hint.textContent = "";
     scrim.hidden = false;
+    for (const part of behind) part.inert = true;
+    heading.scrollTop = heading.scrollHeight;  // 模組先印了很多行才問：問題在最後一行，捲到看得到它
     if (kind === "ask") { input.focus(); input.select(); } else $("dlgOk").focus();
     const done = (value) => {
       scrim.hidden = true;
+      for (const part of behind) part.inert = false;
       document.removeEventListener("keydown", key, true);
       resolve(value);
     };
@@ -181,13 +198,16 @@ function dialog(kind, title, initial = "", check = () => "") {
       const problem = kind === "ask" ? check(input.value) : "";
       if (problem) { hint.textContent = problem; input.focus(); } else done(kind === "ask" ? input.value : true);
     };
-    // 中文輸入法選字時按的 Enter 不算（isComposing；Safari 的核心在選完字那一下是 keyCode 229）
+    // 中文輸入法選字、取消選字時按的 Enter 與 Esc 是給輸入法的，不算（isComposing；Safari 的核心在那一下是 keyCode 229）
     const key = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); done(null); }
-      else if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); ok(); }
+      if (e.isComposing || e.keyCode === 229 || (e.key !== "Escape" && e.key !== "Enter")) return;
+      e.preventDefault();
+      e.stopPropagation();  // 不讓這一下再傳到後面的格子上
+      if (e.key === "Escape") done(null); else ok();
     };
-    $("dlgOk").onclick = ok;
-    $("dlgCancel").onclick = () => done(null);
+    // 雙擊的第二下不算：第一下已經答完這一題，下一題的對話框可能正好開在同一個位置
+    $("dlgOk").onclick = (e) => { if (e.detail < 2) ok(); };
+    $("dlgCancel").onclick = (e) => { if (e.detail < 2) done(null); };
     document.addEventListener("keydown", key, true);
   }));
   return lastDialog;
@@ -244,6 +264,11 @@ document.addEventListener("click", (e) => {
   if (!$("menu").contains(e.target)) closeMenu();
   if (!e.target.closest(".tile, .menu, .scrim")) select(null);  // 點空白的地方：取消選取
 });
+// 雙擊的第一下如果不是按在模組那一格上（按的是 ▸、選單、別的地方），就不算數。在格子自己的 click 之前先看
+document.addEventListener("click", (e) => {
+  const tile = e.target.closest(".tile");
+  if (!tile || tile.dataset.id !== armed || e.target.closest(".badge")) armed = null;
+}, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 document.addEventListener("contextmenu", (e) => { if (!e.target.closest(".tile")) { e.preventDefault(); closeMenu(); } });
 $("area").addEventListener("scroll", closeMenu);
@@ -251,7 +276,7 @@ window.addEventListener("blur", closeMenu);
 // 視窗取得焦點就重掃：在檔案總管新增、刪掉、改了模組，點回來就看得到（D11）
 window.addEventListener("pywebviewready", () => window.addEventListener("focus", () => api().rescan()));
 
-// ── Python 呼叫進來的六個入口（ui/web.py 的 WebPanel） ──
+// ── Python 呼叫進來的七個入口（ui/web.py 的 WebPanel） ──
 
 // 啟動時第一個收到：畫面文字、版本、是不是安全模式
 iplot.init = (data) => {
@@ -276,7 +301,18 @@ iplot.show = (scope) => {
 iplot.log = (text) => { entry(text); };
 
 // error 的欄位見 ui/web.py 的 error_json；sentence 是白話那一句
-iplot.report = (error) => { entry(error.sentence, error); };
+iplot.report = (error) => {
+  if (error.source === "core") iplot.busy(null);  // 核心自己出錯時不一定來得及說「跑完了」
+  entry(error.sentence, error);
+};
+
+// 模組開始執行時送它的名稱，結束時送 null。很快就跑完的不顯示，免得狀態列一直閃
+let busyTimer = 0;
+iplot.busy = (title) => {
+  clearTimeout(busyTimer);
+  if (title === null) { state.busy = null; renderStatus(); }
+  else busyTimer = setTimeout(() => { state.busy = title; renderStatus(); }, 250);
+};
 
 // 問一個字串（模組的 input() 也是這個）；答案用 api().answer(編號, 字串或 null) 送回去
 iplot.ask = (id, prompt, initial) => { dialog("ask", prompt, initial).then((value) => api().answer(id, value)); };
