@@ -1,8 +1,12 @@
+import ast
+import re
 import subprocess
 import sys
 from pathlib import Path
 
-CORE = Path(__file__).resolve().parents[1] / "core"
+ROOT = Path(__file__).resolve().parents[1]
+CORE = ROOT / "core"
+CJK = re.compile(r"[一-鿿]")
 FORBIDDEN = ("subprocess", "sys.platform", "os.name", "startfile", "ctypes")
 
 
@@ -25,3 +29,33 @@ def test_core_has_no_os_code():
 
 def test_actions_module_is_gone():
     assert not (CORE / "actions.py").exists()
+
+
+def _string_constants(path):
+    """path 裡不是 docstring 的字串常數。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docs.add(id(first.value))
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
+
+
+def test_no_chinese_string_constants_outside_text():
+    """D32：畫面文字都在 core/text.py；core/ 其他檔、ui/*.py、main.py 的字串常數沒有中文（註解與 docstring 不算）。"""
+    files = [p for p in CORE.glob("*.py") if p.name != "text.py"] + list((ROOT / "ui").glob("*.py"))
+    for p in sorted(files + [ROOT / "main.py"]):
+        found = [s for s in _string_constants(p) if CJK.search(s)]
+        assert not found, f"{p.relative_to(ROOT)} 有中文字串常數：{found}"
+
+
+def test_core_never_imports_webview():
+    """只有 ui/web.py 可以用 lib/ 裡的 pywebview；core/ 一行都不能 import 它。"""
+    for p in sorted(CORE.glob("*.py")):
+        for node in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            assert not any(n.split(".")[0] in ("webview", "ui") for n in names), f"core/{p.name} import 了 {names}"

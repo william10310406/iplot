@@ -37,6 +37,7 @@ T: dict[str, str] = {
     "ok": "確定",
     "cancel": "取消",
     "scanned": "已掃描 {roots}，找到 {count} 個模組",
+    "list_sep": "、",
     "icon_unusable": "『{title}』的圖示檔讀不到或超過 1 MB，先用預設圖示",
     "installing": "第一次啟動：正在安裝介面（需要網路，約 {size}）…",
     "install_done": "安裝完成，重新啟動中…",
