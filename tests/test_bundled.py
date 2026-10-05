@@ -1,6 +1,7 @@
 """隨附的五個模組：靜態讀得到，用假的 Core 跑得通，不真的開檔案總管、編輯器、終端機。
 modules/作業系統 的後端（mac、win、linux）直接 import 進來驗參數，不真的啟動任何程式。"""
 
+import contextlib
 import ctypes
 import importlib.util
 import inspect
@@ -21,7 +22,7 @@ from core.runner import run_module
 from core.scan import module_info
 
 MODULES = Path(__file__).resolve().parents[1] / "modules"
-NAMES = ("open", "edit", "reveal", "terminal", "trash")
+NAMES = ("open", "edit", "reveal", "terminal", "trash", "requirements", "webview_ready")
 OS_DIR = MODULES / "作業系統"
 
 
@@ -197,7 +198,7 @@ def test_linux_trash_writes_files_and_info(tmp_path, monkeypatch):
     assert (trash / "info" / "x 2.trashinfo").exists() and d2.read_text() == "2"
 
 
-def test_backends_have_same_five_functions():
+def test_backends_have_same_seven_functions():
     sigs = [{n: str(inspect.signature(getattr(backend(b), n))) for n in NAMES}
             for b in ("mac", "win", "linux")]
     assert sigs[0] == sigs[1] == sigs[2]
@@ -256,3 +257,49 @@ def test_restart_execs_from_home_not_module_folder(fake_core, monkeypatch):
 def test_bundled_modules_have_icons():
     icons = {name: bundled(name).icon for name in ("開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統")}
     assert icons == {"開工": "🧭", "打開核心原始碼": "🧬", "開Terminal": "⌨️", "重新啟動": "🔄", "作業系統": "🖥️"}
+
+
+class FakeWinreg(types.ModuleType):
+    """假的 winreg：present 是存在的（hive, 路徑）→ pv 的值；其餘 OpenKey 丟 OSError。"""
+
+    HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER = "HKLM", "HKCU"
+
+    def __init__(self, present):
+        super().__init__("winreg")
+        self.present, self.opened = present, []
+
+    def OpenKey(self, hive, path):  # noqa: N802  真的 winreg 就叫這個名字
+        self.opened.append((hive, path))
+        if (hive, path) not in self.present:
+            raise FileNotFoundError(2, "找不到機碼")
+        return contextlib.nullcontext((hive, path))
+
+    def QueryValueEx(self, key, name):  # noqa: N802
+        return (self.present[key], 1)
+
+
+WEBVIEW2 = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+
+
+def test_requirements_and_ready_per_backend(monkeypatch):
+    assert (backend("mac").requirements(None), backend("mac").webview_ready(None)) == ("web-mac.txt", None)
+    assert backend("linux").requirements(None) == "" and "--safe" in backend("linux").webview_ready(None)
+    assert backend("win").requirements(None) == "web-win.txt"
+    for present in ({("HKLM", "SOFTWARE\\WOW6432Node\\" + WEBVIEW2): "120.0.1"},
+                    {("HKLM", "SOFTWARE\\" + WEBVIEW2): "120.0.1"},
+                    {("HKCU", "Software\\" + WEBVIEW2): "120.0.1"}):
+        monkeypatch.setitem(sys.modules, "winreg", FakeWinreg(present))
+        assert backend("win").webview_ready(None) is None, present
+    for missing in ({}, {("HKCU", "Software\\" + WEBVIEW2): "0.0.0.0"}, {("HKCU", "Software\\" + WEBVIEW2): ""}):
+        monkeypatch.setitem(sys.modules, "winreg", FakeWinreg(missing))
+        reason = backend("win").webview_ready(None)
+        assert isinstance(reason, str) and "WebView2" in reason and "--safe" in reason, missing
+
+
+def test_system_module_answers_through_core_action(fake_core, monkeypatch):
+    """ui/install.py 用 core.action 問；這裡直接用 runner 跑那兩個名字，確認 iplot.py 有把它們接出來。"""
+    monkeypatch.setattr(sys, "platform", "darwin")
+    info = bundled("作業系統")
+    assert run_module(info, App(fake_core, info), "requirements").value == "web-mac.txt"
+    r = run_module(info, App(fake_core, info), "webview_ready")
+    assert r.ok and r.value is None

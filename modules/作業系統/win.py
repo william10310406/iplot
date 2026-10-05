@@ -1,4 +1,4 @@
-"""Windows：startfile、notepad、explorer、wt／cmd；垃圾桶走 SHFileOperationW。未經實機驗證。"""
+"""Windows：startfile、notepad、explorer、wt／cmd；垃圾桶走 SHFileOperationW；WebView2 查登錄檔。未經實機驗證。"""
 import os
 import shutil
 import subprocess
@@ -38,6 +38,30 @@ def terminal(app, path):
     if shutil.which("wt"):
         return _launch(["wt", "-d", str(path)])
     _launch(["cmd"], cwd=str(path), creationflags=0x10)  # 0x10 是 CREATE_NEW_CONSOLE
+
+
+def requirements(app):
+    """網頁面板要裝的套件清單：requirements/ 裡的檔名。"""
+    return "web-win.txt"
+
+
+def webview_ready(app):
+    """網頁面板的前置條件都有就回 None，缺什麼就回一句話。Windows 要 WebView2 runtime（Windows 11 內建）：
+    登錄檔三個位置任一個有它的版本號（pv）就算有。"""
+    import winreg  # 放在函式裡：只有 Windows 有，其他系統也要 import 得了這個檔
+
+    key = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    for hive, path in [(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\" + key),
+                       (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\" + key),
+                       (winreg.HKEY_CURRENT_USER, "Software\\" + key)]:
+        try:
+            with winreg.OpenKey(hive, path) as found:
+                if winreg.QueryValueEx(found, "pv")[0] not in ("", "0.0.0.0"):
+                    return None
+        except OSError:
+            continue
+    return ("找不到 WebView2 runtime：請先安裝 Microsoft Edge WebView2 Runtime（Windows 11 內建），"
+            "或用安全模式：python main.py --safe")
 
 
 def trash(app, path):

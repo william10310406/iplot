@@ -34,6 +34,16 @@ def terminal(app, path):
     _launch(["open", "-a", "Terminal", str(path)])
 
 
+def requirements(app):
+    """網頁面板要裝的套件清單：requirements/ 裡的檔名。"""
+    return "web-mac.txt"
+
+
+def webview_ready(app):
+    """網頁面板的前置條件都有就回 None，缺什麼就回一句話。macOS 內建 WebKit，什麼都不缺。"""
+    return None
+
+
 def trash(app, path):
     """搬到 ~/.Trash（同名就加「 2」「 3」…），回傳搬到哪裡。永遠不刪除。"""
     folder, name = Path.home() / ".Trash", Path(path).name

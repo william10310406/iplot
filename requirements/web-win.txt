@@ -1,0 +1,10 @@
+# 網頁面板在 Windows 需要的套件，版本釘死。未經實機驗證：版本是用 pip 的 --dry-run --platform win_amd64 解出來的。
+# 另外需要 Microsoft Edge WebView2 Runtime（Windows 11 內建）；有沒有，由 modules/作業系統/win.py 的 webview_ready 檢查。
+bottle==0.13.4
+cffi==2.1.1
+clr_loader==0.3.1
+proxy_tools==0.1.0
+pycparser==3.0
+pythonnet==3.2.0
+pywebview==6.2.1
+typing_extensions==4.16.0
