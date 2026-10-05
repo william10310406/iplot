@@ -37,7 +37,7 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
         return DEFAULT_CONFIG, None
     try:
         ns = runpy.run_path(str(path))
-    except (Exception, SystemExit) as exc:  # noqa: BLE001  規格 §7 允許的兩處之一
+    except (Exception, SystemExit) as exc:  # noqa: BLE001  規格 §11 允許的三處之一
         return DEFAULT_CONFIG, from_exception(exc, None, "config")
     d = DEFAULT_CONFIG
     roots, editor = ns.get("ROOTS", d.roots), ns.get("EDITOR", d.editor)

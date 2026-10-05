@@ -200,7 +200,7 @@ class WebPanel:
             job = self._jobs.get()
             try:
                 job()
-            except Exception as exc:  # noqa: BLE001  第三處（07 第 6 節）：一件工作出錯，面板不能就此不動
+            except Exception as exc:  # noqa: BLE001  規格 §11 允許的三處之一：一件工作出錯，面板不能就此不動
                 self.core.report_internal(type(exc), exc, exc.__traceback__)
             finally:
                 self._jobs.task_done()
