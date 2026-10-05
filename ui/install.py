@@ -63,7 +63,8 @@ def installed(home: Path, req: Path) -> bool:
 
 def install(home: Path, req: Path, say: Callable[[str], None], popen: Any = subprocess.Popen) -> str | None:
     """用 pip 把 req 裝進 home/lib，pip 的輸出一行行交給 say。
-    成功就寫下 lib/.installed、回 None；失敗回 pip 最後五行（給人看的原因）。指令是列表，不經過 shell。"""
+    成功就寫下 lib/.installed、回 None；失敗回 pip 說的原因：最後五行裡 ERROR 開頭的那幾行，沒有就整五行。
+    指令是列表，不經過 shell。"""
     lib = home / "lib"
     argv = [sys.executable, "-m", "pip", "install", "--target", str(lib), "--upgrade", "--no-input",
             "--disable-pip-version-check", "-r", str(req)]
@@ -73,7 +74,7 @@ def install(home: Path, req: Path, say: Callable[[str], None], popen: Any = subp
         say(line.rstrip("\n"))
         tail = [*tail, line.rstrip("\n")][-5:]
     if proc.wait() != 0:
-        return "\n".join(tail)
+        return "\n".join([line for line in tail if line.startswith("ERROR")] or tail)
     lib.mkdir(exist_ok=True)
     (lib / ".installed").write_text(_digest(req), encoding="utf-8")
     return None

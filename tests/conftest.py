@@ -135,6 +135,9 @@ class FakeWebview:
     class JavascriptException(Exception):
         pass
 
+    class WebViewException(Exception):
+        pass
+
     class FileDialog:
         OPEN, FOLDER, SAVE = 10, 20, 30
 

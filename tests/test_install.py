@@ -64,11 +64,20 @@ def test_install_streams_lines_and_marks(home, req):
 
 
 def test_install_fails_offline_with_plain_message(home, req):
-    """審查焦點 1：沒有網路時 pip 以非 0 結束，回傳的是 pip 最後幾行（給人看的），不寫 .installed。"""
-    lines = [f"WARNING: Retrying {n}" for n in range(8)] + ["ERROR: Could not fetch URL https://pypi.org/simple/"]
-    result = install.install(home, req, lambda line: None, FakePopen(lines, 1))
-    assert isinstance(result, str) and result.splitlines()[-1] == lines[-1] and len(result.splitlines()) == 5
+    """審查焦點 1：沒有網路時 pip 以非 0 結束，回傳的是 pip 自己說的原因（ERROR 那幾行），不寫 .installed。
+    這幾行是真的拔掉網路時 pip 26 印的。"""
+    errors = ["ERROR: Could not find a version that satisfies the requirement bottle==0.13.4 (from versions: none)",
+              "ERROR: No matching distribution found for bottle==0.13.4"]
+    lines = [f"WARNING: Retrying (Retry(total={n})) after connection broken" for n in (4, 3, 2, 1, 0)] + errors
+    said = []
+    result = install.install(home, req, said.append, FakePopen(lines, 1))
+    assert result == "\n".join(errors) and said == lines, "重試的雜訊只在主控台，不進原因"
     assert not (home / "lib" / ".installed").exists() and not install.installed(home, req)
+
+
+def test_install_failure_without_error_lines_returns_the_last_five(home, req):
+    lines = [f"line {n}" for n in range(8)]
+    assert install.install(home, req, lambda line: None, FakePopen(lines, 2)) == "\n".join(lines[-5:])
 
 
 def test_install_without_pip_reports_the_reason(home, req):

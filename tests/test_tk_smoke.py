@@ -1,6 +1,7 @@
 """有顯示器才跑：真的建 Panel，按按鈕，看訊息區。"""
 
 import dataclasses
+import gc
 import os
 import subprocess
 import sys
@@ -235,3 +236,22 @@ def test_attach_sends_callback_errors_to_core(home, panel):
 
 def test_panel_has_no_window_attribute(panel):
     assert not hasattr(panel, "window") and panel.root.winfo_exists()
+
+
+def test_run_tk_writes_note_then_config_error(home, monkeypatch):
+    """main.run_tk：後備面板先把「為什麼是這個面板」寫進訊息區，再回報 config.py 的錯。"""
+    from test_main import load_main
+
+    made = []
+    monkeypatch.setattr(Panel, "mainloop", lambda self: made.append(self))
+    error = ErrorInfo("SyntaxError", "x", home / "config.py", 1, "", "config", None)
+    load_main().run_tk(home, DEFAULT_CONFIG, error, True, note="先說原因")
+    [p] = made
+    try:
+        text = messages(p)
+        assert text.index("先說原因") < text.index(T["config_error"].format(message="x"))
+        assert p.root.title().endswith(T["safe_mode"]) and p.core.safe
+    finally:
+        close(p.root)
+        del made[:], p
+        gc.collect()  # 面板有循環參照：在這條執行緒收掉，不要留到別的測試的工作執行緒才收（Tcl 會抱怨）

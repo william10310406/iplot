@@ -41,7 +41,7 @@ T: dict[str, str] = {
     "icon_unusable": "『{title}』的圖示檔讀不到或超過 1 MB，先用預設圖示",
     "installing": "第一次啟動：正在安裝介面（需要網路，約 {size}）…",
     "install_done": "安裝完成，重新啟動中…",
-    "install_failed": "介面安裝失敗：{message}\n再試一次：重新啟動 iPLoT。先用安全模式：python3 main.py --safe",
+    "install_failed": "介面安裝失敗：{message}\n安裝需要網路。再試一次：重新啟動 iPLoT。先用安全模式：python3 main.py --safe",
     "no_tk": "這個 Python 沒有 tkinter，安全模式開不了；請用 python.org 的版本",
     "web_failed": "網頁面板開不起來：{message}。已改用安全模式",
     "title": "iPLoT v{version}",

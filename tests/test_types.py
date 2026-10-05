@@ -42,6 +42,7 @@ def test_panel_text_keys():
         assert T.get(k), k
     assert "{roots}" in T["scanned"] and "{count}" in T["scanned"] and "{title}" in T["icon_unusable"]
     assert "{size}" in T["installing"] and "--safe" in T["install_failed"] and "{message}" in T["web_failed"]
+    assert "網路" in T["installing"] and "網路" in T["install_failed"], "裝不起來多半是沒網路：兩句都要講"
 
 
 def test_template_mentions_icon_after_title():
