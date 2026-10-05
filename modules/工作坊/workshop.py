@@ -60,7 +60,7 @@ def read_index(url, timeout=15):
 
 def read_origin(folder):
     """讀模組資料夾裡的 .origin（一行一個「key: value」）。沒有這個檔回 None；
-    讀不懂、或少了 url／version／sha256／digest 任何一項，回空的 dict（當作壞掉）。"""
+    讀不懂、或少了 url／version／sha256／digest／files 任何一項，回空的 dict（當作壞掉）。"""
     try:
         lines = (folder / ORIGIN).read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
