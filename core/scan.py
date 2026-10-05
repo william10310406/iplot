@@ -10,6 +10,7 @@ from .text import T
 from .types import Group, Level, ModuleInfo, Root
 
 MARKER = "iplot.py"
+ICONS = ("icon.png", "icon.svg")  # 模組資料夾裡的圖示檔，前面的優先（D65）
 
 
 def _nfc(name: str) -> str:
@@ -31,6 +32,15 @@ def _module_folders(folder: Path) -> list[Path]:
     return sorted(found, key=lambda p: _nfc(p.name))
 
 
+def _icon_file(folder: Path) -> Path | None:
+    """folder 裡檔名剛好是 icon.png 或 icon.svg 的檔案；跟 iplot.py 一樣比對實際檔名，Icon.png 不算。"""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return None
+    return next((folder / n for n in ICONS if n in names and (folder / n).is_file()), None)
+
+
 def module_info(folder: Path, root: Path, level: Level) -> ModuleInfo:
     """讀一個模組的資訊，不執行它。"""
     name, file = _nfc(folder.name), folder / MARKER
@@ -40,7 +50,8 @@ def module_info(folder: Path, root: Path, level: Level) -> ModuleInfo:
     except OSError:
         has_children = False
     return ModuleInfo(name, meta.title or name, meta.description, folder, file, root, level,
-                      meta.has_run, meta.accepts_files, has_children, meta.error)
+                      meta.has_run, meta.accepts_files, has_children, meta.error,
+                      meta.icon, _icon_file(folder))
 
 
 def _same(a: Path, b: Path) -> bool:

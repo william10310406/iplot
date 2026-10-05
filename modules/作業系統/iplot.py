@@ -10,6 +10,7 @@ elif sys.platform == "win32":
 else:
     import linux as backend
 
+ICON = "🖥️"
 open, edit, reveal = backend.open, backend.edit, backend.reveal
 terminal, trash = backend.terminal, backend.trash
 

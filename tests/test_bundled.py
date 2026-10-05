@@ -251,3 +251,8 @@ def test_restart_execs_from_home_not_module_folder(fake_core, monkeypatch):
     monkeypatch.setattr(os, "execv", lambda exe, argv: seen.append(os.getcwd()))
     assert run_bundled("重新啟動", fake_core).ok
     assert seen == [str(fake_core.home)]
+
+
+def test_bundled_modules_have_icons():
+    icons = {name: bundled(name).icon for name in ("開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統")}
+    assert icons == {"開工": "🧭", "打開核心原始碼": "🧬", "開Terminal": "⌨️", "重新啟動": "🔄", "作業系統": "🖥️"}

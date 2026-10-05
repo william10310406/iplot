@@ -28,6 +28,21 @@ T: dict[str, str] = {
     "menu_reveal": "在資料夾中顯示",
     "menu_terminal": "在終端機打開",
     "menu_add_child": "在這裡新增下一層模組…",
+    "menu_run": "執行",
+    "menu_enter": "進入下一層",
+    "add_tile": "新模組",
+    "status_hint": "單擊選一個模組看它的說明；雙擊執行。",
+    "details": "詳細",
+    "hide_details": "收起",
+    "ok": "確定",
+    "cancel": "取消",
+    "scanned": "已掃描 {roots}，找到 {count} 個模組",
+    "icon_unusable": "『{title}』的圖示檔讀不到或超過 1 MB，先用預設圖示",
+    "installing": "第一次啟動：正在安裝介面（需要網路，約 {size}）…",
+    "install_done": "安裝完成，重新啟動中…",
+    "install_failed": "介面安裝失敗：{message}\n再試一次：重新啟動 iPLoT。先用安全模式：python3 main.py --safe",
+    "no_tk": "這個 Python 沒有 tkinter，安全模式開不了；請用 python.org 的版本",
+    "web_failed": "網頁面板開不起來：{message}。已改用安全模式",
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",
@@ -45,6 +60,7 @@ SYSTEM_MODULE = "作業系統"
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
 # TITLE = "顯示名稱"   # 要讓按鈕文字跟資料夾名稱不同時才打開這一行
+# ICON = "🧩"   # 按鈕的圖示：一個 emoji；或在資料夾放 icon.png
 
 # run 可省略：沒有 run 時，最外層程式碼就是按下的動作（input()、print() 照常用）
 def run(app):

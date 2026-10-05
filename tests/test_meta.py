@@ -57,3 +57,17 @@ def test_null_byte_does_not_crash(tmp_path):
     f.write_bytes(b"x = 1\x00\ndef run(app):\n    pass\n")
     m = read_meta(f)
     assert m.error is not None and m.has_run is False
+
+
+def test_icon_constant(tmp_path):
+    assert read_meta(write(tmp_path, 'ICON = "🧩"\ndef run(app):\n    pass\n')).icon == "🧩"
+
+
+def test_icon_absent_or_not_a_string_is_none(tmp_path):
+    assert read_meta(write(tmp_path, "def run(app):\n    pass\n")).icon is None
+    assert read_meta(write(tmp_path, "ICON = 1\ndef run(app):\n    pass\n")).icon is None
+    assert read_meta(write(tmp_path, '# ICON = "🧩"\ndef run(app):\n    pass\n')).icon is None
+
+
+def test_broken_file_has_no_icon(tmp_path):
+    assert read_meta(write(tmp_path, 'ICON = "🧩"\ndef run(app)\n')).icon is None

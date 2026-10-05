@@ -118,3 +118,33 @@ def test_bad_tilde_root_becomes_missing_not_crash(home):
     [root] = roots_from_config(home, ["~Desktop"])
     [g] = find_modules([root])
     assert g.modules == () and g.note is not None
+
+
+def icon_of(home, name, *files):
+    folder = make_module(home / "modules", name)
+    for f in files:
+        (folder / f).write_bytes(b"x")
+    return module_info(folder, home / "modules", "here").icon_file
+
+
+def test_icon_file_exact_name(home):
+    assert icon_of(home, "A", "icon.png") == home / "modules" / "A" / "icon.png"
+    assert icon_of(home, "B", "icon.svg") == home / "modules" / "B" / "icon.svg"
+    assert icon_of(home, "C", "Icon.png") is None  # APFS 不分大小寫：比對實際檔名，跟 iplot.py 同一套
+    assert icon_of(home, "D", "icon.jpg") is None
+    assert icon_of(home, "E") is None
+
+
+def test_icon_file_prefers_png(home):
+    assert icon_of(home, "A", "icon.svg", "icon.png").name == "icon.png"
+
+
+def test_icon_folder_is_not_an_icon_file(home):
+    folder = make_module(home / "modules", "A")
+    (folder / "icon.png").mkdir()
+    assert module_info(folder, home / "modules", "here").icon_file is None
+
+
+def test_icon_constant_reaches_module_info(home):
+    folder = make_module(home / "modules", "A", 'ICON = "🧩"\ndef run(app):\n    pass\n')
+    assert module_info(folder, home / "modules", "here").icon == "🧩"

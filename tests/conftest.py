@@ -19,11 +19,11 @@ def make_module(parent, name, src=DEFAULT_SRC):
 class FakeView:
     """不開視窗的 View：依序記錄事件，對話框回固定答案。"""
 
-    window = None
     answer = ...  # ask 的答案：... 表示回 default；測試可以設成字串，或 None（按了取消）
 
     def __init__(self):
         self.events = []
+        self.confirmed, self.answers = [], []  # confirm 問過的句子；依序要回的答案，用完之後回 True
 
     @property
     def asks(self):
@@ -53,6 +53,10 @@ class FakeView:
     def ask(self, prompt, default=""):
         self.events.append(("ask", prompt))
         return default if self.answer is ... else self.answer
+
+    def confirm(self, prompt):
+        self.confirmed.append(prompt)
+        return self.answers.pop(0) if self.answers else True
 
     def choose_files(self):
         return [Path("/f")]

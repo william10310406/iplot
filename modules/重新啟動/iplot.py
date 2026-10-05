@@ -3,6 +3,8 @@
 import os
 import sys
 
+ICON = "🔄"
+
 
 def run(app):
     os.chdir(app.home)  # 執行期間的工作目錄是這個模組的資料夾；新的 iPLoT 要從自己的資料夾起來

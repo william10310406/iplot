@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .types import ModuleInfo, Result
 
@@ -12,9 +12,10 @@ if TYPE_CHECKING:
 
 
 class App:
-    """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version（第一版是 1）並寫進 CHANGELOG。"""
+    """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version 並寫進 CHANGELOG
+    （1 是第一版；2 拿掉了 window，見 D66）。"""
 
-    api_version: int = 1
+    api_version: int = 2
 
     def __init__(self, core: Core, info: ModuleInfo) -> None:
         self._core, self._info = core, info
@@ -39,11 +40,6 @@ class App:
     def memory(self) -> dict:
         """這個模組自己的 dict，iPLoT 開著期間保留；跨次啟動要留的請寫成檔案放 module.folder。"""
         return self._memory
-
-    @property
-    def window(self) -> Any:
-        """tkinter 主視窗，模組要自己畫東西時用。"""
-        return self._core.view.window
 
     def log(self, text: str) -> None:
         """寫一行到面板下方的訊息區。"""
@@ -83,6 +79,10 @@ class App:
     def ask(self, prompt: str, default: str = "") -> str | None:
         """跳出對話框問一個字串；按取消回 None。"""
         return self._core.view.ask(prompt, default)
+
+    def confirm(self, prompt: str) -> bool:
+        """跳出對話框問「確定／取消」；按確定回 True。"""
+        return self._core.view.confirm(prompt)
 
     def choose_files(self) -> list[Path]:
         """跳出檔案選擇視窗；按取消回空清單。"""
