@@ -39,7 +39,7 @@ def test_panel_text_keys():
     """規格 §7：新面板的文字都在 T，值是中文。"""
     for k in ["menu_run", "menu_enter", "add_tile", "status_hint", "details", "hide_details", "ok", "cancel",
               "scanned", "icon_unusable", "installing", "install_done", "install_failed", "no_tk", "web_failed",
-              "running", "tk_in_web", "confirm_foreign", "cancelled", "page_unsupported"]:
+              "running", "tk_in_web", "confirm_foreign", "cancelled", "page_unsupported", "refreshing", "refresh_failed"]:
         assert T.get(k), k
     assert "{roots}" in T["scanned"] and "{count}" in T["scanned"] and "{title}" in T["icon_unusable"]
     assert "{size}" in T["installing"] and "--safe" in T["install_failed"] and "{message}" in T["web_failed"]

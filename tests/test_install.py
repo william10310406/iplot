@@ -157,3 +157,26 @@ def test_requirements_files_are_ascii(name):
 
 def test_lib_is_ignored_by_git():
     assert "lib/" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_stale_means_lib_was_installed_from_other_requirements(home, req):
+    """lib/.installed 記的不是現在 requirements/ 裡任何一份（更新換了需求檔）：要重裝。沒裝過不算。"""
+    assert not install.stale(home), "沒有 lib/：這是第一次安裝的事，不是「過期」"
+    (home / "lib").mkdir()
+    (home / "lib" / ".installed").write_text(hashlib.sha256(req.read_bytes()).hexdigest(), encoding="utf-8")
+    assert not install.stale(home)
+    (home / "requirements" / "web-win.txt").write_text("other==1\n", encoding="utf-8")
+    assert not install.stale(home), "別的平台的需求檔不影響"
+    req.write_text("pywebview==9.9.9\n", encoding="utf-8")
+    assert install.stale(home)
+
+
+def test_quick_install_gives_up_fast(home, req):
+    """更新後重裝時先求快：沒有網路就不要讓 pip 重試半分鐘，馬上回來用現有的版本開。"""
+    popen = FakePopen([], 1)
+    install.install(home, req, lambda line: None, popen, quick=True)
+    argv = popen.calls[0][0]
+    assert argv[argv.index("--retries") + 1] == "0" and "--timeout" in argv
+    popen = FakePopen([], 1)
+    install.install(home, req, lambda line: None, popen)
+    assert "--retries" not in popen.calls[0][0]

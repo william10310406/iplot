@@ -44,6 +44,8 @@ T: dict[str, str] = {
     "install_failed": "介面安裝失敗：{message}\n安裝需要網路。再試一次：重新啟動 iPLoT。先用安全模式：python3 main.py --safe",
     "no_tk": "這個 Python 沒有 tkinter，安全模式開不了；請用 python.org 的版本",
     "web_failed": "網頁面板開不起來：{message}。已改用備用面板",
+    "refreshing": "介面要用的套件換了版本，正在重新安裝（需要網路）…",
+    "refresh_failed": "介面的套件這次沒有換成新的：{message}\n先用現有的開；有網路之後重新啟動 iPLoT 會再試一次。",
     "confirm_foreign": "『{title}』是從外面裝進來的，第一次執行前確認：要執行嗎？",
     "cancelled": "已取消執行『{title}』",
     "page_unsupported": "安全模式沒有頁面，這個功能要用一般模式開",

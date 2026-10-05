@@ -50,16 +50,19 @@ def run_tk(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: 
     panel.mainloop()
 
 
-def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str) -> None:
-    """網頁面板：視窗關掉才回傳。lib/ 裡沒有 pywebview、或它找不到能用的視窗套件（裝壞了）時丟 ImportError。"""
+def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str, note: str | None = None) -> None:
+    """網頁面板：視窗關掉才回傳。note 有值就寫進訊息區。
+    lib/ 裡沒有 pywebview、或它找不到能用的視窗套件（裝壞了）時丟 ImportError。"""
     from core.core import Core
     from ui.web import WebPanel
 
     panel = WebPanel(home, version, False)
     core = Core(home, config, panel)
     panel.attach(core)
+    if note is not None:
+        panel.submit(lambda: panel.log(note))  # 頁面就緒之後才送得出去，先排著
     if err is not None:
-        panel.submit(lambda: panel.report(err))  # 頁面就緒之後才送得出去，先排著
+        panel.submit(lambda: panel.report(err))
     guard = NoTk()
     sys.meta_path.insert(0, guard)
     try:
@@ -77,6 +80,27 @@ def tk_or_exit(home: Path, config: Config, err: ErrorInfo | None, safe: bool, no
     except ImportError:
         print(T["no_tk"], flush=True)
         sys.exit(1)
+
+
+def refresh(home: Path, config: Config) -> str | None:
+    """「更新」換了 requirements/ 之後的第一次啟動：lib/ 是照舊的需求檔裝的，開面板之前先重裝。
+    這時候還沒 import 任何 lib/ 的東西，裝好直接往下開，不用重啟。沒裝成（多半是沒有網路）就回那句說明：
+    先用現有的 lib/ 開；lib/.installed 沒動，所以下次啟動會再試。沒事可做、或裝好了，回 None。"""
+    from core.core import Core
+    from ui import install
+
+    if not install.stale(home):
+        return None
+    core = Core(home, config, install.ConsoleView())
+    req = install.requirements_file(home, core)
+    if req is None or install.ready(core) is not None:
+        return None
+    print(T["refreshing"], flush=True)
+    failure = install.install(home, req, lambda line: print(line, flush=True), quick=True)
+    if failure is None:
+        return None
+    print(T["refresh_failed"].format(message=failure), flush=True)
+    return T["refresh_failed"].format(message=failure)
 
 
 def bootstrap(home: Path, config: Config, err: ErrorInfo | None, reason: str, rebooted: bool) -> None:
@@ -120,7 +144,7 @@ def main() -> None:
     if "--safe" in sys.argv[1:]:
         return tk_or_exit(home, config, err, True)
     try:
-        run_web(home, config, err, __version__)
+        run_web(home, config, err, __version__, refresh(home, config))
     except ImportError as exc:
         bootstrap(home, config, err, str(exc), rebooted)
 

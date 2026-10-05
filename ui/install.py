@@ -64,13 +64,24 @@ def installed(home: Path, req: Path) -> bool:
         return False
 
 
-def install(home: Path, req: Path, say: Callable[[str], None], popen: Any = subprocess.Popen) -> str | None:
-    """用 pip 把 req 裝進 home/lib，pip 的輸出一行行交給 say。
+def stale(home: Path) -> bool:
+    """lib/ 是照別的需求檔裝的：lib/.installed 記的 sha256 對不上 requirements/ 裡任何一份（「更新」換過需求檔）。
+    沒裝過（沒有記號）不算過期，那是第一次安裝的事。"""
+    try:
+        marker = (home / "lib" / ".installed").read_text(encoding="utf-8")
+        return marker not in {_digest(f) for f in (home / "requirements").glob("*.txt")}
+    except OSError:
+        return False
+
+
+def install(home: Path, req: Path, say: Callable[[str], None], popen: Any = subprocess.Popen,
+            quick: bool = False) -> str | None:
+    """用 pip 把 req 裝進 home/lib，pip 的輸出一行行交給 say。quick：連不上就馬上放棄，不重試。
     成功就寫下 lib/.installed、回 None；失敗回 pip 說的原因：最後五行裡 ERROR 開頭的那幾行，沒有就整五行。
     指令是列表，不經過 shell。"""
     lib = home / "lib"
     argv = [sys.executable, "-m", "pip", "install", "--target", str(lib), "--upgrade", "--no-input",
-            "--disable-pip-version-check", "-r", str(req)]
+            "--disable-pip-version-check", *(("--retries", "0", "--timeout", "8") if quick else ()), "-r", str(req)]
     proc = popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     tail: list[str] = []
     for line in proc.stdout:
