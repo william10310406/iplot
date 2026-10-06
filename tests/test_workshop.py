@@ -555,7 +555,7 @@ def test_rollback_keeps_the_snapshot_when_the_folder_already_has_dot_History(wor
 
 
 def test_rollback_keeps_the_history_of_a_module_one_level_down(workshop, mods, src, monkeypatch):
-    """Task 17 審查 I3：下一層的子模組有自己的 .history/（核心替每個模組存上一版的地方）。只有最上層的 .history/
+    """第三輪審查 I3：下一層的子模組有自己的 .history/（核心替每個模組存上一版的地方）。只有最上層的 .history/
     是快照住的地方；下一層的要跟著進快照、放回來，比對也要算它——以前它不在快照裡、放回時被刪掉，那一句卻說「已從快照放回」。"""
     folder = make_module(mods, "記帳", "print('v1')\n")
     make_module(folder, "子", "print('子 v1')\n")
@@ -621,7 +621,7 @@ def test_a_failed_snapshot_is_one_sentence_and_leaves_no_half_zip(workshop, mods
 
 
 def test_a_file_from_before_1980_does_not_break_the_snapshot(workshop, mods, src, tmp_path):
-    """Task 17 審查 I4：zip 記不了 1980 年以前的檔案時間。模組資料夾裡有這種檔（從舊備份還原的、時間被清成 0 的）時，
+    """第三輪審查 I4：zip 記不了 1980 年以前的檔案時間。模組資料夾裡有這種檔（從舊備份還原的、時間被清成 0 的）時，
     存快照照樣成功、照常裝好——以前是一句英文「ZIP does not support timestamps before 1980」、留下半個 zip，而且永遠更新不了。"""
     folder = make_module(mods, "記帳", "print('v1')\n")
     (folder / "舊帳.csv").write_text("1970\n", encoding="utf-8")

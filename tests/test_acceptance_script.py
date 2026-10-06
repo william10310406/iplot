@@ -1,4 +1,4 @@
-"""tests/acceptance_workshop.py（自己跑的驗收腳本）裡不開視窗、不連網就測得到的事（Task 17 審查）。"""
+"""tests/acceptance_workshop.py（自己跑的驗收腳本）裡不開視窗、不連網就測得到的事（第三輪審查）。"""
 
 import importlib.util
 import json

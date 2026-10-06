@@ -58,7 +58,7 @@ def test_pack_module_layout_and_exclusions(publish, tmp_path):
 
 
 def test_pack_module_handles_files_from_before_1980(publish, tmp_path):
-    """Task 17 審查 I4：模組裡有 1980 年以前的檔案時間，打包照樣成功（zip 記成 1980 年），不是 traceback、不是半個 --out。"""
+    """第三輪審查 I4：模組裡有 1980 年以前的檔案時間，打包照樣成功（zip 記成 1980 年），不是 traceback、不是半個 --out。"""
     import os
     folder = make_module(tmp_path / "modules", "舊模組")
     os.utime(folder / "iplot.py", (0, 0))
@@ -354,7 +354,7 @@ def test_core_only_run_keeps_the_modules_on_the_page(publish, repo):
     "## [1.0.0]\n\n新的。\n".encode("big5"),  # 以前：traceback
 ])
 def test_a_module_changelog_whose_top_version_cannot_be_read_stops_before_writing_anything(publish, repo, capsys, log):
-    """Task 17 審查（裁定 3.4 改判）：有 CHANGELOG.md、卻讀不出最上面那一版是哪一版，就停下來說一句——不悄悄發佈舊的那一節、
+    """第三輪審查（原本跳過那一節，改判）：有 CHANGELOG.md、卻讀不出最上面那一版是哪一版，就停下來說一句——不悄悄發佈舊的那一節、
     不悄悄跟著 --version、不是 traceback；一個檔都不產生。"""
     path = repo / "modules" / "整理桌面" / "CHANGELOG.md"
     path.write_bytes(log) if isinstance(log, bytes) else path.write_text(log, encoding="utf-8")
