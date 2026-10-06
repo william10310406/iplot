@@ -4,6 +4,8 @@
 import hashlib
 import importlib.util
 import json
+import os
+import stat
 import sys
 import zipfile
 from pathlib import Path
@@ -413,6 +415,88 @@ def test_failed_install_puts_the_old_folder_back(workshop, mods, src, monkeypatc
         workshop.install(pack(src, "整理桌面", V2), mods)
     assert {k: v for k, v in tree(mods).items() if "/.history/" not in k} == before
     assert not (mods / ".workshop-tmp").exists()
+
+
+POSIX_USER = pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="靠 POSIX 的唯讀權限讓寫入失敗")
+
+
+@POSIX_USER
+def test_rollback_goes_on_past_a_read_only_folder(workshop, mods, src, tmp_path):
+    """獨立審查 I3：讓安裝失敗的原因（唯讀的子資料夾）通常也讓放回原樣時的刪除失敗。放回不能在第一個錯就停下來
+    （以前會連包根本沒碰的 a.py 都刪掉）：能刪的刪、從快照補回來，比對過一樣才說「已從快照放回」。"""
+    folder = make_module(mods, "整理桌面", "print('我自己的')\n")
+    (folder / "a.py").write_text("a\n", encoding="utf-8")
+    (folder / "資料").mkdir()
+    (folder / "資料" / "old.txt").write_text("old\n", encoding="utf-8")
+    before = {k: v for k, v in tree(folder).items() if not k.startswith(".history/")}
+    (folder / "資料").chmod(0o555)
+    try:
+        api = workshop.Api(FakeApp(tmp_path), [pack(src, "整理桌面", {"iplot.py": "x = 2\n", "資料/new.txt": "new\n"})], mods)
+        answer = api.install("整理桌面", True)
+        assert answer.startswith("無法安裝：") and "沒有裝成，已從快照放回" in answer, answer
+        assert {k: v for k, v in tree(folder).items() if not k.startswith(".history/")} == before
+    finally:
+        (folder / "資料").chmod(0o755)
+
+
+@pytest.mark.skipif(not hasattr(os, "chflags") or not hasattr(stat, "UF_IMMUTABLE"), reason="macOS／BSD 的鎖定旗標")
+def test_rollback_with_a_locked_file(workshop, mods, src):
+    """在 Finder 裡「鎖定」的檔（chflags uchg）：包要蓋它會失敗，放回時也刪不掉它。它本來就是舊的，其他的放回去就是原樣。"""
+    folder = make_module(mods, "整理桌面", "print('我自己的')\n")
+    (folder / "notes.txt").write_text("我的筆記\n", encoding="utf-8")
+    before = {k: v for k, v in tree(folder).items() if not k.startswith(".history/")}
+    os.chflags(folder / "notes.txt", stat.UF_IMMUTABLE)
+    try:
+        with pytest.raises(OSError) as raised:
+            workshop.install(pack(src, "整理桌面", {"iplot.py": "x = 2\n", "notes.txt": "包裡的\n"}), mods)
+        assert "沒有裝成，已從快照放回" in str(raised.value)
+        assert {k: v for k, v in tree(folder).items() if not k.startswith(".history/")} == before
+    finally:
+        os.chflags(folder / "notes.txt", 0)
+
+
+@POSIX_USER
+def test_when_the_rollback_cannot_finish_the_sentence_says_where_the_snapshot_is(workshop, mods, src, monkeypatch):
+    """快照讀不回來（權限）：不能說放回了；要說放回時出錯、快照在哪裡。"""
+    folder = make_module(mods, "整理桌面", "print('我自己的')\n")
+    real, calls = workshop.shutil.copyfile, []
+
+    def copyfile(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            for saved in (folder / ".history").glob("*-folder.zip"):
+                saved.chmod(0)
+            raise OSError(28, "模擬：磁碟滿了")
+        return real(source, target)
+
+    monkeypatch.setattr(workshop.shutil, "copyfile", copyfile)
+    try:
+        with pytest.raises(OSError) as raised:
+            workshop.install(pack(src, "整理桌面", V2), mods)
+        [saved] = list((folder / ".history").glob("*-folder.zip"))
+        assert "已從快照放回" not in str(raised.value) and f"放回時出錯，快照在 {saved}" in str(raised.value)
+    finally:
+        for saved in (folder / ".history").glob("*-folder.zip"):
+            saved.chmod(0o644)
+
+
+def test_a_rollback_that_cannot_finish_leaves_every_module_folder_asking(workshop, mods, tmp_path, monkeypatch):
+    """放不回去時，資料夾裡可能留著新下載的程式：剩下的每一個模組資料夾都放 .unconfirmed，執行前一樣會問。"""
+    folder = make_module(mods, "整理桌面", "x = 2\n")
+    make_module(folder, "子", "y = 2\n")
+    not_a_zip = tmp_path / "壞掉的快照.zip"
+    not_a_zip.write_bytes(b"not a zip")
+    real = os.unlink
+
+    def unlink(path, *args, **kwargs):  # 兩個 iplot.py 都刪不掉（被別的程式鎖著）
+        if os.path.basename(path) == "iplot.py":
+            raise PermissionError(13, "模擬：刪不掉")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", unlink)
+    assert workshop._rollback(folder, not_a_zip) is False
+    monkeypatch.undo()
+    assert (folder / ".unconfirmed").is_file() and (folder / "子" / ".unconfirmed").is_file()
 
 
 def test_failed_first_install_leaves_no_folder(workshop, mods, src, monkeypatch):

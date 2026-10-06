@@ -3,6 +3,7 @@
 
 規矩（D70）：只寫進自己裝的那個 modules/<名稱>/ 與暫存資料夾；覆蓋前，舊資料夾整個存進它自己的 .history/；
 從這裡裝進來的模組帶著空檔案 .unconfirmed，第一次執行前 iPLoT 會先問一次。"""
+import contextlib
 import hashlib
 import html
 import http.client
@@ -188,22 +189,49 @@ def _clear(folder, rel):
     return path
 
 
+class NotInstalled(OSError):
+    """裝到一半出錯、已經（或沒能）放回原樣。訊息就是要給人看的那一句。"""
+
+
+def _contents(folder):
+    """folder 裡的檔案（相對路徑 → 內容），挑法跟 snapshot 一樣：.history/ 以外的每一個檔。"""
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*")
+            if p.is_file() and ".history" not in p.relative_to(folder).parts}
+
+
 def _rollback(folder, saved):
-    """裝到一半出錯：把模組資料夾放回裝之前的樣子。saved 是覆蓋前存的快照；None 表示原本沒有這個資料夾。"""
+    """裝到一半出錯：把模組資料夾放回裝之前的樣子，回有沒有放回去。saved 是覆蓋前存的快照；None 表示原本沒有這個資料夾。
+    讓安裝失敗的原因（鎖定的檔、唯讀的資料夾）通常也讓這裡刪不掉、寫不回去：遇到錯不停下來，能刪的刪、能放的放，
+    最後逐檔跟快照比，一樣才算放回去了。沒放回去的話，留下來的每個模組資料夾都放 .unconfirmed（裡面可能有新下載的程式）。"""
     if saved is None:
-        return shutil.rmtree(folder, ignore_errors=True)
-    for path in folder.iterdir():
-        if path.name != ".history":
-            shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
-    with zipfile.ZipFile(saved) as z:
-        z.extractall(folder)
+        shutil.rmtree(folder, ignore_errors=True)
+        back = not folder.exists()
+    else:
+        for path in folder.iterdir():
+            if path.name != ".history":
+                with contextlib.suppress(OSError):
+                    shutil.rmtree(path, ignore_errors=True) if path.is_dir() and not path.is_symlink() else path.unlink()
+        try:
+            with zipfile.ZipFile(saved) as z:
+                for member in z.infolist():
+                    with contextlib.suppress(OSError):
+                        z.extract(member, folder)
+                back = _contents(folder) == {m.filename: z.read(m) for m in z.infolist() if not m.is_dir()}
+        except (OSError, zipfile.BadZipFile):
+            back = False
+    if not back:
+        for rel in _module_dirs(folder, []):
+            with contextlib.suppress(OSError):
+                (folder / rel / UNCONFIRMED).touch()
+    return back
 
 
 def install(entry, modules_dir):
     """照索引的這一筆安裝（或覆蓋）一個模組，回安裝後的狀態。不對就丟 ValueError，模組資料夾不動：
     名稱要是單純的資料夾名；sha256 要對；zip 的最上層要剛好是 <名稱>/，裡面要有 iplot.py。
     資料夾已經在的話，先整個存進它的 .history/，再把包裡的檔案蓋上去（包裡沒有的舊檔案留著）；
-    蓋到一半出錯（OSError）就照那份快照放回原樣。包裡與磁碟上每一個有 iplot.py 的資料夾都先放好 .unconfirmed，才開始放程式。"""
+    蓋到一半出錯（OSError）就照那份快照放回原樣，丟 NotInstalled，訊息照實說放回去了沒有、沒放回的話快照在哪裡。
+    包裡與磁碟上每一個有 iplot.py 的資料夾都先放好 .unconfirmed，才開始放程式。"""
     name = entry["name"]
     if not isinstance(name, str) or not name.strip() or name.startswith(".") or set(name) & set("/\\"):
         raise ValueError("索引裡的模組名稱不是單純的資料夾名")
@@ -232,9 +260,13 @@ def install(entry, modules_dir):
             write_origin(folder, {"url": entry["zip_url"], "version": entry["version"], "sha256": entry["sha256"],
                                   "digest": digest(folder, listed), "files": json.dumps(listed, ensure_ascii=False),
                                   "installed": f"{datetime.now():%Y-%m-%d %H:%M:%S}"})
-        except OSError:
-            _rollback(folder, saved)
-            raise
+        except OSError as exc:
+            back = _rollback(folder, saved)
+            if saved is None:
+                done = "沒有裝成，裝了一半的資料夾已經拿掉" if back else f"沒有裝成，裝了一半的資料夾拿不掉：{folder}"
+            else:
+                done = "沒有裝成，已從快照放回" if back else f"沒有裝成，放回時出錯，快照在 {saved}"
+            raise NotInstalled(f"{exc}；{done}") from exc
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return state(entry, modules_dir)
@@ -279,5 +311,7 @@ class Api:
             return "無法安裝：下載的檔案不是 zip"
         except (ValueError, KeyError, TypeError) as exc:  # sha256 不符、包的內容不對、索引那一筆的型別不對
             return f"無法安裝：{exc}"
-        except NETWORK as exc:  # 連不上、下載到一半斷了；也包括寫檔出錯（那時模組資料夾已經放回原樣）
+        except NotInstalled as exc:  # 寫檔出錯：訊息裡已經說了放回去了沒有
+            return f"無法安裝：{exc}"
+        except NETWORK as exc:  # 連不上、下載到一半斷了
             return f"無法安裝：{getattr(exc, 'reason', exc)}"
