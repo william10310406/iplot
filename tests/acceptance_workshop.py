@@ -264,7 +264,8 @@ def main(argv):
         finished = run_copy(acc, home, update["version"], stubs)
         for line in (acc / "results.jsonl").read_text(encoding="utf-8").splitlines() if (acc / "results.jsonl").exists() else []:
             r = json.loads(line)
-            results.append((r["item"], r["ok"], {**r["evidence"], "pid": r["pid"]}))
+            evidence = r["evidence"] if isinstance(r["evidence"], dict) else {"說明": r["evidence"]}  # 失敗的路上記的是一句話
+            results.append((r["item"], r["ok"], {**evidence, "pid": r["pid"]}))
         stage = (acc / "stage").read_text(encoding="utf-8").strip()
         results.append(("複本的 iPLoT 自己結束", finished and stage == "done", {"複本": str(home), "最後的階段": stage,
                         "stderr": (acc / "main.err").read_text(encoding="utf-8").strip().splitlines()[-5:]}))
