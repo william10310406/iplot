@@ -397,6 +397,63 @@ def test_mistyped_url_is_blamed_on_the_url(iplot, home):
     assert len(app.logs) == 1 and "UPDATE_URL" in app.logs[0] and "Traceback" not in app.logs[0]
 
 
+def test_a_failed_swap_is_one_sentence_and_everything_is_put_back(iplot, update, home, source, monkeypatch):
+    """獨立審查 I2：換的時候出錯（權限、檔案被佔著）。apply 已經把四樣放回去了，面板上要是一句話，不是模組錯誤。"""
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name == "main.py.new":
+            raise PermissionError(13, "模擬：main.py 換不上去")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    assert len(app.logs) == 1 and "沒有更新" in app.logs[0] and "都還是原來的" in app.logs[0]
+    assert update.installed_version(home) == "0.4.9" and tree(home)["main.py"] == b"old main\n"
+
+
+def test_a_failed_backup_is_one_sentence(iplot, update, home, source, monkeypatch):
+    def full(*args):
+        raise OSError(28, "模擬：磁碟滿了")
+
+    monkeypatch.setattr(update, "backup", full)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    before = {k: v for k, v in tree(home).items() if not k.startswith(".backup/")}
+    iplot.run(app)
+    assert len(app.logs) == 1 and "沒有更新" in app.logs[0] and "磁碟滿了" in app.logs[0]
+    assert {k: v for k, v in tree(home).items() if not k.startswith(".backup/")} == before
+
+
+def test_when_putting_back_fails_too_the_sentence_does_not_say_it_was_put_back(iplot, update, home, source, monkeypatch):
+    """放回去的時候也出錯：不能說「都還是原來的」；要說哪些東西留在一半，舊版的備份在哪裡。"""
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name == "main.py.new" or (self.name == "ui.old" and Path(target).name == "ui"):
+            raise PermissionError(13, "模擬：改不了名")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [saved] = [p for p in (home / ".backup").iterdir() if p.is_dir()]
+    assert len(app.logs) == 1 and "都還是原來的" not in app.logs[0] and "ui.old" in app.logs[0]
+    assert f".backup/{saved.name}/" in app.logs[0]
+
+
+@pytest.mark.parametrize("field, value", [("zip_url", None), ("zip_url", 5), ("sha256", None), ("version", None),
+                                          ("version", 1)])
+def test_wrong_types_in_update_json_are_one_sentence(home, source, field, value):
+    """審查 M1：update.json 的 version、zip_url、sha256 不是文字，是一句話，不是模組錯誤。"""
+    info = json.loads((source / "update.json").read_text(encoding="utf-8"))
+    (source / "update.json").write_text(json.dumps({**info, field: value}), encoding="utf-8")
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    before = tree(home)
+    run(app)
+    assert tree(home) == before and len(app.logs) == 1 and "update.json" in app.logs[0]
+
+
 def test_backup_is_named_after_the_version_on_disk(iplot, home, source):
     """備份的資料夾用磁碟上那一份的版本命名（剛更新完沒重啟時，程式自己的 app.version 還是更舊的那個）。"""
     app = FakeApp(home, version="0.4.0", update_url=(source / "update.json").as_uri())

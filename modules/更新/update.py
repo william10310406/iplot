@@ -47,6 +47,15 @@ def fetch_json(url, timeout=15):
     return data
 
 
+def check(info):
+    """update.json 裡的版本、zip 的網址、sha256，回 (version, zip_url, sha256)。
+    少了哪一項丟 KeyError；不是文字（null、數字）丟 ValueError。"""
+    values = tuple(info[key] for key in ("version", "zip_url", "sha256"))
+    if not all(isinstance(value, str) for value in values):
+        raise ValueError("update.json 裡的 version、zip_url、sha256 應該都是文字")
+    return values
+
+
 def newer(current, latest):
     """latest 這個版本是不是比 current 新：用 . 切開，一段一段當整數比。看不懂的版本號一律當作不比較新。"""
     try:
@@ -156,6 +165,12 @@ def apply(home, zip_path):
             _discard(home)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def unfinished(home):
+    """換到一半留下來、要用手整理的東西：還在的 <名稱>.old、<名稱>.new，與不見了的那幾樣。都沒有就是空的清單。"""
+    left = [f"{name}{end}" for name in PARTS for end in (".old", ".new") if (home / f"{name}{end}").exists()]
+    return left + [name for name in PARTS if not (home / name).exists()]
 
 
 def _remove(path):
