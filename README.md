@@ -181,6 +181,14 @@ git push
 
 用的人在 `config.py` 填 `UPDATE_URL = "<base-url>/update.json"`、`WORKSHOP_URL = "<base-url>/index.json"`，也就是工具最後印出來的那兩行（網址裡的中文會寫成 `%XX`，是同一個網址）；那兩行前面沒有空白，整行從行首貼進 `config.py` 就好。隨附的 `config.py` 填的是 `https://william10310406.github.io/iplot-workshop/` 底下那兩個。`index.html` 是給還沒裝 iPLoT 的人看的那一頁，網址就是 `https://<帳號>.github.io/iplot-workshop/`。從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，寫這一段時還沒有走過。
 
+**推上去之後：對真的網址驗一遍。** 在 iPLoT 資料夾裡執行：
+
+```
+python3 tests/acceptance_workshop.py
+```
+
+它跟 `tests/smoke.py` 一樣是自己跑的腳本（pytest 不收），要 macOS、裝好的 `lib/` 和網路，會開出 iPLoT 的視窗，約一分鐘。照 `config.py` 的兩個網址做兩件事：一、等網路上的 `update.json`、`index.json` 跟 `../iplot-workshop` 裡的一樣（Pages 還沒換好就每 10 秒再試一次，最多 10 分鐘），再下載 `index.html`、核心 zip、每個模組 zip，sha256 要跟 json 寫的一樣；二、把 iPLoT 資料夾複製到暫存處（真的工作樹不動），版本改成 0.4.9、刪掉複本的「打開核心原始碼」，開複本真的視窗，用程式代替滑鼠：按「更新」從網路換成新版、按「重新啟動」、打開「工作坊」看清單上的每一列與「這一版」、從網路裝「打開核心原始碼」。每一項印出證據（訊息區的句子、sha256、pid），全部通過結束碼是 0。`--keep <資料夾>` 把複本留在那裡，人工驗收可以接著用；`--published <資料夾>` 換掉拿來比的那個資料夾。確認框的長相、用瀏覽器看那一頁、關掉 Wi-Fi 之後按「工作坊」只有一句話，這些要人眼看，不在腳本裡。
+
 **在本機試，用 `file://`。** 不用上傳、不用網路：`--base-url file:///<絕對路徑>/交付/發佈`。在 iPLoT 資料夾裡可以直接這樣寫：
 
 ```
