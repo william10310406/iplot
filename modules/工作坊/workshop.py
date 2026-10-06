@@ -12,6 +12,7 @@ import os
 import shutil
 import ssl
 import threading
+import unicodedata
 import urllib.parse
 import urllib.request
 import zipfile
@@ -22,8 +23,12 @@ ORIGIN, UNCONFIRMED = ".origin", ".unconfirmed"
 # 比對時不分大小寫：macOS 的檔案系統上「.Origin」跟「.origin」是同一個名字
 SKIP = {".history", ".origin", ".unconfirmed", "__pycache__", ".ds_store"}
 NETWORK = (OSError, http.client.HTTPException)  # 連不上、逾時、連到一半斷掉、伺服器沒回話
-LABELS = {"absent": "未安裝", "installed": "已安裝", "update": "可更新", "modified": "已修改", "unknown": "版本未知"}
-BUTTONS = {"absent": "安裝", "update": "更新", "modified": "覆蓋", "unknown": "覆蓋"}  # 已安裝的沒有按鈕
+LABELS = {"absent": "未安裝", "installed": "已安裝", "update": "可更新", "modified": "已修改", "unknown": "版本未知",
+          "bundled": "隨附模組"}
+BUTTONS = {"absent": "安裝", "update": "更新", "modified": "覆蓋", "unknown": "覆蓋"}  # 已安裝、隨附模組的沒有按鈕
+# iPLoT 自己要用的隨附模組：工作坊不覆蓋（覆蓋之後帶著 .unconfirmed，右鍵動作每次先問、啟動時要安裝介面卻沒辦法回答）
+BUNDLED = ("作業系統", "更新", "工作坊")
+BUNDLED_NOTE = "這是 iPLoT 自己要用的隨附模組，工作坊不覆蓋它；要換新版，自己把新的資料夾複製進 modules/。"
 CONFIRM = "需要確認"  # 已修改、版本未知的要先確認才覆蓋：page.html 看到這個回答就不會當成裝好了
 NEEDED = ("name", "version", "zip_url", "sha256")  # 索引的每一筆至少要有這幾項
 
@@ -115,11 +120,25 @@ def _newer(current, latest):
         return False
 
 
+def _bundled(name, modules_dir):
+    """name 是不是 BUNDLED 裡的一個。macOS 的檔名不分大小寫、也不分 Unicode 的寫法（相容表意字「更」就是「更」），
+    所以先正規化再比；資料夾在的話，再問檔案系統是不是同一個資料夾。"""
+    if unicodedata.normalize("NFC", name).casefold() in {b.casefold() for b in BUNDLED}:
+        return True
+    folder = modules_dir / name
+    with contextlib.suppress(OSError):
+        return folder.exists() and any((modules_dir / b).exists() and folder.samefile(modules_dir / b) for b in BUNDLED)
+    return False
+
+
 def state(entry, modules_dir):
     """索引裡這一筆，在這台電腦上是什麼狀態：
-    absent 沒有這個資料夾；unknown 資料夾在但不是從工作坊裝的（沒有 .origin）；
+    bundled iPLoT 自己要用的隨附模組（BUNDLED），工作坊不碰；absent 沒有這個資料夾；
+    unknown 資料夾在但不是從工作坊裝的（沒有 .origin）；
     modified 當初裝進來的檔有被改過、刪掉（或 .origin 壞了）；update 沒改過、索引的版本比較新；
     installed 沒改過、已經是這一版。模組自己另外存的檔不算改過。"""
+    if _bundled(entry["name"], modules_dir):
+        return "bundled"
     folder = modules_dir / entry["name"]
     if not folder.exists():
         return "absent"
@@ -257,6 +276,8 @@ def install(entry, modules_dir, confirmed=False):
     name = entry["name"]
     if not isinstance(name, str) or not name.strip() or name.startswith(".") or set(name) & set("/\\"):
         raise ValueError("索引裡的模組名稱不是單純的資料夾名")
+    if _bundled(name, modules_dir):
+        raise ValueError(f"「{name}」是 iPLoT 自己要用的隨附模組，工作坊不覆蓋它")
     folder, tmp = modules_dir / name, modules_dir / ".workshop-tmp"
     if folder.is_symlink():
         raise ValueError(f"「{name}」是一個符號連結，不裝進去")
@@ -310,9 +331,10 @@ def render(entries, modules_dir, template):
         name = html.escape(str(entry["name"]), quote=True)
         button = (f'<button type="button" data-name="{name}" data-ask="{int(now in ("modified", "unknown"))}">'
                   f"{BUTTONS[now]}</button>") if now in BUTTONS else ""
+        note = f'<div class="note">{BUNDLED_NOTE}</div>' if now == "bundled" else ""
         rows.append(
             f'<tr><td class="icon">{html.escape(str(entry.get("icon") or ""))}</td>'
-            f'<td><b>{name}</b><div class="desc">{html.escape(str(entry.get("description") or ""))}</div></td>'
+            f'<td><b>{name}</b><div class="desc">{html.escape(str(entry.get("description") or ""))}</div>{note}</td>'
             f'<td class="ver">{html.escape(str(entry["version"]))}</td>'
             f'<td class="state">{LABELS[now]}</td><td class="act">{button}</td></tr>')
     head, mark, tail = template.rpartition("{rows}")  # 只換最後一個：前面的說明文字裡提到它也沒關係

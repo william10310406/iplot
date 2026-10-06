@@ -602,6 +602,25 @@ def test_update_that_only_replaces_its_own_files_does_not_ask(workshop, mods, en
     assert (folder / "helper.py").read_text(encoding="utf-8") == "x = 2\n" and (folder / "settings.json").exists()
 
 
+@pytest.mark.parametrize("name, on_disk", [("作業系統", "作業系統"), ("更新", "更新"), ("工作坊", "工作坊"),
+                                           ("更新", "更新"),  # 相容表意字：NFC 之後就是「更新」，macOS 上是同一個資料夾
+                                           ("作業系統", None)])  # 被刪掉了也不從工作坊裝回來
+def test_workshop_never_overwrites_iplots_own_modules(workshop, mods, src, tmp_path, name, on_disk):
+    """裁定（2026-10-06，0.5.0 審查「作業系統」被覆蓋）：工作坊不讓索引覆蓋「作業系統」「更新」「工作坊」。
+    覆蓋之後帶著 .unconfirmed：右鍵動作每次先問、啟動時要安裝介面卻沒辦法回答。清單上那一列沒有按鈕，有一句說明。"""
+    if on_disk:
+        make_module(mods, on_disk, "print('隨附的')\n")
+    e = pack(src, name, V1)
+    before = tree(mods)
+    assert workshop.state(e, mods) == "bundled"
+    row = workshop.render([e], mods, "{rows}")
+    assert "<button" not in row and "工作坊不覆蓋" in row
+    assert workshop.Api(FakeApp(tmp_path), [e], mods).install(name, True).startswith("無法安裝：")
+    with pytest.raises(ValueError):
+        workshop.install(e, mods, True)
+    assert tree(mods) == before
+
+
 def test_origin_lists_the_installed_files(workshop, mods, entry):
     workshop.install(entry, mods)
     origin = workshop.read_origin(mods / "整理桌面")
