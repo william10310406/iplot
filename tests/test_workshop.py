@@ -368,6 +368,33 @@ def test_nested_modules_are_asked_about_too(workshop, mods, src, tmp_path):
     assert (folder / ".unconfirmed").is_file() and (folder / "子工具" / ".unconfirmed").is_file(), "覆蓋之後重新要問"
 
 
+def test_module_folders_already_on_disk_are_asked_about_too(workshop, mods, src):
+    """獨立審查 C1：下一層的模組資料夾已經在磁碟上（上一版裝的、確認過），新的包只帶它旁邊的 helper.py、不帶它的 iplot.py。
+    那個資料夾一樣要放 .unconfirmed：不然執行它，就不經確認跑了新下載的 helper.py。"""
+    from conftest import FakeView
+
+    from core.core import Core
+    from core.types import DEFAULT_CONFIG
+    v1 = {"iplot.py": "x = 1\n", "子工具/iplot.py": "import helper\nhelper.go()\n",
+          "子工具/helper.py": "def go():\n    pass\n"}
+    workshop.install(pack(src / "v1", "工具箱", v1), mods)
+    folder = mods / "工具箱"
+    for marker in folder.rglob(".unconfirmed"):  # 使用者兩個都確認過了
+        marker.unlink()
+    v2 = {"iplot.py": "x = 2\n", "子工具/helper.py": "def go():\n    open('ran.txt', 'w').close()\n"}
+    e2 = {**pack(src / "v2", "工具箱", v2), "version": "2.0.0"}
+    assert workshop.state(e2, mods) == "update"
+    workshop.install(e2, mods)
+    assert (folder / "子工具" / ".unconfirmed").is_file()
+    view = FakeView()
+    view.answers = [False]
+    core = Core(mods.parent, DEFAULT_CONFIG, view)
+    core.rescan()
+    core.enter(next(m for m in core.all_modules() if m.name == "工具箱"))
+    core.press(next(m for m in core.all_modules() if m.name == "子工具"))
+    assert len(view.confirmed) == 1 and not (folder / "子工具" / "ran.txt").exists()
+
+
 def test_failed_install_puts_the_old_folder_back(workshop, mods, src, monkeypatch):
     """複製到一半出錯：模組資料夾回到安裝前的樣子（靠覆蓋前存的那份快照），不會留下一半新一半舊、又沒有 .unconfirmed。"""
     folder = make_module(mods, "整理桌面", "print('我自己的')\n")

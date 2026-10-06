@@ -99,6 +99,14 @@ def digest(folder, files):
     return h.hexdigest()
 
 
+def _module_dirs(folder, rels):
+    """要放 .unconfirmed 的資料夾（相對路徑，"" 是模組資料夾自己）：包裡（rels）與磁碟上現在每一個有 iplot.py 的資料夾。
+    磁碟上的也要：包可能只帶了下一層模組旁邊的 helper.py，那個 iplot.py 是上一版留下、確認過的，執行它一樣跑了新下載的程式。"""
+    on_disk = [p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.name == "iplot.py"]
+    return {rel.rpartition("/")[0] for rel in [*rels, *on_disk]
+            if rel.rpartition("/")[2] == "iplot.py" and not _local(rel.split("/"))}
+
+
 def _newer(current, latest):
     try:
         return tuple(int(p) for p in str(latest).split(".")) > tuple(int(p) for p in str(current).split("."))
@@ -195,7 +203,7 @@ def install(entry, modules_dir):
     """照索引的這一筆安裝（或覆蓋）一個模組，回安裝後的狀態。不對就丟 ValueError，模組資料夾不動：
     名稱要是單純的資料夾名；sha256 要對；zip 的最上層要剛好是 <名稱>/，裡面要有 iplot.py。
     資料夾已經在的話，先整個存進它的 .history/，再把包裡的檔案蓋上去（包裡沒有的舊檔案留著）；
-    蓋到一半出錯（OSError）就照那份快照放回原樣。包裡每一個有 iplot.py 的資料夾都先放好 .unconfirmed，才開始放程式。"""
+    蓋到一半出錯（OSError）就照那份快照放回原樣。包裡與磁碟上每一個有 iplot.py 的資料夾都先放好 .unconfirmed，才開始放程式。"""
     name = entry["name"]
     if not isinstance(name, str) or not name.strip() or name.startswith(".") or set(name) & set("/\\"):
         raise ValueError("索引裡的模組名稱不是單純的資料夾名")
@@ -216,9 +224,8 @@ def install(entry, modules_dir):
         saved = snapshot(folder) if folder.exists() else None
         try:
             folder.mkdir(exist_ok=True)
-            for rel, _ in files:  # 先放標記：每個有 iplot.py 的資料夾第一次執行前都要問
-                if rel.rpartition("/")[2] == "iplot.py":
-                    _clear(folder, rel.rpartition("/")[0] + "/" + UNCONFIRMED if "/" in rel else UNCONFIRMED).touch()
+            for rel in _module_dirs(folder, [rel for rel, _ in files]):  # 先放標記，才放程式
+                _clear(folder, f"{rel}/{UNCONFIRMED}" if rel else UNCONFIRMED).touch()
             for rel, source in files:
                 shutil.copyfile(source, _clear(folder, rel))
             listed = [rel for rel, _ in files]
