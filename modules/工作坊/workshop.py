@@ -171,14 +171,20 @@ def _kept(parts):
 
 
 def snapshot(folder):
-    """把整個模組資料夾（.history/ 自己除外）壓成 .history/<日期時間>-folder.zip，回那個檔。"""
+    """把整個模組資料夾（.history/ 自己除外）壓成 .history/<日期時間>-folder.zip，回那個檔。
+    寫到一半出錯（OSError）就把寫了一半的 zip 刪掉再丟出去。"""
     (folder / ".history").mkdir(exist_ok=True)
     saved = _stamped(folder / ".history", "-folder.zip")
     files = [(p.relative_to(folder).as_posix(), p) for p in sorted(folder.rglob("*"))
              if p.is_file() and not _kept(p.relative_to(folder).parts)]
-    with zipfile.ZipFile(saved, "w", zipfile.ZIP_DEFLATED) as z:
-        for rel, path in files:
-            z.write(path, rel)
+    try:
+        with zipfile.ZipFile(saved, "w", zipfile.ZIP_DEFLATED) as z:
+            for rel, path in files:
+                z.write(path, rel)
+    except OSError:
+        with contextlib.suppress(OSError):
+            saved.unlink()
+        raise
     return saved
 
 
@@ -317,7 +323,10 @@ def install(entry, modules_dir, confirmed=False):
                 listed = []
             if _clashes(folder, [rel for rel, _ in files], listed if isinstance(listed, list) else []):
                 raise NeedsConfirmation(name)
-        saved = snapshot(folder) if folder.exists() else None
+        try:
+            saved = snapshot(folder) if folder.exists() else None
+        except OSError as exc:
+            raise NotInstalled(f"{exc}；沒有裝成，還沒動到資料夾（存快照時出錯）") from exc
         try:
             folder.mkdir(exist_ok=True)
             for rel in _module_dirs(folder, [rel for rel, _ in files]):  # 先放標記，才放程式

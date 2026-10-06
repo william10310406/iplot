@@ -577,6 +577,30 @@ def test_rollback_does_not_delete_anything_when_the_snapshot_is_unreadable(works
     assert (folder / ".unconfirmed").is_file() and (folder / "子" / ".unconfirmed").is_file()
 
 
+def test_a_failed_snapshot_is_one_sentence_and_leaves_no_half_zip(workshop, mods, src, tmp_path, monkeypatch):
+    """存快照時出錯（磁碟滿、.history/ 不能寫）：還沒動到資料夾，那一列一句話說清楚；.history/ 裡不留寫到一半的 zip。"""
+    folder = make_module(mods, "記帳", "print('v1')\n")
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    (folder / ".history").mkdir()
+    (folder / ".history" / "2026-10-01_120000.py").write_text("print('v0')\n", encoding="utf-8")
+    before = tree(folder)
+    real, calls = zipfile.ZipFile.write, []
+
+    def write(self, filename, arcname=None, *args, **kwargs):
+        calls.append(arcname)
+        if len(calls) == 2:
+            raise OSError(28, "模擬：磁碟滿了")
+        return real(self, filename, arcname, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", write)
+    api = workshop.Api(FakeApp(tmp_path), [pack(src, "記帳", {"iplot.py": "print('v2')\n"})], mods)
+    answer = api.install("記帳", True)
+    monkeypatch.undo()
+    assert len(calls) == 2, "真的走到存快照"
+    assert answer == "無法安裝：[Errno 28] 模擬：磁碟滿了；沒有裝成，還沒動到資料夾（存快照時出錯）", answer
+    assert tree(folder) == before, "資料夾逐位元組不變，.history/ 沒有新檔"
+
+
 def test_a_rollback_that_cannot_finish_leaves_every_module_folder_asking(workshop, mods, tmp_path, monkeypatch):
     """放不回去時，資料夾裡可能留著新下載的程式：剩下的每一個模組資料夾都放 .unconfirmed，執行前一樣會問。"""
     folder = make_module(mods, "整理桌面", "x = 2\n")
