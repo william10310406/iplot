@@ -166,8 +166,9 @@ def _stamped(folder, suffix):
 
 
 def _kept(parts):
-    """路徑裡有沒有哪一段是快照資料夾 .history；不分大小寫：macOS 上本來就有的 .History/ 跟 .history/ 是同一個資料夾。"""
-    return any(part.casefold() == ".history" for part in parts)
+    """路徑是不是在快照住的那個資料夾——模組資料夾最上層的 .history/——裡面；不分大小寫：macOS 上本來就有的
+    .History/ 跟 .history/ 是同一個資料夾。下一層子模組自己的 .history/（核心替它存的上一版）不算：它跟著進快照、放回來。"""
+    return bool(parts) and parts[0].casefold() == ".history"
 
 
 def snapshot(folder):

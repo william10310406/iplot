@@ -554,6 +554,25 @@ def test_rollback_keeps_the_snapshot_when_the_folder_already_has_dot_History(wor
     assert {k: v for k, v in tree(folder).items() if not k.lower().startswith(".history/")} == before
 
 
+def test_rollback_keeps_the_history_of_a_module_one_level_down(workshop, mods, src, monkeypatch):
+    """Task 17 審查 I3：下一層的子模組有自己的 .history/（核心替每個模組存上一版的地方）。只有最上層的 .history/
+    是快照住的地方；下一層的要跟著進快照、放回來，比對也要算它——以前它不在快照裡、放回時被刪掉，那一句卻說「已從快照放回」。"""
+    folder = make_module(mods, "記帳", "print('v1')\n")
+    make_module(folder, "子", "print('子 v1')\n")
+    (folder / "子" / ".history").mkdir()
+    (folder / "子" / ".history" / "2026-10-01_120000.py").write_text("print('子 v0')\n", encoding="utf-8")
+    before = {k: v for k, v in tree(folder).items() if not k.startswith(".history/")}
+    _fail_second_copy(workshop, monkeypatch)
+    with pytest.raises(OSError) as raised:
+        workshop.install(pack(src, "記帳", {"iplot.py": "print('v2')\n", "子/iplot.py": "print('子 v2')\n"}), mods)
+    monkeypatch.undo()
+    assert "沒有裝成，已從快照放回" in str(raised.value), str(raised.value)
+    assert {k: v for k, v in tree(folder).items() if not k.startswith(".history/")} == before
+    [saved] = list((folder / ".history").glob("*-folder.zip"))
+    with zipfile.ZipFile(saved) as z:
+        assert "子/.history/2026-10-01_120000.py" in z.namelist()
+
+
 def test_rollback_does_not_delete_anything_when_the_snapshot_is_unreadable(workshop, mods, src, monkeypatch):
     """第二輪審查 R2：快照讀不到（寫壞了）時，放回原樣不能先把資料夾清掉——清了就補不回來。
     一樣都不刪：包沒碰到的檔逐位元組不變；留下的每個模組資料夾放 .unconfirmed；那一句照實說是新舊混合、在哪裡。"""
