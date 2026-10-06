@@ -11,7 +11,9 @@
 --base-url 是 交付/發佈/ 上傳之後對應的網址。放在 GitHub 公開 repo 的話用 raw 網址，例如
 https://raw.githubusercontent.com/<帳號>/<repo>/main/發佈；在本機試就用 file:///…/交付/發佈。
 然後在 config.py 填 UPDATE_URL = "<base-url>/update.json"、WORKSHOP_URL = "<base-url>/index.json"。
-模組的版本預設跟 --version 一樣；要另外指定就寫「名稱=版本」，例如 --modules 整理桌面=1.2.0。"""
+模組的版本與這一版改了什麼，取自模組資料夾裡的 CHANGELOG.md（格式跟 repo 的一樣）最上面那一節：
+版本號，與那一節的第一段（寫進 index.json 的 notes）。沒有 CHANGELOG.md 的模組，版本跟 --version 一樣、notes 是空的；
+要另外指定就寫「名稱=版本」，例如 --modules 整理桌面=1.2.0。兩邊都有又不一樣就停下來，一個檔都不產生。"""
 
 import argparse
 import hashlib
@@ -51,6 +53,15 @@ def changelog_notes(changelog: Path, version: str) -> str:
             if line.strip():
                 lines.append(line)
     return "\n".join(lines)
+
+
+def latest(changelog: Path) -> tuple[str | None, str]:
+    """CHANGELOG.md 最上面那一節的（版本號, 第一段）；[Unreleased] 這類不是版本號的節不算。
+    沒有這個檔、或裡面沒有任何一節是版本號，回 (None, "")。"""
+    if not changelog.is_file():
+        return None, ""
+    found = re.search(r"^## \[(\d+(?:\.\d+)*)\]", changelog.read_text(encoding="utf-8"), re.M)
+    return (found[1], changelog_notes(changelog, found[1])) if found else (None, "")
 
 
 def pack_module(folder: Path, out_dir: Path) -> Path:
@@ -93,11 +104,19 @@ def main(argv: list[str], root: Path = ROOT) -> int:
     parser.add_argument("--ref", help="核心 zip 從哪個 git ref 打包；預設是 v<版本> 這個 tag")
     args = parser.parse_args(argv)
     version, out = args.version, root / "交付" / "發佈"
-    wanted = [(name, ver or version) for name, _, ver in (m.partition("=") for m in args.modules)]
-    missing = [name for name, _ in wanted if not (root / "modules" / name / "iplot.py").is_file()]
+    asked = [(name, ver) for name, _, ver in (m.partition("=") for m in args.modules)]
+    missing = [name for name, _ in asked if not (root / "modules" / name / "iplot.py").is_file()]
     if missing:
         print("modules/ 裡沒有這些模組：" + "、".join(missing))
         return 1
+    wanted = []  # (名稱, 版本, notes)
+    for name, ver in asked:
+        logged, notes = latest(root / "modules" / name / "CHANGELOG.md")
+        if ver and logged and ver != logged:  # 單一來源：不悄悄蓋掉其中一邊
+            print(f"「{name}」：指令列寫 {ver}，modules/{name}/CHANGELOG.md 最上面那一節是 {logged}；"
+                  "拿掉指令列的版本，或改 CHANGELOG.md，再發佈")
+            return 1
+        wanted.append((name, ver or logged or version, notes))
     out.mkdir(parents=True, exist_ok=True)
     ref, core_zip = args.ref or f"v{version}", out / f"iPLoT-v{version}.zip"
     git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)  # noqa: E731
@@ -119,11 +138,12 @@ def main(argv: list[str], root: Path = ROOT) -> int:
     notes = changelog_notes(root / "CHANGELOG.md", version)
     made = [core_zip, write_update(core_zip, version, _url(args.base_url, core_zip.name), notes, out)]
     entries = []
-    for name, ver in wanted:
+    for name, ver, module_notes in wanted:
         folder = root / "modules" / name
         packed, meta = pack_module(folder, out / MODULES), read_meta(folder / "iplot.py")
         entries.append({"name": name, "version": ver, "zip_url": _url(args.base_url, MODULES, packed.name),
-                        "sha256": sha256_of(packed), "description": meta.description, "icon": meta.icon})
+                        "sha256": sha256_of(packed), "description": meta.description, "icon": meta.icon,
+                        "notes": module_notes})
         made.append(packed)
     if wanted:  # 沒給 --modules：只發佈核心，原本的 index.json 不動
         made.append(write_index(entries, out))

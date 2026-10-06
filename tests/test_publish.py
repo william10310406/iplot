@@ -112,9 +112,9 @@ def test_main_end_to_end(publish, repo, capsys):
     mods = base + "/%E6%A8%A1%E7%B5%84/"
     assert index == [
         {"name": "整理桌面", "version": "1.2.0", "zip_url": mods + "%E6%95%B4%E7%90%86%E6%A1%8C%E9%9D%A2.zip",
-         "sha256": sha(out / "模組" / "整理桌面.zip"), "description": "把桌面上的截圖收起來。", "icon": "🧹"},
+         "sha256": sha(out / "模組" / "整理桌面.zip"), "description": "把桌面上的截圖收起來。", "icon": "🧹", "notes": ""},
         {"name": "沒圖示", "version": "9.9.9", "zip_url": mods + "%E6%B2%92%E5%9C%96%E7%A4%BA.zip",
-         "sha256": sha(out / "模組" / "沒圖示.zip"), "description": "", "icon": None}]
+         "sha256": sha(out / "模組" / "沒圖示.zip"), "description": "", "icon": None, "notes": ""}]
     assert "update.json" in capsys.readouterr().out
 
 
@@ -208,3 +208,44 @@ def test_skip_ignores_case(publish, tmp_path):
         (folder / junk).write_text("x", encoding="utf-8")
     with zipfile.ZipFile(publish.pack_module(folder, tmp_path / "out")) as z:
         assert z.namelist() == ["A/iplot.py"]
+
+
+# 模組自己的版本與更新紀錄（D78）：模組資料夾裡的 CHANGELOG.md
+
+MODULE_LOG = ("# Changelog\n\n「整理桌面」的版本紀錄。\n\n## [Unreleased]\n\n## [1.3.0] - 2026-10-06\n\n截圖改收進「截圖」資料夾，\n"
+              "不再收進「下載」。\n\n### 變更\n- 一\n\n## [1.2.0] - 2026-10-01\n\n舊的。\n")
+
+
+def test_module_version_and_notes_come_from_its_changelog(publish, repo):
+    """有 CHANGELOG.md 的模組：版本是最上面那一節（[Unreleased] 不算）的版本號，notes 是那一節的第一段；
+    CHANGELOG.md 跟著模組的 zip 一起出去。"""
+    (repo / "modules" / "整理桌面" / "CHANGELOG.md").write_text(MODULE_LOG, encoding="utf-8")
+    out = repo / "交付" / "發佈"
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面"], root=repo) == 0
+    [entry] = json.loads((out / "index.json").read_text(encoding="utf-8"))["modules"]
+    assert (entry["version"], entry["notes"]) == ("1.3.0", "截圖改收進「截圖」資料夾，\n不再收進「下載」。")
+    with zipfile.ZipFile(out / "模組" / "整理桌面.zip") as z:
+        assert "整理桌面/CHANGELOG.md" in z.namelist()
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面=1.3.0"],
+                        root=repo) == 0, "指令列寫的跟 CHANGELOG.md 一樣：照常"
+
+
+def test_conflicting_versions_stop_before_writing_anything(publish, repo, capsys):
+    """指令列的「名稱=版本」跟模組的 CHANGELOG.md 不一樣：單一來源，不悄悄蓋掉——說一句、代碼 1、一個檔都不產生。"""
+    (repo / "modules" / "整理桌面" / "CHANGELOG.md").write_text(MODULE_LOG, encoding="utf-8")
+    code = publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面=1.2.0", "沒圖示"],
+                        root=repo)
+    said = capsys.readouterr().out
+    assert code == 1
+    assert "整理桌面" in said and "1.2.0" in said and "1.3.0" in said and "CHANGELOG.md" in said
+    assert len(said.strip().splitlines()) == 1, said
+    assert not (repo / "交付").exists(), "一個檔都不產生"
+
+
+def test_modules_without_a_changelog_follow_the_core_version(publish, repo):
+    """沒有 CHANGELOG.md 的模組：版本同 --version（或指令列的「名稱=版本」），notes 是空字串。"""
+    out = repo / "交付" / "發佈"
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "沒圖示", "整理桌面=1.0.1"],
+                        root=repo) == 0
+    index = json.loads((out / "index.json").read_text(encoding="utf-8"))["modules"]
+    assert [(e["name"], e["version"], e["notes"]) for e in index] == [("沒圖示", "9.9.9", ""), ("整理桌面", "1.0.1", "")]
