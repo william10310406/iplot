@@ -48,7 +48,7 @@ def changelog_notes(changelog: Path, version: str) -> str:
     """CHANGELOG.md 裡「## [version]」那一節的第一段（摘要）；找不到那一版回空字串。
     它會整段顯示在「要更新嗎」的對話框裡，所以只取摘要，不是整節。"""
     lines, found = [], False
-    for line in changelog.read_text(encoding="utf-8").splitlines():
+    for line in changelog.read_text(encoding="utf-8-sig").splitlines():
         if line.startswith("## ["):
             if found:
                 break
@@ -62,12 +62,21 @@ def changelog_notes(changelog: Path, version: str) -> str:
 
 
 def latest(changelog: Path) -> tuple[str | None, str]:
-    """CHANGELOG.md 最上面那一節的（版本號, 第一段）；[Unreleased] 這類不是版本號的節不算。
-    沒有這個檔、或裡面沒有任何一節是版本號，回 (None, "")。"""
+    """CHANGELOG.md 最上面那一節（[Unreleased] 不算）的（版本號, 第一段）；沒有這個檔回 (None, "")。
+    有這個檔、卻讀不出最上面那一版（不是 UTF-8、沒有任何一節、版本號不是 1.2.0 這種寫法）丟 ValueError（一句話）：
+    不悄悄跳過那一節去發佈舊的，也不悄悄改用 --version。"""
     if not changelog.is_file():
         return None, ""
-    found = re.search(r"^## \[(\d+(?:\.\d+)*)\]", changelog.read_text(encoding="utf-8"), re.M)
-    return (found[1], changelog_notes(changelog, found[1])) if found else (None, "")
+    try:
+        text = changelog.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValueError("不是 UTF-8 的文字檔") from None
+    heads = [h for h in re.findall(r"^## \[([^\]]*)\]", text, re.M) if h.strip().casefold() != "unreleased"]
+    if not heads:
+        raise ValueError("裡面沒有「## [1.0.0] - 日期」這樣的一節")
+    if not re.fullmatch(r"\d+(\.\d+)*", heads[0]):
+        raise ValueError(f"最上面那一節的版本「{heads[0]}」不是 1.2.0 這種只有數字與點的寫法（工作坊比不了別的寫法）")
+    return heads[0], changelog_notes(changelog, heads[0])
 
 
 def pack_module(folder: Path, out_dir: Path) -> Path:
@@ -181,7 +190,11 @@ def main(argv: list[str], root: Path = ROOT) -> int:
         return 1
     wanted = []  # (名稱, 版本, notes)
     for name, ver in asked:
-        logged, notes = latest(root / "modules" / name / "CHANGELOG.md")
+        try:
+            logged, notes = latest(root / "modules" / name / "CHANGELOG.md")
+        except ValueError as exc:
+            print(f"modules/{name}/CHANGELOG.md {exc}；改好再發佈")
+            return 1
         if ver and logged and ver != logged:  # 單一來源：不悄悄蓋掉其中一邊
             print(f"「{name}」：指令列寫 {ver}，modules/{name}/CHANGELOG.md 最上面那一節是 {logged}；"
                   "拿掉指令列的版本，或改 CHANGELOG.md，再發佈")

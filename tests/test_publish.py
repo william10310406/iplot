@@ -345,3 +345,25 @@ def test_core_only_run_keeps_the_modules_on_the_page(publish, repo):
     assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
     text = "".join(parsed((out / "index.html").read_text(encoding="utf-8")).text)
     assert "整理桌面" in text and "把桌面上的截圖收起來。" in text
+
+
+@pytest.mark.parametrize("log", [
+    "## [1.0.0-beta.1] - 2026-10-06\n\n新的。\n\n## [0.9.0] - 2026-10-01\n\n舊的。\n",  # 以前：悄悄發佈 0.9.0 與舊的說明
+    "## [v1.0.0] - 2026-10-06\n\n新的。\n",  # 以前：當作沒有 CHANGELOG.md，跟著 --version
+    "# Changelog\n\n還沒有任何一版。\n",
+    "## [1.0.0]\n\n新的。\n".encode("big5"),  # 以前：traceback
+])
+def test_a_module_changelog_whose_top_version_cannot_be_read_stops_before_writing_anything(publish, repo, capsys, log):
+    """Task 17 審查（裁定 3.4 改判）：有 CHANGELOG.md、卻讀不出最上面那一版是哪一版，就停下來說一句——不悄悄發佈舊的那一節、
+    不悄悄跟著 --version、不是 traceback；一個檔都不產生。"""
+    path = repo / "modules" / "整理桌面" / "CHANGELOG.md"
+    path.write_bytes(log) if isinstance(log, bytes) else path.write_text(log, encoding="utf-8")
+    code = publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面"], root=repo)
+    said = capsys.readouterr().out.strip().splitlines()
+    assert code == 1 and len(said) == 1 and "modules/整理桌面/CHANGELOG.md" in said[0], said
+    assert not (repo / "交付").exists()
+
+
+def test_a_module_changelog_with_a_bom_is_read(publish, repo):
+    (repo / "modules" / "整理桌面" / "CHANGELOG.md").write_text("﻿## [1.3.0] - 2026-10-06\n\n摘要。\n", encoding="utf-8")
+    assert publish.latest(repo / "modules" / "整理桌面" / "CHANGELOG.md") == ("1.3.0", "摘要。")
