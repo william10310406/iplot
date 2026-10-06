@@ -165,12 +165,17 @@ def _stamped(folder, suffix):
     return path
 
 
+def _kept(parts):
+    """路徑裡有沒有哪一段是快照資料夾 .history；不分大小寫：macOS 上本來就有的 .History/ 跟 .history/ 是同一個資料夾。"""
+    return any(part.casefold() == ".history" for part in parts)
+
+
 def snapshot(folder):
     """把整個模組資料夾（.history/ 自己除外）壓成 .history/<日期時間>-folder.zip，回那個檔。"""
     (folder / ".history").mkdir(exist_ok=True)
     saved = _stamped(folder / ".history", "-folder.zip")
     files = [(p.relative_to(folder).as_posix(), p) for p in sorted(folder.rglob("*"))
-             if p.is_file() and ".history" not in p.relative_to(folder).parts]
+             if p.is_file() and not _kept(p.relative_to(folder).parts)]
     with zipfile.ZipFile(saved, "w", zipfile.ZIP_DEFLATED) as z:
         for rel, path in files:
             z.write(path, rel)
@@ -235,19 +240,31 @@ class NotInstalled(OSError):
 def _contents(folder):
     """folder 裡的檔案（相對路徑 → 內容），挑法跟 snapshot 一樣：.history/ 以外的每一個檔。"""
     return {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*")
-            if p.is_file() and ".history" not in p.relative_to(folder).parts}
+            if p.is_file() and not _kept(p.relative_to(folder).parts)}
+
+
+def _readable(saved):
+    """快照讀得到、每個檔都解得開（testzip）才算。"""
+    try:
+        with zipfile.ZipFile(saved) as z:
+            return z.testzip() is None
+    except (OSError, zipfile.BadZipFile):
+        return False
 
 
 def _rollback(folder, saved):
     """裝到一半出錯：把模組資料夾放回裝之前的樣子，回有沒有放回去。saved 是覆蓋前存的快照；None 表示原本沒有這個資料夾。
     讓安裝失敗的原因（鎖定的檔、唯讀的資料夾）通常也讓這裡刪不掉、寫不回去：遇到錯不停下來，能刪的刪、能放的放，
-    最後逐檔跟快照比，一樣才算放回去了。沒放回去的話，留下來的每個模組資料夾都放 .unconfirmed（裡面可能有新下載的程式）。"""
+    最後逐檔跟快照比，一樣才算放回去了。快照讀不到的話一樣都不刪（刪了就補不回來）。
+    沒放回去的話，留下來的每個模組資料夾都放 .unconfirmed（裡面可能有新下載的程式）。"""
     if saved is None:
         shutil.rmtree(folder, ignore_errors=True)
         back = not folder.exists()
+    elif not _readable(saved):
+        back = False
     else:
         for path in folder.iterdir():
-            if path.name != ".history":
+            if not _kept([path.name]):
                 with contextlib.suppress(OSError):
                     shutil.rmtree(path, ignore_errors=True) if path.is_dir() and not path.is_symlink() else path.unlink()
         try:
@@ -312,9 +329,12 @@ def install(entry, modules_dir, confirmed=False):
                                   "digest": digest(folder, listed), "files": json.dumps(listed, ensure_ascii=False),
                                   "installed": f"{datetime.now():%Y-%m-%d %H:%M:%S}"})
         except OSError as exc:
+            unreadable = saved is not None and not _readable(saved)
             back = _rollback(folder, saved)
             if saved is None:
                 done = "沒有裝成，裝了一半的資料夾已經拿掉" if back else f"沒有裝成，裝了一半的資料夾拿不掉：{folder}"
+            elif unreadable:
+                done = f"沒有裝成，快照讀不到、沒有放回，資料夾現在是新舊混合：{folder}"
             else:
                 done = "沒有裝成，已從快照放回" if back else f"沒有裝成，放回時出錯，快照在 {saved}"
             raise NotInstalled(f"{exc}；{done}") from exc

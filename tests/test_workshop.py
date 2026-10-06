@@ -457,7 +457,8 @@ def test_rollback_with_a_locked_file(workshop, mods, src):
 
 @POSIX_USER
 def test_when_the_rollback_cannot_finish_the_sentence_says_where_the_snapshot_is(workshop, mods, src, monkeypatch):
-    """快照讀不回來（權限）：不能說放回了；要說放回時出錯、快照在哪裡。"""
+    """快照讀不回來（權限）：不能說放回了。2026-10-06（R2）起快照讀不到就一樣都不刪，那一句說資料夾是新舊混合、在哪裡；
+    「放回時出錯，快照在 <路徑>」留給快照讀得到、卻有檔解不回去的時候（下一個測試）。"""
     folder = make_module(mods, "整理桌面", "print('我自己的')\n")
     real, calls = workshop.shutil.copyfile, []
 
@@ -473,8 +474,8 @@ def test_when_the_rollback_cannot_finish_the_sentence_says_where_the_snapshot_is
     try:
         with pytest.raises(OSError) as raised:
             workshop.install(pack(src, "整理桌面", V2), mods)
-        [saved] = list((folder / ".history").glob("*-folder.zip"))
-        assert "已從快照放回" not in str(raised.value) and f"放回時出錯，快照在 {saved}" in str(raised.value)
+        assert "已從快照放回" not in str(raised.value)
+        assert f"快照讀不到、沒有放回，資料夾現在是新舊混合：{folder}" in str(raised.value)
     finally:
         for saved in (folder / ".history").glob("*-folder.zip"):
             saved.chmod(0o644)
@@ -511,6 +512,69 @@ def test_rollback_that_cannot_write_a_file_back_does_not_say_it_put_it_back(work
     assert not (folder / "帳本.csv").exists() and (folder / ".unconfirmed").is_file()
     with zipfile.ZipFile(saved) as z:
         assert z.read("帳本.csv") == "我的帳\n".encode()
+
+
+def _fail_second_copy(workshop, monkeypatch, before_raising=lambda: None):
+    real, calls = workshop.shutil.copyfile, []
+
+    def copyfile(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            before_raising()
+            raise OSError(28, "模擬：磁碟滿了")
+        return real(source, target)
+
+    monkeypatch.setattr(workshop.shutil, "copyfile", copyfile)
+
+
+def test_rollback_keeps_the_snapshot_when_the_folder_already_has_dot_History(workshop, mods, src, monkeypatch):
+    """第二輪審查 R2：macOS 不分大小寫，模組資料夾裡本來就有 .History/（使用者或別的工具建的）時，快照寫進它裡面。
+    以前用精確的 ".history" 認快照資料夾：放回原樣時把 .History/ 連快照一起刪掉，那一句還說「快照在 <已經不在的路徑>」。"""
+    probe = mods / "Aa"
+    probe.mkdir()
+    insensitive = (mods / "aA").exists()
+    probe.rmdir()
+    if not insensitive:
+        pytest.skip("只在不分大小寫的檔案系統上會碰到")
+    folder = make_module(mods, "記帳", "print('v1')\n")
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    (folder / ".History").mkdir()
+    (folder / ".History" / "mine.txt").write_text("我自己的\n", encoding="utf-8")
+    before = {k: v for k, v in tree(folder).items() if not k.lower().startswith(".history/")}
+    _fail_second_copy(workshop, monkeypatch)
+    with pytest.raises(OSError) as raised:
+        workshop.install(pack(src, "記帳", {"iplot.py": "print('v2')\n", "b.py": "x = 1\n"}), mods)
+    monkeypatch.undo()
+    message = str(raised.value)
+    assert (folder / ".History" / "mine.txt").read_text(encoding="utf-8") == "我自己的\n"
+    assert [p.name for p in (folder / ".History").iterdir() if p.name.endswith("-folder.zip")], "快照還在"
+    for path in message.split("快照在 ")[1:]:
+        assert Path(path).exists(), message
+    assert "沒有裝成，已從快照放回" in message, message
+    assert {k: v for k, v in tree(folder).items() if not k.lower().startswith(".history/")} == before
+
+
+def test_rollback_does_not_delete_anything_when_the_snapshot_is_unreadable(workshop, mods, src, monkeypatch):
+    """第二輪審查 R2：快照讀不到（寫壞了）時，放回原樣不能先把資料夾清掉——清了就補不回來。
+    一樣都不刪：包沒碰到的檔逐位元組不變；留下的每個模組資料夾放 .unconfirmed；那一句照實說是新舊混合、在哪裡。"""
+    folder = make_module(mods, "記帳", "print('v1')\n")
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    make_module(folder, "子", "print('子')\n")
+
+    def spoil():
+        for saved in (folder / ".history").glob("*-folder.zip"):
+            saved.write_bytes(b"not a zip any more")
+
+    _fail_second_copy(workshop, monkeypatch, spoil)
+    with pytest.raises(OSError) as raised:
+        workshop.install(pack(src, "記帳", {"iplot.py": "print('v2')\n", "b.py": "x = 1\n"}), mods)
+    monkeypatch.undo()
+    message = str(raised.value)
+    assert (folder / "帳本.csv").read_bytes() == "我的帳\n".encode()
+    assert (folder / "子" / "iplot.py").read_bytes() == "print('子')\n".encode()
+    assert "已從快照放回" not in message
+    assert f"沒有裝成，快照讀不到、沒有放回，資料夾現在是新舊混合：{folder}" in message, message
+    assert (folder / ".unconfirmed").is_file() and (folder / "子" / ".unconfirmed").is_file()
 
 
 def test_a_rollback_that_cannot_finish_leaves_every_module_folder_asking(workshop, mods, tmp_path, monkeypatch):
