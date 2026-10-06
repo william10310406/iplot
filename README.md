@@ -10,7 +10,7 @@
    - macOS：Python 3.10 以上、有 pip 就可以，不必是 python.org 的（Homebrew 的照理也行，但沒有實測過）。[python.org 的安裝檔](https://www.python.org/downloads/)最省事：它內含 tkinter，安全模式和後備面板要用。開發和實測用的是 python.org 的 3.14。
    - Windows：python.org 的安裝檔，安裝時勾選 tcl/tk（安全模式和後備面板要用）。網頁面板另外需要 Microsoft Edge WebView2 Runtime（Windows 11 內建）。**未經實機驗證。**
    - Linux：這一版沒有網頁面板，開的是 tkinter 面板。發行版的 Python 加上 `python3-tk` 套件（Debian／Ubuntu：`sudo apt install python3-tk`）。
-2. 下載這個資料夾，放哪裡都可以（例如 `~/iPLoT`）。
+2. 到 [https://william10310406.github.io/iplot-workshop/](https://william10310406.github.io/iplot-workshop/) 下載 `iPLoT-vX.Y.Z.zip`（那一頁也列了工作坊裡的模組），解壓縮，資料夾放哪裡都可以（例如 `~/iPLoT`）。
 3. 啟動：
    - macOS：雙擊 `iPLoT.command`。第一次 macOS 可能問你要不要打開，選「打開」。
    - Windows：雙擊 `iPLoT.bat`。**未經實機驗證。**
@@ -122,24 +122,25 @@ print("你的年齡是" + x + "歲")
 - **更新**（⬆️）：把 iPLoT 的核心換成新版，不動到自己做的東西。
 - **工作坊**（🧰）：從一份清單安裝、更新別人做的模組。
 
-平常不連網。只有按下去的那一次才連，iPLoT 不會自己去看有沒有新版。來源網址沒設定時（預設就是沒設定），按了只會在訊息區說一句怎麼設定——不連網；除了每個模組執行前照例存進自己 `.history/` 的那一份 `iplot.py` 快照，不寫任何檔案；其他功能不受影響。
+平常不連網。只有按下去的那一次才連，iPLoT 不會自己去看有沒有新版。隨附的 `config.py` 已經填好來源（GitHub Pages 上的 `iplot-workshop`，見「怎麼設定」），剛拿到的 iPLoT 按下去就有東西。把來源改成 `None` 就不連網：按了只會在訊息區說一句怎麼設定——不連網；除了每個模組執行前照例存進自己 `.history/` 的那一份 `iplot.py` 快照，不寫任何檔案；其他功能不受影響。
 
-這兩個功能的整個流程只在 macOS 上、用本機的 `file://` 網址驗過；`https://` 只驗過連得上、憑證驗得過。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與後備面板（所以 Linux 也是）沒有工作坊的清單頁。
+這兩個功能的整個流程只在 macOS 上、用本機的 `file://` 網址驗過；`https://` 只驗過連得上、憑證驗得過；從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，寫這一段時還沒有走過。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與後備面板（所以 Linux 也是）沒有工作坊的清單頁。
 
 ### 怎麼設定
 
-`config.py` 裡的兩行，預設都是 `None`：
+`config.py` 裡的兩行，隨附的已經填好 iPLoT 自己放檔案的地方：
 
 ```python
-UPDATE_URL = None              # 「更新」從哪裡看有沒有新版：update.json 的網址；None = 不設，按「更新」時會說怎麼填
-WORKSHOP_URL = None            # 「工作坊」的模組清單：index.json 的網址；None = 不設
+# 「更新」從哪裡看有沒有新版、「工作坊」的模組清單。按了才連網；改成 None 就不連網
+UPDATE_URL = "https://william10310406.github.io/iplot-workshop/update.json"
+WORKSHOP_URL = "https://william10310406.github.io/iplot-workshop/index.json"
 ```
 
-把 `None` 換成放檔案的人給的網址（字串，要加引號），存檔，執行「重新啟動」。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，自己加上去；不加等於沒設定。
+不想連網：把網址換成 `None`（不加引號），存檔，執行「重新啟動」；按下去只會說一句怎麼設定。要用別人放檔案的地方：換成那個人給的網址（字串，要加引號）。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，照上面那三行自己加上去；不加等於沒設定（`None`）。
 
 ### 怎麼發佈
 
-這是放檔案的人做的事；只是拿「更新」「工作坊」來用的人不用做，填好上面那兩行就可以。`tools/publish.py` 把一個版本變成這兩個模組讀得懂的檔案。它用 `git archive` 打包核心，所以要在有 git 紀錄的 iPLoT 資料夾裡執行：
+這是放檔案的人做的事；只是拿「更新」「工作坊」來用的人不用做，隨附的 `config.py` 就指到 iPLoT 自己放檔案的地方。`tools/publish.py` 把一個版本變成這兩個模組讀得懂的檔案。它用 `git archive` 打包核心，所以要在有 git 紀錄的 iPLoT 資料夾裡執行：
 
 ```
 python3 tools/publish.py --version 0.5.0 --base-url <放檔案的地方> --modules 整理桌面 開工
@@ -162,19 +163,23 @@ python3 tools/publish.py --version 0.5.0 --base-url <放檔案的地方> --modul
 
 `--base-url` 是 `交付/發佈/` 這個資料夾放上去之後對應的網址。兩個 JSON 裡的下載網址都是照它寫的，所以要先決定放哪裡，再跑工具。產生的檔要一起放上去：JSON 裡記著 zip 的 sha256，只換其中一邊就對不上，「更新」「工作坊」會拒絕。
 
-**放在 GitHub 的公開 repo，用 raw 網址。** 這是定下來的做法。把 `交付/發佈/` 裡的東西放進一個公開 repo 的某個資料夾，例如 `發佈/`；raw 網址直接給出檔案的內容，長這樣：
+**放在 GitHub Pages：iPLoT 自己就是這樣發佈的（D79）。** 另一個公開 repo `iplot-workshop`，GitHub Pages 從它 `main` 分支的根目錄出，網址是 `https://<帳號>.github.io/iplot-workshop/`。它的本機 clone 放在 iPLoT 資料夾隔壁（`../iplot-workshop`），`--out` 直接寫進去，然後 commit、push。完整的指令，在 iPLoT 資料夾裡：
 
 ```
-https://raw.githubusercontent.com/<帳號>/<repo>/<分支>/發佈/update.json
+python3 tools/publish.py --version 0.5.0 --base-url https://<帳號>.github.io/iplot-workshop --out ../iplot-workshop --modules 開工 作業系統 打開核心原始碼
 ```
 
-`--base-url` 填到放 `update.json` 的那一層：
+還沒打 `v0.5.0` 這個 tag 時加 `--ref HEAD`。再到 `../iplot-workshop`：
 
 ```
-python3 tools/publish.py --version 0.5.0 --base-url https://raw.githubusercontent.com/<帳號>/<repo>/<分支>/發佈 --modules 整理桌面 開工
+git add -A
+git commit -m "0.5.0（<iPLoT 的短 sha>）"
+git push
 ```
 
-用的人在 `config.py` 填 `UPDATE_URL = "<base-url>/update.json"`、`WORKSHOP_URL = "<base-url>/index.json"`，也就是工具最後印出來的那兩行（網址裡的中文會寫成 `%XX`，是同一個網址）。那兩行前面沒有空白，整行從行首貼進 `config.py` 就好。repo 要是公開的：iPLoT 取檔時不帶任何帳號密碼。**這條路還沒有真的走過**——repo 還沒建，raw 網址上還沒有放過任何檔案；整個流程到目前為止都是用下面的 `file://` 驗的，`https://` 只試過連得上 raw.githubusercontent.com、憑證驗得過。
+推上去之後 Pages 要一兩分鐘才換成新的（`https://<帳號>.github.io/iplot-workshop/update.json` 打開來是新的版本就好了）；那之前按「更新」，拿到的可能還是上一版。第一次推的 repo，要在 GitHub 上那個 repo 的 Settings → Pages 選「Deploy from a branch」、`main`、`/ (root)`。repo 要是公開的：iPLoT 取檔時不帶任何帳號密碼。
+
+用的人在 `config.py` 填 `UPDATE_URL = "<base-url>/update.json"`、`WORKSHOP_URL = "<base-url>/index.json"`，也就是工具最後印出來的那兩行（網址裡的中文會寫成 `%XX`，是同一個網址）；那兩行前面沒有空白，整行從行首貼進 `config.py` 就好。隨附的 `config.py` 填的是 `https://william10310406.github.io/iplot-workshop/` 底下那兩個。`index.html` 是給還沒裝 iPLoT 的人看的那一頁，網址就是 `https://<帳號>.github.io/iplot-workshop/`。從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，寫這一段時還沒有走過。
 
 **在本機試，用 `file://`。** 不用上傳、不用網路：`--base-url file:///<絕對路徑>/交付/發佈`。在 iPLoT 資料夾裡可以直接這樣寫：
 
@@ -184,7 +189,7 @@ python3 tools/publish.py --version 0.5.0 --ref HEAD --base-url "file://$(pwd)/�
 
 一步一步的試法在 [docs/06_架構說明與試用.md](docs/06_架構說明與試用.md) 第五節。
 
-其他能用 `https://` 直接取到檔案的地方照理也行，沒有試過。Google Drive 的分享連結不是直接取檔，不行。
+其他能用 `https://` 直接取到檔案的地方照理也行（例如 GitHub 的 raw 網址），沒有試過。Google Drive 的分享連結不是直接取檔，不行。
 
 ### 按「更新」會發生什麼
 
