@@ -503,3 +503,18 @@ def test_empty_icon_file_falls_back(home):
     logs = []
     assert icon_for(DEFAULT_INFO(folder), set(), logs.append) is None
     assert logs == [T["icon_unusable"].format(title="A")]
+
+
+# M3：app.page
+
+def test_page_blocks_until_closed(panel):
+    """app.page 開第二個視窗顯示一頁 HTML，視窗關掉才回來（像對話框）；api 的方法給那一頁的 JS 呼叫。"""
+    api = object()
+    t, box = in_thread(lambda: panel.page("工作坊", "<p>hi</p>", api))
+    until(lambda: len(panel.webview.windows) == 2)
+    page = panel.webview.windows[1]
+    assert (page.title, page.kw["html"], page.kw["js_api"]) == ("工作坊", "<p>hi</p>", api)
+    assert "url" not in page.kw and t.is_alive()
+    page.fire("closed")
+    t.join(3)
+    assert box == [None] and not t.is_alive()

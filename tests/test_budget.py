@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core"
 SKIP = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
         tokenize.ENCODING, tokenize.ENDMARKER}
-UI_BUDGETS = {"ui/web.py": 200, "ui/tk.py": 180, "ui/install.py": 80,
+# ui/web.py：2026-10-05 由 200 調到 220（M3 的 page 5 行，日後關閉前確認 8 行）
+UI_BUDGETS = {"ui/web.py": 220, "ui/tk.py": 180, "ui/install.py": 80,
               "ui/index.html": 120, "ui/app.js": 400, "ui/style.css": 300}
 BLOCKS = (("/*", "*/"), ("<!--", "-->"))
 

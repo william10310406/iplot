@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import time
 import types
@@ -61,11 +62,36 @@ class FakeView:
         self.confirmed.append(prompt)
         return self.answers.pop(0) if self.answers else True
 
+    def page(self, title, html, api):
+        self.events.append(("page", (title, html, api)))
+
     def choose_files(self):
         return [Path("/f")]
 
     def choose_folder(self):
         return Path("/d")
+
+
+class FakeApp:
+    """模組拿到的 app 的替身：記下 log、confirm、page、rescan；設定用關鍵字給（update_url=…）。"""
+
+    def __init__(self, home, version="0.4.9", **config):
+        self.home, self.version = home, version
+        self.config = dataclasses.replace(DEFAULT_CONFIG, **config)
+        self.logs, self.confirms, self.answers, self.pages, self.rescans = [], [], [], [], 0
+
+    def log(self, text):
+        self.logs.append(text)
+
+    def confirm(self, prompt):
+        self.confirms.append(prompt)
+        return self.answers.pop(0) if self.answers else True
+
+    def page(self, title, html, api=None):
+        self.pages.append((title, html, api))
+
+    def rescan(self):
+        self.rescans += 1
 
 
 class FakeCore:

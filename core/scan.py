@@ -1,5 +1,6 @@
 """找模組：資料夾裡有 iplot.py 就是模組。只看檔名和 ast，不執行任何模組程式碼。"""
 
+import contextlib
 import os
 import unicodedata
 from collections.abc import Iterable
@@ -19,11 +20,10 @@ def _nfc(name: str) -> str:
 
 def is_module(folder: Path) -> bool:
     """folder 是資料夾（不是符號連結），裡面有檔名剛好是 iplot.py 的檔案；讀不到就不是。"""
-    try:  # APFS 不分大小寫，所以比對 listdir 的實際檔名，iPLoT.py 不算
+    with contextlib.suppress(OSError):  # APFS 不分大小寫，所以比對 listdir 的實際檔名，iPLoT.py 不算
         return (not folder.is_symlink() and folder.is_dir()
                 and MARKER in os.listdir(folder) and (folder / MARKER).is_file())
-    except OSError:
-        return False
+    return False
 
 
 def _module_folders(folder: Path) -> list[Path]:
@@ -32,26 +32,17 @@ def _module_folders(folder: Path) -> list[Path]:
     return sorted(found, key=lambda p: _nfc(p.name))
 
 
-def _icon_file(folder: Path) -> Path | None:
-    """folder 裡檔名剛好是 icon.png 或 icon.svg 的檔案；跟 iplot.py 一樣比對實際檔名，Icon.png 不算。"""
-    try:
-        names = os.listdir(folder)
-    except OSError:
-        return None
-    return next((folder / n for n in ICONS if n in names and (folder / n).is_file()), None)
-
-
 def module_info(folder: Path, root: Path, level: Level) -> ModuleInfo:
-    """讀一個模組的資訊，不執行它。"""
+    """讀一個模組的資訊，不執行它。圖示檔是檔名剛好叫 icon.png 或 icon.svg 的檔案：
+    跟 iplot.py 一樣比對實際檔名，Icon.png 不算。"""
     name, file = _nfc(folder.name), folder / MARKER
-    meta = read_meta(file)
-    try:
+    meta, icon_file, has_children = read_meta(file), None, False
+    with contextlib.suppress(OSError):  # 資料夾讀不到：當作沒有圖示檔、沒有子模組
+        names = os.listdir(folder)
+        icon_file = next((folder / n for n in ICONS if n in names and (folder / n).is_file()), None)
         has_children = bool(_module_folders(folder))
-    except OSError:
-        has_children = False
     return ModuleInfo(name, meta.title or name, meta.description, folder, file, root, level,
-                      meta.has_run, meta.accepts_files, has_children, meta.error,
-                      meta.icon, _icon_file(folder))
+                      meta.has_run, meta.accepts_files, has_children, meta.error, meta.icon, icon_file)
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -97,7 +88,6 @@ def find_modules(roots: list[Root]) -> list[Group]:
 
 def find_children(folder: Path, root: Path) -> list[ModuleInfo]:
     """folder 底下的子模組（level 為 child）；讀不到就當作沒有。"""
-    try:
+    with contextlib.suppress(OSError):
         return [module_info(f, root, "child") for f in _module_folders(folder)]
-    except OSError:
-        return []
+    return []

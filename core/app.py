@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .types import ModuleInfo, Result
+from . import __version__
+from .types import Config, ModuleInfo, Result
 
 if TYPE_CHECKING:
     from .core import Core
@@ -13,9 +14,10 @@ if TYPE_CHECKING:
 
 class App:
     """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version 並寫進 CHANGELOG
-    （1 是第一版；2 拿掉了 window，見 D66）。"""
+    （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page）。version 是核心的版本字串。"""
 
-    api_version: int = 2
+    api_version: int = 3
+    version: str = __version__
 
     def __init__(self, core: Core, info: ModuleInfo) -> None:
         self._core, self._info = core, info
@@ -35,6 +37,11 @@ class App:
     def modules(self) -> tuple[ModuleInfo, ...]:
         """目前範圍內所有模組的唯讀清單。"""
         return self._core.all_modules()
+
+    @property
+    def config(self) -> Config:
+        """config.py 讀出來的設定（唯讀）：roots、editor、history_keep、update_url、workshop_url。"""
+        return self._core.config
 
     @property
     def memory(self) -> dict:
@@ -83,6 +90,11 @@ class App:
     def confirm(self, prompt: str) -> bool:
         """跳出對話框問「確定／取消」；按確定回 True。"""
         return self._core.view.confirm(prompt)
+
+    def page(self, title: str, html: str, api: object | None = None) -> None:
+        """開一個視窗顯示一頁 HTML，關掉才回來；api 的公開方法給那一頁的 JS 用 pywebview.api.<方法> 呼叫。
+        tkinter 面板（安全模式與備用面板）沒有頁面，只在訊息區記一行。"""
+        self._core.view.page(title, html, api)
 
     def choose_files(self) -> list[Path]:
         """跳出檔案選擇視窗；按取消回空清單。"""

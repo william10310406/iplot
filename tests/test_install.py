@@ -113,7 +113,7 @@ def test_requirements_file_and_ready_ask_the_system_module(home, monkeypatch, ca
     assert install.ready(core) is None
     monkeypatch.setattr(sys, "platform", "linux")
     assert install.requirements_file(home, core) is None, "Linux 這一版沒有網頁面板"
-    assert "--safe" in install.ready(core)
+    assert "Linux" in install.ready(core)
     assert capsys.readouterr().out == "", "問這兩件事不在主控台留下「完成」之類的字"
 
 
@@ -132,6 +132,7 @@ def test_console_view_is_a_minimal_view(capsys):
     view.report(ErrorInfo("TypeError", "m", None, None, "Traceback…", "config", None))
     assert capsys.readouterr().out == "一行\n" + T["config_error"].format(message="m") + "\n"
     assert (view.ask("q"), view.confirm("q"), view.choose_files(), view.choose_folder()) == (None, False, [], None)
+    assert view.page("t", "<p></p>", None) is None
 
 
 @pytest.mark.parametrize("name", ["web-mac.txt", "web-win.txt"])
@@ -156,3 +157,35 @@ def test_requirements_files_are_ascii(name):
 
 def test_lib_is_ignored_by_git():
     assert "lib/" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_stale_means_lib_was_installed_from_other_requirements(home, req):
+    """lib/.installed 記的不是現在 requirements/ 裡任何一份（更新換了需求檔）：要重裝。沒裝過不算。"""
+    assert not install.stale(home), "沒有 lib/：這是第一次安裝的事，不是「過期」"
+    (home / "lib").mkdir()
+    (home / "lib" / ".installed").write_text(hashlib.sha256(req.read_bytes()).hexdigest(), encoding="utf-8")
+    assert not install.stale(home)
+    (home / "requirements" / "web-win.txt").write_text("other==1\n", encoding="utf-8")
+    assert not install.stale(home), "別的平台的需求檔不影響"
+    req.write_text("pywebview==9.9.9\n", encoding="utf-8")
+    assert install.stale(home)
+
+
+def test_quick_install_gives_up_fast(home, req):
+    """更新後重裝時先求快：沒有網路就不要讓 pip 重試半分鐘，馬上回來用現有的版本開。"""
+    popen = FakePopen([], 1)
+    install.install(home, req, lambda line: None, popen, quick=True)
+    argv = popen.calls[0][0]
+    assert argv[argv.index("--retries") + 1] == "0" and "--timeout" in argv
+    popen = FakePopen([], 1)
+    install.install(home, req, lambda line: None, popen)
+    assert "--retries" not in popen.calls[0][0]
+
+
+def test_stale_survives_a_garbled_marker_and_a_missing_requirements_folder(home, req):
+    """記號檔不是文字（壞掉了）：當作過期、重裝一次，不是啟動時的 traceback。requirements/ 整個不見：沒得比，不重裝。"""
+    (home / "lib").mkdir()
+    (home / "lib" / ".installed").write_bytes(b"\xff\xfe\x00garbage")
+    assert install.stale(home) is True
+    shutil.rmtree(home / "requirements")
+    assert install.stale(home) is False

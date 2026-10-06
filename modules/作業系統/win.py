@@ -60,8 +60,7 @@ def webview_ready(app):
                     return None
         except OSError:
             continue
-    return ("找不到 WebView2 runtime：請先安裝 Microsoft Edge WebView2 Runtime（Windows 11 內建），"
-            "或用安全模式：python main.py --safe")
+    return "找不到 WebView2 runtime：請先安裝 Microsoft Edge WebView2 Runtime（Windows 11 內建）"
 
 
 def trash(app, path):

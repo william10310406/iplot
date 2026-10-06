@@ -49,7 +49,7 @@ def requirements(app):
 
 def webview_ready(app):
     """網頁面板的前置條件都有就回 None，缺什麼就回一句話。Linux 要系統層的 GTK／WebKit2GTK，pip 裝不了。"""
-    return "這一版的網頁面板還不支援 Linux，請用安全模式：python3 main.py --safe"
+    return "這一版的網頁面板還不支援 Linux"
 
 
 def trash(app, path):

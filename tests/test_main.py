@@ -73,11 +73,12 @@ def boot(home, monkeypatch):
     shutil.copytree(ROOT / "modules" / SYSTEM_MODULE, home / "modules" / SYSTEM_MODULE,
                     ignore=shutil.ignore_patterns("__pycache__", ".history"))
     shutil.copytree(ROOT / "requirements", home / "requirements")
-    b = types.SimpleNamespace(main=main, home=home, calls=[], web=None, tk=None, pip=None,
+    b = types.SimpleNamespace(main=main, home=home, calls=[], web=None, tk=None, pip=None, notes=[], quick=[],
                               req=home / "requirements" / "web-mac.txt")
 
-    def run_web(home, config, err, version):
+    def run_web(home, config, err, version, note=None):
         b.calls.append(("web", version))
+        b.notes.append(note)
         if b.web is not None:
             raise b.web
 
@@ -86,8 +87,9 @@ def boot(home, monkeypatch):
         if b.tk is not None:
             raise b.tk
 
-    def install(home, req, say):
+    def install(home, req, say, quick=False):
         b.calls.append(("pip", req, (home / "lib" / ".installed").exists()))
+        b.quick.append(quick)
         say("Collecting pywebview")
         return b.pip
 
@@ -155,12 +157,13 @@ def test_execv_keeps_the_arguments(boot, monkeypatch):
 
 
 def test_install_failure_falls_back_to_tk_with_note(boot, capsys):
-    """裝不起來（例如沒有網路）：主控台與 tk 面板的訊息區都說原因與怎麼再試；後備是安全模式。"""
+    """裝不起來（例如沒有網路）：主控台與 tk 面板的訊息區都說原因與怎麼再試。
+    後備面板不是安全模式：掃完整範圍（上一層與 ROOTS），只有 --safe 才只掃 modules/。"""
     boot.web, boot.pip = ImportError("No module named 'webview'"), "ERROR: Could not fetch URL x"
     boot.main.main()
     assert kinds(boot) == ["web", "pip", "tk"]
     _, safe, note = boot.calls[-1]
-    assert safe is True and note == T["install_failed"].format(message="ERROR: Could not fetch URL x")
+    assert safe is False and note == T["install_failed"].format(message="ERROR: Could not fetch URL x")
     out = capsys.readouterr().out
     assert note in out and "Traceback" not in out
 
@@ -186,7 +189,7 @@ def test_broken_lib_reinstalls_then_falls_back(boot, capsys):
     boot.main.main()  # 重啟後的那一次：還是壞
     assert kinds(boot) == ["web", "pip", "execv", "web", "tk"], "只重裝一次"
     _, safe, note = boot.calls[-1]
-    assert safe is True and note == T["web_failed"].format(message="cannot import name 'AppKit'")
+    assert safe is False and note == T["web_failed"].format(message="cannot import name 'AppKit'")
     assert note in capsys.readouterr().out
 
 
@@ -206,12 +209,13 @@ def test_boot_flag_does_not_leak_into_later_restarts(boot, monkeypatch):
 
 
 def test_platform_without_web_panel_falls_back_without_pip(boot, monkeypatch, capsys):
-    """Linux 這一版沒有網頁面板：不跑 pip，主控台與訊息區說明，開安全模式。"""
+    """Linux 這一版沒有網頁面板：不跑 pip，主控台與訊息區說明，開後備的 tk 面板（完整範圍）。"""
     monkeypatch.setattr(sys, "platform", "linux")
     boot.web = ImportError("No module named 'webview'")
     boot.main.main()
     assert kinds(boot) == ["web", "tk"]
     assert "Linux" in boot.calls[-1][2] and boot.calls[-1][2].startswith(T["web_failed"].split("{")[0])
+    assert boot.calls[-1][1] is False
 
 
 def test_missing_system_module_falls_back_without_pip(boot, capsys):
@@ -219,14 +223,14 @@ def test_missing_system_module_falls_back_without_pip(boot, capsys):
     shutil.rmtree(boot.home / "modules" / SYSTEM_MODULE)
     boot.web = ImportError("No module named 'webview'")
     boot.main.main()
-    assert kinds(boot) == ["web", "tk"] and boot.calls[-1][1] is True
+    assert kinds(boot) == ["web", "tk"] and boot.calls[-1][1] is False
     assert T["no_system"].format(module=SYSTEM_MODULE, name="requirements") in capsys.readouterr().out
 
 
 def test_config_error_reaches_the_panel(boot, monkeypatch):
     (boot.home / "config.py").write_text("ROOTS = [\n", encoding="utf-8")
     seen = []
-    monkeypatch.setattr(boot.main, "run_web", lambda home, config, err, version: seen.append(err))
+    monkeypatch.setattr(boot.main, "run_web", lambda home, config, err, version, note=None: seen.append(err))
     boot.main.main()
     assert seen[0].source == "config"
 
@@ -296,3 +300,58 @@ def test_module_using_tkinter_under_the_web_panel_gets_a_plain_error(home, monke
     assert error["kind"] == "ImportError" and error["message"] == T["tk_in_web"] and error["module"] == "海龜"
     assert ["reached"] not in window.calls("log")
     import tkinter  # noqa: F401  面板關掉之後擋就拿掉了
+
+
+
+# 需求檔變了（「更新」換了 requirements/）→ 下次啟動重裝 lib/；沒有網路就先用現有的
+
+def mark_installed(b, text=None):
+    (b.home / "lib").mkdir(exist_ok=True)
+    digest = hashlib.sha256(b.req.read_bytes()).hexdigest() if text is None else text
+    (b.home / "lib" / ".installed").write_text(digest, encoding="utf-8")
+
+
+def test_up_to_date_lib_is_not_reinstalled(boot, capsys):
+    mark_installed(boot)
+    boot.main.main()
+    assert kinds(boot) == ["web"] and boot.notes == [None] and capsys.readouterr().out == ""
+
+
+def test_changed_requirements_reinstall_before_the_panel_opens(boot, capsys):
+    """lib/ 是照舊的需求檔裝的：開面板之前先重裝（求快），裝好直接開，不用重啟——這時候還沒 import 任何 lib/ 的東西。"""
+    mark_installed(boot, "digest of the old requirements file")
+    boot.main.main()
+    assert kinds(boot) == ["pip", "web"] and boot.quick == [True] and boot.notes == [None]
+    assert boot.calls[0][2] is True, "重裝之前不拿掉記號：沒裝成的話下次還要再試"
+    out = capsys.readouterr().out
+    assert T["refreshing"] in out and "Collecting pywebview" in out
+
+
+def test_changed_requirements_offline_opens_the_old_panel_and_keeps_trying(boot, capsys):
+    """更新之後沒有網路：重裝失敗就說明原因、先用現有的 lib/ 開網頁面板（訊息區也說一次）；
+    記號沒動，所以下次啟動會再試。"""
+    mark_installed(boot, "digest of the old requirements file")
+    boot.pip = "ERROR: Could not find a version"
+    boot.main.main()
+    note = T["refresh_failed"].format(message="ERROR: Could not find a version")
+    assert kinds(boot) == ["pip", "web"] and boot.notes == [note]
+    out = capsys.readouterr().out
+    assert note in out and "Traceback" not in out
+    assert (boot.home / "lib" / ".installed").read_text(encoding="utf-8") == "digest of the old requirements file"
+    boot.main.main()
+    assert kinds(boot) == ["pip", "web", "pip", "web"], "下次啟動再試一次"
+
+
+def test_changed_requirements_on_a_platform_without_web_panel_does_nothing(boot, monkeypatch):
+    mark_installed(boot, "digest of the old requirements file")
+    monkeypatch.setattr(sys, "platform", "linux")
+    boot.web = ImportError("No module named 'webview'")
+    boot.main.main()
+    assert "pip" not in kinds(boot)
+
+
+def test_safe_mode_never_touches_lib(boot, monkeypatch):
+    mark_installed(boot, "digest of the old requirements file")
+    monkeypatch.setattr(sys, "argv", ["main.py", "--safe"])
+    boot.main.main()
+    assert kinds(boot) == ["tk"]

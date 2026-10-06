@@ -1,4 +1,4 @@
-"""隨附的五個模組：靜態讀得到，用假的 Core 跑得通，不真的開檔案總管、編輯器、終端機。
+"""隨附的七個模組：靜態讀得到，用假的 Core 跑得通，不真的開檔案總管、編輯器、終端機，也不連網。
 modules/作業系統 的後端（mac、win、linux）直接 import 進來驗參數，不真的啟動任何程式。"""
 
 import contextlib
@@ -64,7 +64,7 @@ def quiet(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統"])
+@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊"])
 def test_bundled_meta(name):
     m = read_meta(MODULES / name / "iplot.py")
     assert (m.error, m.has_run) == (None, True) and m.description
@@ -255,8 +255,47 @@ def test_restart_execs_from_home_not_module_folder(fake_core, monkeypatch):
 
 
 def test_bundled_modules_have_icons():
-    icons = {name: bundled(name).icon for name in ("開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統")}
-    assert icons == {"開工": "🧭", "打開核心原始碼": "🧬", "開Terminal": "⌨️", "重新啟動": "🔄", "作業系統": "🖥️"}
+    icons = {name: bundled(name).icon for name in ("開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統",
+                                                   "更新", "工作坊")}
+    assert icons == {"開工": "🧭", "打開核心原始碼": "🧬", "開Terminal": "⌨️", "重新啟動": "🔄", "作業系統": "🖥️",
+                     "更新": "⬆️", "工作坊": "🧰"}
+
+
+@pytest.mark.parametrize("name, setting", [("更新", "UPDATE_URL"), ("工作坊", "WORKSHOP_URL")])
+def test_update_and_workshop_do_nothing_until_a_url_is_set(name, setting, home, monkeypatch):
+    """平常使用不需要網路：來源網址沒設定時，按下去只說一句怎麼設定，不連網、不開頁面、不寫任何檔案。"""
+    import urllib.request
+
+    from conftest import FakeApp
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("沒設定網址卻去連網了")
+
+    monkeypatch.setattr(urllib.request, "urlopen", no_network)
+    app = FakeApp(home)
+    info = bundled(name)
+    result = run_module(info, app)
+    assert result.ok, result.error
+    assert len(app.logs) == 1 and setting in app.logs[0] and "config.py" in app.logs[0]
+    assert app.pages == [] and app.confirms == [] and list(home.rglob("*")) == [home / "modules"]
+
+
+def test_shipped_config_points_at_the_workshop_site():
+    """D71 修訂（D-d）：隨附的 config.py 直接帶正式網址（GitHub Pages 上的 iplot-workshop），剛拿到的 iPLoT 按「更新」
+    「工作坊」就有東西；Config 的預設值仍是 None（上面那個測試），改回 None 就不連網。"""
+    from core.core import load_config
+
+    config, err = load_config(MODULES.parent / "config.py")
+    base = "https://william10310406.github.io/iplot-workshop/"
+    assert err is None
+    assert (config.update_url, config.workshop_url) == (base + "update.json", base + "index.json")
+
+
+def test_update_and_workshop_keep_their_logic_beside_iplot_py():
+    """兩個模組都是「iplot.py 只串起來，做法在旁邊的檔」；工作坊的頁面零外部資源。"""
+    assert (MODULES / "更新" / "update.py").is_file() and (MODULES / "工作坊" / "workshop.py").is_file()
+    page = (MODULES / "工作坊" / "page.html").read_text(encoding="utf-8")
+    assert "{rows}" in page and "http://" not in page and "https://" not in page
 
 
 class FakeWinreg(types.ModuleType):
@@ -283,7 +322,8 @@ WEBVIEW2 = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}
 
 def test_requirements_and_ready_per_backend(monkeypatch):
     assert (backend("mac").requirements(None), backend("mac").webview_ready(None)) == ("web-mac.txt", None)
-    assert backend("linux").requirements(None) == "" and "--safe" in backend("linux").webview_ready(None)
+    assert backend("linux").requirements(None) == "" and "Linux" in backend("linux").webview_ready(None)
+    assert "安全模式" not in backend("linux").webview_ready(None), "這句話後面接的是「已改用備用面板」"
     assert backend("win").requirements(None) == "web-win.txt"
     for present in ({("HKLM", "SOFTWARE\\WOW6432Node\\" + WEBVIEW2): "120.0.1"},
                     {("HKLM", "SOFTWARE\\" + WEBVIEW2): "120.0.1"},
@@ -293,7 +333,7 @@ def test_requirements_and_ready_per_backend(monkeypatch):
     for missing in ({}, {("HKCU", "Software\\" + WEBVIEW2): "0.0.0.0"}, {("HKCU", "Software\\" + WEBVIEW2): ""}):
         monkeypatch.setitem(sys.modules, "winreg", FakeWinreg(missing))
         reason = backend("win").webview_ready(None)
-        assert isinstance(reason, str) and "WebView2" in reason and "--safe" in reason, missing
+        assert isinstance(reason, str) and "WebView2" in reason and "安全模式" not in reason, missing
 
 
 def test_system_module_answers_through_core_action(fake_core, monkeypatch):

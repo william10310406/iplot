@@ -55,6 +55,8 @@ class Config:
     roots: tuple[str, ...]
     editor: tuple[str, ...] | None
     history_keep: int
+    update_url: str | None = None
+    workshop_url: str | None = None
 
 
 @dataclass(frozen=True)

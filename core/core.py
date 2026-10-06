@@ -23,6 +23,7 @@ class View(Protocol):
     def report(self, error: ErrorInfo) -> None: ...
     def ask(self, prompt: str, default: str = "") -> str | None: ...
     def confirm(self, prompt: str) -> bool: ...
+    def page(self, title: str, html: str, api: object | None) -> None: ...
     def choose_files(self) -> list[Path]: ...
     def choose_folder(self) -> Path | None: ...
 
@@ -39,13 +40,15 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
         ns = runpy.run_path(str(path))
     except (Exception, SystemExit) as exc:  # noqa: BLE001  規格 §11 允許的三處之一
         return DEFAULT_CONFIG, from_exception(exc, None, "config")
-    d = DEFAULT_CONFIG
-    roots, editor = ns.get("ROOTS", d.roots), ns.get("EDITOR", d.editor)
-    keep = ns.get("HISTORY_KEEP", d.history_keep)
+    d, get = DEFAULT_CONFIG, ns.get
+    roots, editor, keep = get("ROOTS", d.roots), get("EDITOR", d.editor), get("HISTORY_KEEP", d.history_keep)
+    update, workshop = get("UPDATE_URL"), get("WORKSHOP_URL")
     for name, ok, expected in [("ROOTS", _strs(roots), "list[str]"),
                                ("EDITOR", editor is None or (_strs(editor) and len(editor) > 0),
                                 "None | non-empty list[str]"),
-                               ("HISTORY_KEEP", type(keep) is int and keep >= 1, "int >= 1")]:
+                               ("HISTORY_KEEP", type(keep) is int and keep >= 1, "int >= 1"),
+                               ("UPDATE_URL", isinstance(update, str | None), "None | str"),
+                               ("WORKSHOP_URL", isinstance(workshop, str | None), "None | str")]:
         if not ok:
             message = T["config_type"].format(name=name, expected=expected)
             return d, ErrorInfo("TypeError", message, path, None, "", "config", None)
@@ -54,7 +57,7 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
             Path(s).expanduser()
         except RuntimeError:  # 「~Desktop」：少了斜線，pathlib 會在掃描時丟例外，這裡先攔下來
             return d, ErrorInfo("ValueError", T["bad_root"].format(entry=s), path, None, "", "config", None)
-    return Config(tuple(roots), None if editor is None else tuple(editor), keep), None
+    return Config(tuple(roots), None if editor is None else tuple(editor), keep, update, workshop), None
 
 
 class Core:
@@ -104,7 +107,14 @@ class Core:
     def press(self, info: ModuleInfo, handler: str = "run", args: tuple = (),
               quiet: bool = False) -> Result:
         """執行模組：先存快照再交給 runner，結果寫進訊息區；執行中收到的重掃延到結束才做。
-        quiet 只省掉「完成」那一行，快照、輸出、錯誤照舊。"""
+        quiet 只省掉「完成」那一行，快照、輸出、錯誤照舊。
+        模組資料夾裡有空檔案 .unconfirmed（工作坊裝進來的）時先問一次：取消就不執行，確定就拿掉標記（D59）。"""
+        marker = info.folder / ".unconfirmed"
+        if marker.exists() and not self.view.confirm(T["confirm_foreign"].format(title=info.title)):
+            self.view.log(T["cancelled"].format(title=info.title))
+            return Result(False, None, 0.0, "")
+        with contextlib.suppress(OSError):  # 拿不掉（唯讀）：照常執行，只是下次還會再問
+            marker.unlink(missing_ok=True)
         self._depth += 1
         try:
             try:

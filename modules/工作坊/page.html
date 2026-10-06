@@ -1,0 +1,88 @@
+<!doctype html>
+<!-- 工作坊的清單頁。表格裡的那個記號由 workshop.render 換成一列列的模組；按鈕呼叫 Python 的 workshop.Api.install。
+     沒有任何外部資源。 -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>工作坊</title>
+<style>
+:root { color-scheme: light dark; --bg: #ffffff; --fg: #1c1d21; --muted: #6b7080; --line: #dfe2e9; --accent: #3d6ee0;
+  --on-accent: #ffffff; --danger: #d9463e; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #242529; --fg: #ebecf0; --muted: #9a9fae; --line: #34363f; --accent: #7398f4; --danger: #f0736b; }
+}
+body { margin: 0; padding: 14px 18px; background: var(--bg); color: var(--fg);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+h1 { margin: 0 0 2px; font-size: 16px; }
+.hint { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 9px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+.icon { width: 34px; font-size: 22px; text-align: center; }
+.desc, .ver, .note { color: var(--muted); font-size: 12.5px; }
+.notes { margin-top: 2px; font-size: 12.5px; white-space: pre-line; }
+.ver, .state, .act { white-space: nowrap; }
+.state.bad { color: var(--danger); white-space: normal; }
+button { padding: 4px 12px; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent);
+  color: var(--on-accent); font: inherit; font-size: 13px; }
+button.plain { margin-left: 6px; border-color: var(--line); background: none; color: var(--fg); }
+button:disabled { opacity: .5; }
+.empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>工作坊</h1>
+<p class="hint">裝進來的模組只寫進它自己的資料夾；覆蓋之前，舊的會整個存進那個資料夾的 .history/。關掉這個視窗，新裝的模組就出現在面板上；第一次執行前會先問一次。</p>
+<table id="list">
+{rows}
+</table>
+<p class="empty" id="empty" hidden>清單是空的。</p>
+<script>
+"use strict";
+const list = document.getElementById("list");
+document.getElementById("empty").hidden = list.rows.length > 0;
+
+// 按鈕：安裝／更新直接做；「覆蓋」先在同一列問一次（再按一次才真的覆蓋）。
+// 更新會蓋掉模組自己存的檔時，Python 回「需要確認」，也在同一列問
+function ask(button, act) {
+  button.dataset.label = button.dataset.label || button.textContent;
+  button.dataset.ask = "0";
+  button.dataset.sure = "1";
+  button.textContent = "確定覆蓋";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "plain";
+  cancel.dataset.cancel = "1";
+  cancel.textContent = "取消";
+  const note = document.createElement("div");
+  note.className = "note";
+  note.textContent = "這會覆蓋現有的模組，舊版會整個存進它的 .history/";
+  act.append(cancel, note);
+}
+
+list.addEventListener("click", (e) => {
+  const button = e.target.closest("button");
+  if (!button) return;
+  const row = button.closest("tr"), cell = row.querySelector(".state"), act = row.querySelector(".act");
+  const main = act.querySelector("button[data-name]");
+  if (button.dataset.cancel) {  // 取消：回到只有原來那一顆按鈕的樣子（覆蓋或更新），下次按一樣先問
+    main.dataset.ask = "1";
+    delete main.dataset.sure;
+    main.textContent = main.dataset.label;
+    act.replaceChildren(main);
+    return;
+  }
+  if (button.dataset.ask === "1") { ask(button, act); return; }
+  const enable = (on) => { for (const b of act.querySelectorAll("button")) b.disabled = !on; };
+  const failed = (text) => { cell.textContent = text; cell.classList.add("bad"); enable(true); };
+  enable(false);
+  window.pywebview.api.install(main.dataset.name, main.dataset.sure === "1").then((answer) => {
+    if (answer === "需要確認") { enable(true); if (main.dataset.sure !== "1") ask(main, act); return; }
+    if (answer.startsWith("無法安裝")) { failed(answer); return; }
+    cell.textContent = answer;
+    cell.classList.remove("bad");
+    act.replaceChildren();
+  }).catch((error) => failed("無法安裝：" + error));
+});
+</script>
+</body>
+</html>

@@ -253,3 +253,58 @@ def test_press_quiet_skips_done_line(home, view):
     c = started(home, view)
     c.press(find(c, "A"), quiet=True)
     assert not any("完成（" in line for line in view.logs)
+
+
+# M3：外來模組第一次執行前確認（D59）、來源網址
+
+RAN = "open('ran.txt', 'w').close()\n"  # 執行過就會在模組資料夾留下 ran.txt
+
+
+def test_unconfirmed_module_asks_first(home, view):
+    """工作坊裝進來的模組帶著空檔案 .unconfirmed：第一次執行前先問；確定就拿掉標記、照常執行，之後不再問。"""
+    folder = make_module(home / "modules", "外來", 'TITLE = "外來的"\n' + RAN)
+    (folder / ".unconfirmed").touch()
+    c = started(home, view)
+    assert c.press(find(c, "外來")).ok
+    assert view.confirmed == [T["confirm_foreign"].format(title="外來的")]
+    assert (folder / "ran.txt").exists() and not (folder / ".unconfirmed").exists()
+    c.press(find(c, "外來"))
+    assert len(view.confirmed) == 1
+
+
+def test_unconfirmed_cancel_does_not_run(home, view):
+    """按取消：不執行、不存快照、標記留著（下次還會問），訊息區記一行。"""
+    folder = make_module(home / "modules", "外來", RAN)
+    (folder / ".unconfirmed").touch()
+    c = started(home, view)
+    view.answers = [False]
+    result = c.press(find(c, "外來"))
+    assert (result.ok, result.error, result.output) == (False, None, "")
+    assert not (folder / "ran.txt").exists() and not (folder / ".history").exists()
+    assert (folder / ".unconfirmed").exists() and view.logs[-1] == T["cancelled"].format(title="外來")
+    assert view.reports == []
+
+
+def test_modules_without_the_marker_are_never_asked(home, view):
+    make_module(home / "modules", "A")
+    c = started(home, view)
+    c.press(find(c, "A"))
+    assert view.confirmed == []
+
+
+def test_marker_that_cannot_be_removed_does_not_block_the_module(home, view, monkeypatch):
+    """標記拿不掉（唯讀的資料夾）：問過、按了確定就照常執行，只是下次還會再問；不能變成核心錯誤、模組永遠跑不了。"""
+    folder = make_module(home / "modules", "外來", RAN)
+    (folder / ".unconfirmed").touch()
+    real = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        if self.name == ".unconfirmed":
+            raise PermissionError(13, "模擬：唯讀")
+        return real(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    c = started(home, view)
+    assert c.press(find(c, "外來")).ok and (folder / "ran.txt").exists()
+    c.press(find(c, "外來"))
+    assert len(view.confirmed) == 2
