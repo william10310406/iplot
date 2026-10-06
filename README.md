@@ -145,7 +145,7 @@ WORKSHOP_URL = None            # 「工作坊」的模組清單：index.json 的
 python3 tools/publish.py --version 0.5.0 --base-url <放檔案的地方> --modules 整理桌面 開工
 ```
 
-`--modules` 後面是要放進工作坊的模組，寫 `modules/` 裡的資料夾名稱（「整理桌面」是舉例；`modules/` 裡沒有的名稱，工具會說是哪幾個，不產生任何檔）。沒給 `--modules` 時只發佈核心：不打模組的包，`交付/發佈/` 裡原本的 `index.json` 也不動。它在 `交付/發佈/` 產生四種檔，最後印出要填進 `config.py` 的那兩行：
+`--modules` 後面是要放進工作坊的模組，寫 `modules/` 裡的資料夾名稱（「整理桌面」是舉例；`modules/` 裡沒有的名稱，工具會說是哪幾個，不產生任何檔）。沒給 `--modules` 時只發佈核心：不打模組的包，`交付/發佈/` 裡原本的 `index.json` 也不動。它在 `--out` 指的資料夾（沒給就是 `交付/發佈/`）產生下面這些檔，最後印出要填進 `config.py` 的那兩行：
 
 | 產生的檔 | 誰用 | 內容 |
 |---|---|---|
@@ -153,6 +153,8 @@ python3 tools/publish.py --version 0.5.0 --base-url <放檔案的地方> --modul
 | `update.json` | 「更新」讀 | 版本、zip 的網址、zip 的 sha256、這一版改了什麼（取自 `CHANGELOG.md` 那一版那一節的第一段，也就是摘要；它會整段顯示在「要更新嗎」的對話框裡） |
 | `模組/<名稱>.zip` | 「工作坊」下載 | 每個模組一包，最上層是 `<名稱>/`。各台電腦自己的東西不帶（名字不分大小寫）：`.history/`、`.origin`、`.unconfirmed`、`__pycache__`、`.DS_Store` |
 | `index.json` | 「工作坊」讀 | 每個模組的名稱、版本、zip 的網址、zip 的 sha256、說明、圖示（說明與圖示取自模組的 `iplot.py`）、這一版改了什麼（`notes`，取自模組的 `CHANGELOG.md`） |
+| `index.html` | 用瀏覽器看的人 | 一頁：核心的版本、下載連結、sha256、怎麼開始用；每個模組的圖示、名稱、版本、說明、這一版改了什麼、zip 連結、sha256。資料跟上面兩個 JSON 是同一份；沒有 JS、沒有外部資源 |
+| `.nojekyll` | GitHub Pages | 空檔：讓 Pages 照原樣放出每個檔 |
 
 模組的版本寫在模組資料夾裡的 `CHANGELOG.md`，格式跟 iPLoT 自己的 `CHANGELOG.md` 一樣：一版一節，`## [1.2.0] - 2026-10-06`，最新的在最上面，標題底下第一段說這一版改了什麼。工具取最上面那一節的版本號當模組的版本（`[Unreleased]` 不算），取那一段當 `index.json` 的 `notes`。沒有 `CHANGELOG.md` 的模組，版本跟 `--version` 一樣、`notes` 是空的：每發一版，它的版本都跟著變，裝過的人會看到「可更新」。也可以在指令列寫「名稱=版本」，例如 `--modules 整理桌面=1.2.0`；跟 `CHANGELOG.md` 寫的不一樣時，工具說一句就停，不產生任何檔。隨附的「開工」「作業系統」「打開核心原始碼」各有一份 `CHANGELOG.md`。
 

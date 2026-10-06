@@ -249,3 +249,90 @@ def test_modules_without_a_changelog_follow_the_core_version(publish, repo):
                         root=repo) == 0
     index = json.loads((out / "index.json").read_text(encoding="utf-8"))["modules"]
     assert [(e["name"], e["version"], e["notes"]) for e in index] == [("沒圖示", "9.9.9", ""), ("整理桌面", "1.0.1", "")]
+
+
+# 一頁 index.html、.nojekyll、--out（D79）
+
+class Tags(__import__("html.parser").parser.HTMLParser):
+    """收集開始標籤、檢查每個非 void 標籤都有關上。"""
+    VOID = {"meta", "link", "br", "hr", "img", "input", "wbr"}
+
+    def __init__(self):
+        super().__init__()
+        self.opened, self.stack, self.text = [], [], []
+
+    def handle_starttag(self, tag, attrs):
+        self.opened.append((tag, dict(attrs)))
+        if tag not in self.VOID:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag):
+        assert self.stack and self.stack[-1] == tag, (tag, self.stack)
+        self.stack.pop()
+
+    def handle_data(self, data):
+        self.text.append(data)
+
+
+def parsed(page):
+    tags = Tags()
+    tags.feed(page)
+    tags.close()
+    assert tags.stack == [], tags.stack
+    return tags
+
+
+def test_index_html_lists_every_module_and_escapes_text(publish, repo):
+    """index.html 給還沒裝 iPLoT 的人看：核心的版本、下載連結、sha256、notes；每個模組的名稱、版本、說明、這一版、zip 連結、sha256。
+    所有字都當文字：說明裡的 <script> 以文字出現，頁面裡沒有 <script；沒有外部資源。"""
+    (repo / "modules" / "整理桌面" / "CHANGELOG.md").write_text(MODULE_LOG, encoding="utf-8")
+    (repo / "modules" / "沒圖示" / "iplot.py").write_text('"""壞人 <script>alert(1)</script> & 好人。"""\ndef run(app):\n    pass\n',
+                                                         encoding="utf-8")
+    out = repo / "交付" / "發佈"
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面", "沒圖示"],
+                        root=repo) == 0
+    page = (out / "index.html").read_text(encoding="utf-8")
+    update = json.loads((out / "update.json").read_text(encoding="utf-8"))
+    index = json.loads((out / "index.json").read_text(encoding="utf-8"))["modules"]
+    tags = parsed(page)
+    text = "".join(tags.text)
+    links = [a["href"] for tag, a in tags.opened if tag == "a"]
+    assert "iPLoT 工作坊" in text and "9.9.9" in text and update["sha256"] in text and "九九九。" in text
+    assert "解壓縮後雙擊 iPLoT.command；第一次啟動會自動安裝介面，要有網路" in text
+    assert "在 iPLoT 裡按「工作坊」就能安裝、更新這些模組；也可以下載 zip、解開後把資料夾放進 modules/" in text
+    assert update["zip_url"] in links
+    for entry in index:
+        assert entry["name"] in text and entry["version"] in text and entry["sha256"] in text and entry["zip_url"] in links
+        assert entry["description"] in text
+    assert "這一版：截圖改收進「截圖」資料夾，\n不再收進「下載」。" in text
+    assert text.count("這一版：") == 1, "沒有 notes 的模組沒有「這一版」"
+    assert "<script" not in page.lower() and "&lt;script&gt;alert(1)&lt;/script&gt; &amp; 好人" in page
+    assert not [t for t, a in tags.opened if t in ("script", "link", "img", "iframe")], "沒有 JS、沒有外部資源"
+    assert "prefers-color-scheme: dark" in page and 'name="viewport"' in page
+
+
+def test_out_dir_gets_everything_and_the_default_folder_stays_untouched(publish, repo, tmp_path, capsys):
+    """--out：所有檔寫到那裡（核心 zip 照樣先寫 .part 再改名），交付/發佈/ 不建；印出來要填的兩行照舊。"""
+    out = tmp_path / "iplot-workshop"
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面",
+                         "--out", str(out)], root=repo) == 0
+    made = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    assert made == [".nojekyll", "iPLoT-v9.9.9.zip", "index.html", "index.json", "update.json", "模組/整理桌面.zip"]
+    assert not (repo / "交付").exists()
+    said = capsys.readouterr().out
+    assert 'UPDATE_URL = "https://example.invalid/x/update.json"' in said and str(out) in said
+
+
+def test_nojekyll_is_written(publish, repo):
+    """GitHub Pages 預設用 Jekyll 處理檔案：以底線、點開頭的會被略過。一個空的 .nojekyll 讓它照原樣放出來。"""
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
+    assert (repo / "交付" / "發佈" / ".nojekyll").read_bytes() == b""
+
+
+def test_core_only_run_keeps_the_modules_on_the_page(publish, repo):
+    """只發佈核心（沒給 --modules）：index.json 不動，所以 index.html 的模組那一段照原本 index.json 上的模組列。"""
+    out = repo / "交付" / "發佈"
+    publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面"], root=repo)
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
+    text = "".join(parsed((out / "index.html").read_text(encoding="utf-8")).text)
+    assert "整理桌面" in text and "把桌面上的截圖收起來。" in text
