@@ -189,6 +189,26 @@ def _clear(folder, rel):
     return path
 
 
+class NeedsConfirmation(Exception):
+    """包裡的檔會蓋掉或拿掉模組自己存的檔（不在 .origin 的 files 裡）：要先問過才裝（D77）。"""
+
+
+def _clashes(folder, rels, listed):
+    """把包裡的 rels 放進 folder 時，會被蓋掉或拿掉、又不是當初裝進來的（不在 listed 裡）那些本機檔，相對路徑。
+    看三種：同名的檔（蓋掉）、同名的資料夾裡的檔（整個資料夾拿掉）、擋在路上的檔（要建資料夾的地方有個檔）。"""
+    hit = set()
+    for rel in rels:
+        parts = rel.split("/")
+        for i in range(1, len(parts) + 1):
+            path = folder.joinpath(*parts[:i])
+            if path.is_symlink() or path.is_file():
+                hit.add("/".join(parts[:i]))
+                break
+            if i == len(parts) and path.is_dir():
+                hit.update(p.relative_to(folder).as_posix() for p in path.rglob("*") if p.is_symlink() or p.is_file())
+    return sorted(h for h in hit if h not in listed and not _local(h.split("/")))
+
+
 class NotInstalled(OSError):
     """裝到一半出錯、已經（或沒能）放回原樣。訊息就是要給人看的那一句。"""
 
@@ -226,9 +246,11 @@ def _rollback(folder, saved):
     return back
 
 
-def install(entry, modules_dir):
+def install(entry, modules_dir, confirmed=False):
     """照索引的這一筆安裝（或覆蓋）一個模組，回安裝後的狀態。不對就丟 ValueError，模組資料夾不動：
     名稱要是單純的資料夾名；sha256 要對；zip 的最上層要剛好是 <名稱>/，裡面要有 iplot.py。
+    從工作坊裝過的（有 .origin）、包裡的檔又會蓋掉或拿掉模組自己存的檔（不在 .origin 的 files 裡）：
+    沒有 confirmed 就丟 NeedsConfirmation，模組資料夾不動（D77）。
     資料夾已經在的話，先整個存進它的 .history/，再把包裡的檔案蓋上去（包裡沒有的舊檔案留著）；
     蓋到一半出錯（OSError）就照那份快照放回原樣，丟 NotInstalled，訊息照實說放回去了沒有、沒放回的話快照在哪裡。
     包裡與磁碟上每一個有 iplot.py 的資料夾都先放好 .unconfirmed，才開始放程式。"""
@@ -249,6 +271,14 @@ def install(entry, modules_dir):
         files = _files(tmp / "unpacked" / name)
         if "iplot.py" not in [rel for rel, _ in files]:
             raise ValueError("包裡沒有 iplot.py")
+        origin = read_origin(folder) if folder.exists() else None
+        if origin and not confirmed:
+            try:
+                listed = json.loads(origin["files"])
+            except ValueError:
+                listed = []
+            if _clashes(folder, [rel for rel, _ in files], listed if isinstance(listed, list) else []):
+                raise NeedsConfirmation(name)
         saved = snapshot(folder) if folder.exists() else None
         try:
             folder.mkdir(exist_ok=True)
@@ -297,8 +327,8 @@ class Api:
         self._lock = threading.Lock()  # 清單頁可以連按兩列；安裝一次只做一個（它們共用暫存資料夾）
 
     def install(self, name, confirmed=False):
-        """安裝、更新或覆蓋 name，回新的狀態（中文）。已修改、版本未知的要 confirmed 才覆蓋，否則回 CONFIRM、什麼都不動。
-        出錯回一句「無法安裝：…」，不丟例外。"""
+        """安裝、更新或覆蓋 name，回新的狀態（中文）。已修改、版本未知的，還有更新會蓋掉模組自己存的檔的（D77），
+        要 confirmed 才做，否則回 CONFIRM、什麼都不動。出錯回一句「無法安裝：…」，不丟例外。"""
         entry = next((e for e in self._entries if e["name"] == name), None)
         if entry is None:
             return f"無法安裝：清單裡沒有「{name}」"
@@ -306,7 +336,9 @@ class Api:
             with self._lock:
                 if state(entry, self._modules_dir) in ("modified", "unknown") and not confirmed:
                     return CONFIRM
-                return LABELS[install(entry, self._modules_dir)]
+                return LABELS[install(entry, self._modules_dir, confirmed)]
+        except NeedsConfirmation:
+            return CONFIRM
         except zipfile.BadZipFile:
             return "無法安裝：下載的檔案不是 zip"
         except (ValueError, KeyError, TypeError) as exc:  # sha256 不符、包的內容不對、索引那一筆的型別不對

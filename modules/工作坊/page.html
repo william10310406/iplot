@@ -40,8 +40,10 @@ button:disabled { opacity: .5; }
 const list = document.getElementById("list");
 document.getElementById("empty").hidden = list.rows.length > 0;
 
-// 按鈕：安裝／更新直接做；「覆蓋」先在同一列問一次（再按一次才真的覆蓋）
+// 按鈕：安裝／更新直接做；「覆蓋」先在同一列問一次（再按一次才真的覆蓋）。
+// 更新會蓋掉模組自己存的檔時，Python 回「需要確認」，也在同一列問
 function ask(button, act) {
+  button.dataset.label = button.dataset.label || button.textContent;
   button.dataset.ask = "0";
   button.dataset.sure = "1";
   button.textContent = "確定覆蓋";
@@ -61,10 +63,10 @@ list.addEventListener("click", (e) => {
   if (!button) return;
   const row = button.closest("tr"), cell = row.querySelector(".state"), act = row.querySelector(".act");
   const main = act.querySelector("button[data-name]");
-  if (button.dataset.cancel) {  // 取消：回到只有一顆「覆蓋」的樣子
+  if (button.dataset.cancel) {  // 取消：回到只有原來那一顆按鈕的樣子（覆蓋或更新），下次按一樣先問
     main.dataset.ask = "1";
     delete main.dataset.sure;
-    main.textContent = "覆蓋";
+    main.textContent = main.dataset.label;
     act.replaceChildren(main);
     return;
   }

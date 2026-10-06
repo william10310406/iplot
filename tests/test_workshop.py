@@ -556,6 +556,52 @@ def test_a_modules_own_data_does_not_make_it_modified(workshop, mods, entry, src
     assert (folder / "settings.json").exists() and workshop.state(entry, mods) == "installed"
 
 
+def test_update_asks_before_overwriting_a_file_the_module_made(workshop, mods, entry, src, tmp_path):
+    """獨立審查 I4（D77）：「已修改」只看當初裝進來的檔，所以模組自己存的 帳本.csv 不讓它變成已修改。
+    新版的包裡剛好也有一個 帳本.csv（作者測試時模組寫出來、一起被打包）：按「更新」不能不問就蓋掉。
+    先回「需要確認」、什麼都不動；確認之後才蓋，舊的在快照裡。"""
+    workshop.install(entry, mods)
+    folder = mods / "整理桌面"
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    newer = {**pack(src / "v2", "整理桌面", {**V2, "帳本.csv": "作者的測試資料\n"}), "version": "1.1.0"}
+    assert workshop.state(newer, mods) == "update"
+    api = workshop.Api(FakeApp(tmp_path), [newer], mods)
+    before = tree(folder)
+    assert api.install("整理桌面") == workshop.CONFIRM
+    assert tree(folder) == before and not (mods / ".workshop-tmp").exists()
+    assert api.install("整理桌面", True) == workshop.LABELS["installed"]
+    assert (folder / "帳本.csv").read_text(encoding="utf-8") == "作者的測試資料\n"
+    [saved] = list((folder / ".history").glob("*-folder.zip"))
+    with zipfile.ZipFile(saved) as z:
+        assert z.read("帳本.csv") == "我的帳\n".encode()
+
+
+@pytest.mark.parametrize("mine, theirs", [
+    ({"輸出/a.txt": "我的輸出\n"}, {"輸出": "包裡的一個檔\n"}),  # 包裡的檔會把模組自己的資料夾整個拿掉
+    ({"data": "我的 data 檔\n"}, {"data/new.txt": "new\n"}),  # 包裡的資料夾要擋路的那個檔讓路
+])
+def test_update_asks_before_removing_what_the_module_made(workshop, mods, entry, src, tmp_path, mine, theirs):
+    workshop.install(entry, mods)
+    folder = mods / "整理桌面"
+    for rel, text in mine.items():
+        (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+        (folder / rel).write_text(text, encoding="utf-8")
+    newer = {**pack(src / "v2", "整理桌面", {**V1, **theirs}), "version": "1.1.0"}
+    before = tree(folder)
+    assert workshop.Api(FakeApp(tmp_path), [newer], mods).install("整理桌面") == workshop.CONFIRM
+    assert tree(folder) == before
+
+
+def test_update_that_only_replaces_its_own_files_does_not_ask(workshop, mods, entry, src, tmp_path):
+    """包裡的檔只蓋到當初裝進來的那些（.origin 的 files），模組自己存的檔沒碰到：照舊直接更新，不多問。"""
+    workshop.install(entry, mods)
+    folder = mods / "整理桌面"
+    (folder / "settings.json").write_text("{}", encoding="utf-8")
+    newer = {**pack(src / "v2", "整理桌面", V2), "version": "1.1.0"}
+    assert workshop.Api(FakeApp(tmp_path), [newer], mods).install("整理桌面") == workshop.LABELS["installed"]
+    assert (folder / "helper.py").read_text(encoding="utf-8") == "x = 2\n" and (folder / "settings.json").exists()
+
+
 def test_origin_lists_the_installed_files(workshop, mods, entry):
     workshop.install(entry, mods)
     origin = workshop.read_origin(mods / "整理桌面")
@@ -620,6 +666,13 @@ def test_page_does_not_reload_and_handles_failures():
     page = (MODULE / "page.html").read_text(encoding="utf-8")
     assert "location.reload" not in page and ".catch(" in page
     assert page.count("{rows}") == 1, "{rows} 只出現在要放清單的地方（註解裡再寫一次，清單會被塞進去兩次）"
+
+
+def test_cancel_puts_back_the_buttons_own_label():
+    """「更新」也可能要先確認（D77）：在同一列按「取消」要回到那一顆按鈕原來的字，不是一律變成「覆蓋」。
+    （真的視窗另外驗過：spikes/workshop_fix_probe.py）"""
+    page = (MODULE / "page.html").read_text(encoding="utf-8")
+    assert 'main.textContent = "覆蓋"' not in page and "dataset.label" in page
 
 
 def test_render_fills_the_rows_once(workshop, mods, entry):
