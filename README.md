@@ -124,7 +124,7 @@ print("你的年齡是" + x + "歲")
 
 平常不連網。只有按下去的那一次才連，iPLoT 不會自己去看有沒有新版。隨附的 `config.py` 已經填好來源（GitHub Pages 上的 `iplot-workshop`，見「怎麼設定」），剛拿到的 iPLoT 按下去就有東西。把來源改成 `None` 就不連網：按了只會在訊息區說一句怎麼設定——不連網；除了每個模組執行前照例存進自己 `.history/` 的那一份 `iplot.py` 快照，不寫任何檔案；其他功能不受影響。
 
-這兩個功能的整個流程只在 macOS 上、用本機的 `file://` 網址驗過；`https://` 只驗過連得上、憑證驗得過；從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，寫這一段時還沒有走過。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與後備面板（所以 Linux 也是）沒有工作坊的清單頁。
+這兩個功能只在 macOS 上驗過：自動測試與在真的視窗裡走的大部分用本機的 `file://` 網址；從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，2026-10-06 在 macOS 上用 `tests/acceptance_workshop.py` 走過一次（全部通過；確認框的長相、用瀏覽器看那一頁、沒有網路時的那一句，要人眼看的部分還沒做）。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與後備面板（所以 Linux 也是）沒有工作坊的清單頁。
 
 ### 怎麼設定
 
@@ -179,7 +179,7 @@ git push
 
 推上去之後 Pages 要一兩分鐘才換成新的（`https://<帳號>.github.io/iplot-workshop/update.json` 打開來是新的版本就好了）；那之前按「更新」，拿到的可能還是上一版。第一次推的 repo，要在 GitHub 上那個 repo 的 Settings → Pages 選「Deploy from a branch」、`main`、`/ (root)`。repo 要是公開的：iPLoT 取檔時不帶任何帳號密碼。
 
-用的人在 `config.py` 填 `UPDATE_URL = "<base-url>/update.json"`、`WORKSHOP_URL = "<base-url>/index.json"`，也就是工具最後印出來的那兩行（網址裡的中文會寫成 `%XX`，是同一個網址）；那兩行前面沒有空白，整行從行首貼進 `config.py` 就好。隨附的 `config.py` 填的是 `https://william10310406.github.io/iplot-workshop/` 底下那兩個。`index.html` 是給還沒裝 iPLoT 的人看的那一頁，網址就是 `https://<帳號>.github.io/iplot-workshop/`。從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，寫這一段時還沒有走過。
+用的人在 `config.py` 填 `UPDATE_URL = "<base-url>/update.json"`、`WORKSHOP_URL = "<base-url>/index.json"`，也就是工具最後印出來的那兩行（網址裡的中文會寫成 `%XX`，是同一個網址）；那兩行前面沒有空白，整行從行首貼進 `config.py` 就好。隨附的 `config.py` 填的是 `https://william10310406.github.io/iplot-workshop/` 底下那兩個。`index.html` 是給還沒裝 iPLoT 的人看的那一頁，網址就是 `https://<帳號>.github.io/iplot-workshop/`。從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，2026-10-06 在 macOS 上用 `tests/acceptance_workshop.py` 走過一次（全部通過；確認框的長相、用瀏覽器看那一頁、沒有網路時的那一句，要人眼看的部分還沒做）。
 
 **推上去之後：對真的網址驗一遍。** 在 iPLoT 資料夾裡執行：
 
