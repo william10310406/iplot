@@ -18,7 +18,7 @@ from pathlib import Path
 
 PARTS = ("core", "ui", "main.py", "requirements")  # 更新會換掉的東西；其他都是使用者的
 ORDER = ("ui", "main.py", "requirements", "core")  # 換上去的順序：core 帶著版本號，最後才換
-TRASH = ".update-old"  # 換下來的舊版搬到這裡再刪
+TRASH = ".update-old"  # 換下來的舊版先改名成 .update-old-<名稱>-<n> 再刪
 # 連線這一段會遇到的錯：連不上、逾時、連到一半斷掉、伺服器沒回話。iplot.py 把它們說成一句話
 NETWORK = (OSError, http.client.HTTPException)
 
@@ -109,35 +109,41 @@ def backup(home, old_version):
 def _restore(home):
     """把沒做完的交換收回來（上一次換到一半程式被關掉、或這一次換到一半出錯）。
     還有任何 <名稱>.new 就是沒換完（core 最後換，換完就沒有 .new 了）：留著的 <名稱>.old 放回去、.new 丟掉，
-    四樣回到完整的舊版。沒有 .new 就是上一次已經全部換好、只是舊的沒刪掉：那些 .old 不放回去，搬開再刪。"""
+    四樣回到完整的舊版。.new 等 .old 全部放回去之後才丟：放回的途中程式被關掉，下一次還看得到 .new，就知道還沒收完。
+    沒有 .new 就是上一次已經全部換好、只是舊的沒刪掉：那些 .old 不放回去，改名再刪。"""
     if any((home / f"{name}.new").exists() for name in PARTS):
         for name in PARTS:
             if (home / f"{name}.old").exists():
                 _remove(home / name)
                 (home / f"{name}.old").rename(home / name)
+        for name in PARTS:
             _remove(home / f"{name}.new")
     _discard(home)
 
 
 def _discard(home):
-    """丟掉換下來的舊版：每個 <名稱>.old 先改名搬進 .update-old/，再整個刪掉。
-    刪不掉的（唯讀的檔案）留在 .update-old/，不會還叫 <名稱>.old，下一次更新就不會把它當成舊版放回去；下次再刪一次。"""
-    trash = home / TRASH
+    """丟掉換下來的舊版：每個 <名稱>.old 先在原地改名成 .update-old-<名稱>-<n>，再刪掉。
+    改了名就不會再被當成舊版放回去；刪不掉的（唯讀的資料夾）留著那個名字，下一次更新再刪一次。
+    名字留在同一層：把唯讀的資料夾搬進別的資料夾底下會被拒絕（要改它裡面的「..」）。"""
     for name in PARTS:
         old = home / f"{name}.old"
         if old.exists():
-            trash.mkdir(exist_ok=True)
             n = 1
-            while (trash / f"{name}-{n}").exists():
+            while (home / f"{TRASH}-{name}-{n}").exists():
                 n += 1
-            old.rename(trash / f"{name}-{n}")
-    shutil.rmtree(trash, ignore_errors=True)
+            old.rename(home / f"{TRASH}-{name}-{n}")
+    for trash in home.glob(f"{TRASH}-*"):
+        if trash.is_dir() and not trash.is_symlink():
+            shutil.rmtree(trash, ignore_errors=True)
+        else:
+            with contextlib.suppress(OSError):
+                trash.unlink()
 
 
 def apply(home, zip_path):
     """把 zip 裡的四樣換進 home。zip 的最上層要剛好是一個資料夾（交付用的包是 iPLoT-vX.Y.Z/），裡面四樣都要有，
     否則丟 ValueError、什麼都不動。先解到 home/.update-tmp/，四樣各自搬到 <名稱>.new，再逐一改名換上去
-    （舊的先改名成 <名稱>.old，全部換完才搬進 .update-old/ 刪掉）。換到一半出錯就全部放回去：要嘛四樣都是新的，要嘛都是舊的。
+    （舊的先改名成 <名稱>.old，全部換完才改名成 .update-old-<名稱>-<n> 刪掉）。換到一半出錯就全部放回去：要嘛四樣都是新的，要嘛都是舊的。
     core/ 最後換，所以「磁碟上的版本是新的」就代表四樣都換好了。做完清掉暫存。"""
     tmp = home / ".update-tmp"
     shutil.rmtree(tmp, ignore_errors=True)

@@ -355,6 +355,48 @@ def test_old_that_cannot_be_deleted_is_renamed_before_it_is_cleared(update, home
             p.chmod(0o755)
 
 
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="靠 POSIX 的唯讀資料夾讓改名失敗")
+def test_a_read_only_old_folder_is_still_moved_out_of_the_way(update, home, source, tmp_path):
+    """舊的 core/ 整個是唯讀的（0o555）：把它搬到別的資料夾底下會被拒絕（要改它的「..」），留在原地改名可以。
+    丟舊版時要是只能搬進另一個資料夾，core.old 就一直留著，之後每一次更新都在開頭失敗。"""
+    (home / "core").chmod(0o555)
+    try:
+        update.apply(home, source / "iPLoT-v9.9.9.zip")
+        assert not [p.name for p in home.iterdir() if p.name.endswith(".old")]
+        with pytest.raises(ValueError):  # 包有問題：一句「少了 ui」，不是開頭收殘餘時的 PermissionError
+            update.apply(home, broken_zip(tmp_path))
+        assert update.installed_version(home) == "9.9.9"
+    finally:
+        for p in [home, *home.rglob("*")]:
+            if p.is_dir() and not p.is_symlink():
+                p.chmod(0o755)
+
+
+def test_a_restore_that_is_killed_half_way_is_finished_next_time(update, home, source, tmp_path, monkeypatch):
+    """換到最後一樣（core）出錯、正在放回的時候程式被強制結束：下一次更新還要認得出「上一次沒換完」，把其餘的 .old 也放回去。
+    所以 .new 要等 .old 全部放回去之後才丟：只要還有 .new，就知道還沒收完。"""
+    real_rename, real_remove = Path.rename, update._remove
+
+    def rename(self, target):
+        if self.name == "core.new":
+            raise PermissionError(13, "模擬：core 換不上去")
+        return real_rename(self, target)
+
+    def remove(path):
+        real_remove(path)
+        if path.name.endswith(".new"):
+            raise KeyboardInterrupt  # 模擬：丟掉第一個 .new 之後程式就被強制結束
+
+    monkeypatch.setattr(Path, "rename", rename)
+    monkeypatch.setattr(update, "_remove", remove)
+    with pytest.raises(KeyboardInterrupt):
+        update.apply(home, source / "iPLoT-v9.9.9.zip")
+    monkeypatch.undo()
+    with pytest.raises(ValueError):
+        update.apply(home, broken_zip(tmp_path))
+    assert tree(home) == {k: v.encode() for k, v in {**OLD, **MINE}.items()}
+
+
 @pytest.fixture
 def iplot(update, monkeypatch):
     """modules/更新/iplot.py，它 import 的 update 就是上面那個 fixture：可以換掉裡面的函式來模擬網路出事。"""
