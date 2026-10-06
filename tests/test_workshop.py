@@ -725,6 +725,7 @@ def test_update_that_only_replaces_its_own_files_does_not_ask(workshop, mods, en
 
 @pytest.mark.parametrize("name, on_disk", [("作業系統", "作業系統"), ("更新", "更新"), ("工作坊", "工作坊"),
                                            ("更新", "更新"),  # 相容表意字：NFC 之後就是「更新」，macOS 上是同一個資料夾
+                                           ("更新", None),  # 相容表意字、資料夾不在：只靠 NFC 那一道擋（第二輪審查 R3）
                                            ("作業系統", None)])  # 被刪掉了也不從工作坊裝回來
 def test_workshop_never_overwrites_iplots_own_modules(workshop, mods, src, tmp_path, name, on_disk):
     """裁定（2026-10-06，0.5.0 審查「作業系統」被覆蓋）：工作坊不讓索引覆蓋「作業系統」「更新」「工作坊」。
@@ -810,7 +811,7 @@ def test_page_does_not_reload_and_handles_failures():
 
 def test_cancel_puts_back_the_buttons_own_label():
     """「更新」也可能要先確認（D77）：在同一列按「取消」要回到那一顆按鈕原來的字，不是一律變成「覆蓋」。
-    （真的視窗另外驗過：spikes/workshop_fix_probe.py）"""
+    （這裡只看原始碼；在 macOS 真的清單頁手動驗過（2026-10-06）。）"""
     page = (MODULE / "page.html").read_text(encoding="utf-8")
     assert 'main.textContent = "覆蓋"' not in page and "dataset.label" in page
 
