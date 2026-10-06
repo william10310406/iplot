@@ -480,6 +480,39 @@ def test_when_the_rollback_cannot_finish_the_sentence_says_where_the_snapshot_is
             saved.chmod(0o644)
 
 
+def test_rollback_that_cannot_write_a_file_back_does_not_say_it_put_it_back(workshop, mods, src, monkeypatch):
+    """快照打得開、但有一個檔解不回去（例如磁碟還是滿的）：要靠逐檔比對抓到，不能說「已從快照放回」；
+    要說放回時出錯、快照在哪裡，並替留下來的模組資料夾放 .unconfirmed。（第二輪審查 R1：以前沒有測試走到這條路，
+    把比對拿掉、一律當成放回了，其他放回原樣的測試照樣通過。）"""
+    folder = make_module(mods, "記帳", "print('v1')\n")
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    real_copy, calls = workshop.shutil.copyfile, []
+
+    def copyfile(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError(28, "模擬：磁碟滿了")
+        return real_copy(source, target)
+
+    real_extract = zipfile.ZipFile.extract
+
+    def extract(self, member, path=None, pwd=None):
+        if (member.filename if isinstance(member, zipfile.ZipInfo) else member) == "帳本.csv":
+            raise OSError(28, "模擬：磁碟還是滿的")
+        return real_extract(self, member, path, pwd)
+
+    monkeypatch.setattr(workshop.shutil, "copyfile", copyfile)
+    monkeypatch.setattr(zipfile.ZipFile, "extract", extract)
+    with pytest.raises(OSError) as raised:
+        workshop.install(pack(src, "記帳", {"iplot.py": "print('v2')\n", "b.py": "x = 1\n"}), mods)
+    monkeypatch.undo()
+    [saved] = list((folder / ".history").glob("*-folder.zip"))
+    assert "已從快照放回" not in str(raised.value) and f"放回時出錯，快照在 {saved}" in str(raised.value)
+    assert not (folder / "帳本.csv").exists() and (folder / ".unconfirmed").is_file()
+    with zipfile.ZipFile(saved) as z:
+        assert z.read("帳本.csv") == "我的帳\n".encode()
+
+
 def test_a_rollback_that_cannot_finish_leaves_every_module_folder_asking(workshop, mods, tmp_path, monkeypatch):
     """放不回去時，資料夾裡可能留著新下載的程式：剩下的每一個模組資料夾都放 .unconfirmed，執行前一樣會問。"""
     folder = make_module(mods, "整理桌面", "x = 2\n")
