@@ -361,9 +361,11 @@ def render(entries, modules_dir, template):
         button = (f'<button type="button" data-name="{name}" data-ask="{int(now in ("modified", "unknown"))}">'
                   f"{BUTTONS[now]}</button>") if now in BUTTONS else ""
         note = f'<div class="note">{BUNDLED_NOTE}</div>' if now == "bundled" else ""
+        notes = entry.get("notes") or ""  # 這一版改了什麼（D78）；舊的索引沒有這一項
+        notes = f'<div class="notes">這一版：{html.escape(str(notes))}</div>' if notes else ""
         rows.append(
             f'<tr><td class="icon">{html.escape(str(entry.get("icon") or ""))}</td>'
-            f'<td><b>{name}</b><div class="desc">{html.escape(str(entry.get("description") or ""))}</div>{note}</td>'
+            f'<td><b>{name}</b><div class="desc">{html.escape(str(entry.get("description") or ""))}</div>{notes}{note}</td>'
             f'<td class="ver">{html.escape(str(entry["version"]))}</td>'
             f'<td class="state">{LABELS[now]}</td><td class="act">{button}</td></tr>')
     head, mark, tail = template.rpartition("{rows}")  # 只換最後一個：前面的說明文字裡提到它也沒關係

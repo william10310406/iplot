@@ -819,3 +819,15 @@ def test_cancel_puts_back_the_buttons_own_label():
 def test_render_fills_the_rows_once(workshop, mods, entry):
     html = workshop.render([entry], mods, "<!-- {rows} 在這 -->\n<table>{rows}</table>")
     assert html.count("整理桌面</b>") == 1
+
+
+def test_page_shows_the_notes_as_text(workshop, mods, entry):
+    """索引的 notes（模組這一版改了什麼，D78）在那一列說明底下多一行「這一版：…」，跟索引的其他字一樣當文字；
+    空的、沒有 notes 的（舊的索引）不出現這一行。"""
+    rows = workshop.render([{**entry, "notes": "改了 <b>粗體</b> & 一點"}, {**entry, "name": "舊索引"},
+                            {**entry, "name": "空的", "notes": ""}], mods, "{rows}").split("\n")
+    assert '<div class="notes">這一版：改了 &lt;b&gt;粗體&lt;/b&gt; &amp; 一點</div>' in rows[0]
+    assert "<b>粗體" not in rows[0]
+    assert "這一版" not in rows[1] and "這一版" not in rows[2]
+    page = (MODULE / "page.html").read_text(encoding="utf-8")
+    assert ".notes" in page.split("</style>")[0], "page.html 的 CSS 有 .notes"
