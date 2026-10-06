@@ -2,6 +2,7 @@
 這裡都是普通的函式，旁邊的 iplot.py 只負責把它們串起來、把結果說給人聽。
 
 只換 PARTS 列的四樣。config.py、custom.css、modules/、logs/、lib/ 一律不碰，iPLoT 資料夾以外的東西也不碰（D69）。"""
+import contextlib
 import hashlib
 import http.client
 import json
@@ -17,6 +18,7 @@ from pathlib import Path
 
 PARTS = ("core", "ui", "main.py", "requirements")  # 更新會換掉的東西；其他都是使用者的
 ORDER = ("ui", "main.py", "requirements", "core")  # 換上去的順序：core 帶著版本號，最後才換
+TRASH = ".update-old"  # 換下來的舊版搬到這裡再刪
 # 連線這一段會遇到的錯：連不上、逾時、連到一半斷掉、伺服器沒回話。iplot.py 把它們說成一句話
 NETWORK = (OSError, http.client.HTTPException)
 
@@ -96,19 +98,37 @@ def backup(home, old_version):
 
 
 def _restore(home):
-    """把換到一半的狀態收回來：還留著 <名稱>.old 的，舊的放回去；<名稱>.new 丟掉。之後四樣是完整的舊版。
-    上一次換到一半程式被關掉、或這一次換到一半出錯，都靠這個。"""
+    """把沒做完的交換收回來（上一次換到一半程式被關掉、或這一次換到一半出錯）。
+    還有任何 <名稱>.new 就是沒換完（core 最後換，換完就沒有 .new 了）：留著的 <名稱>.old 放回去、.new 丟掉，
+    四樣回到完整的舊版。沒有 .new 就是上一次已經全部換好、只是舊的沒刪掉：那些 .old 不放回去，搬開再刪。"""
+    if any((home / f"{name}.new").exists() for name in PARTS):
+        for name in PARTS:
+            if (home / f"{name}.old").exists():
+                _remove(home / name)
+                (home / f"{name}.old").rename(home / name)
+            _remove(home / f"{name}.new")
+    _discard(home)
+
+
+def _discard(home):
+    """丟掉換下來的舊版：每個 <名稱>.old 先改名搬進 .update-old/，再整個刪掉。
+    刪不掉的（唯讀的檔案）留在 .update-old/，不會還叫 <名稱>.old，下一次更新就不會把它當成舊版放回去；下次再刪一次。"""
+    trash = home / TRASH
     for name in PARTS:
-        if (home / f"{name}.old").exists():
-            _remove(home / name)
-            (home / f"{name}.old").rename(home / name)
-        _remove(home / f"{name}.new")
+        old = home / f"{name}.old"
+        if old.exists():
+            trash.mkdir(exist_ok=True)
+            n = 1
+            while (trash / f"{name}-{n}").exists():
+                n += 1
+            old.rename(trash / f"{name}-{n}")
+    shutil.rmtree(trash, ignore_errors=True)
 
 
 def apply(home, zip_path):
     """把 zip 裡的四樣換進 home。zip 的最上層要剛好是一個資料夾（交付用的包是 iPLoT-vX.Y.Z/），裡面四樣都要有，
     否則丟 ValueError、什麼都不動。先解到 home/.update-tmp/，四樣各自搬到 <名稱>.new，再逐一改名換上去
-    （舊的先改名成 <名稱>.old，全部換完才刪）。換到一半出錯就全部放回去：要嘛四樣都是新的，要嘛都是舊的。
+    （舊的先改名成 <名稱>.old，全部換完才搬進 .update-old/ 刪掉）。換到一半出錯就全部放回去：要嘛四樣都是新的，要嘛都是舊的。
     core/ 最後換，所以「磁碟上的版本是新的」就代表四樣都換好了。做完清掉暫存。"""
     tmp = home / ".update-tmp"
     shutil.rmtree(tmp, ignore_errors=True)
@@ -132,10 +152,8 @@ def apply(home, zip_path):
         except OSError:
             _restore(home)
             raise
-        for name in PARTS:  # 全部換好了，舊的才丟；丟不掉也不算失敗（下次更新開頭會再收一次）
-            shutil.rmtree(home / f"{name}.old", ignore_errors=True)
-            if (home / f"{name}.old").is_file():
-                (home / f"{name}.old").unlink()
+        with contextlib.suppress(OSError):  # 全部換好了，舊的才丟；丟不掉也不算失敗（下次更新開頭會再收一次）
+            _discard(home)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -4,6 +4,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import zipfile
@@ -306,6 +307,52 @@ def test_apply_recovers_from_a_swap_that_was_killed_half_way(update, home, sourc
     after = tree(home)
     assert {k: v for k, v in after.items() if k in NEW} == {k: v.encode() for k, v in NEW.items()}
     assert set(after) == set(NEW) | set(MINE)
+
+
+def broken_zip(tmp_path):
+    """少了 ui/ 的包：apply 一定丟 ValueError。"""
+    z = tmp_path / "少一樣.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        for name, text in NEW.items():
+            if not name.startswith("ui/"):
+                f.writestr(f"iPLoT-v9.9.9/{name}", text)
+    return z
+
+
+def test_leftover_old_without_new_is_not_put_back(update, home, source, tmp_path):
+    """獨立審查 I1：上一次更新已經全部換好（沒有任何 .new），只是 .old 沒刪掉。下一次更新不能把那些 .old 放回去：
+    只有 .new 還在（上一次沒換完）才放回；否則只清掉殘餘。"""
+    update.apply(home, source / "iPLoT-v9.9.9.zip")
+    updated = tree(home)
+    for name, text in OLD.items():  # 模擬上一次刪不掉的舊版
+        part, _, rest = name.partition("/")
+        target = home / f"{part}.old" / rest if rest else home / f"{part}.old"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError):
+        update.apply(home, broken_zip(tmp_path))
+    assert tree(home) == updated and update.installed_version(home) == "9.9.9"
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="靠 POSIX 的唯讀資料夾讓刪除失敗")
+def test_old_that_cannot_be_deleted_is_renamed_before_it_is_cleared(update, home, source, tmp_path):
+    """舊的 core/ 裡有刪不掉的東西（唯讀的子資料夾）：更新照樣成功，但留下的殘餘不能還叫 core.old，
+    否則下一次更新開頭會把這個殘缺的 core 換回來，iPLoT 就開不起來。"""
+    locked = home / "core" / "locked"
+    locked.mkdir()
+    (locked / "f.txt").write_text("x", encoding="utf-8")
+    locked.chmod(0o555)
+    try:
+        update.apply(home, source / "iPLoT-v9.9.9.zip")
+        assert update.installed_version(home) == "9.9.9"
+        assert not [p.name for p in home.iterdir() if p.name.endswith(".old")]
+        with pytest.raises(ValueError):
+            update.apply(home, broken_zip(tmp_path))
+        assert {k: v for k, v in tree(home).items() if k in NEW} == {k: v.encode() for k, v in NEW.items()}
+        assert update.installed_version(home) == "9.9.9"
+    finally:
+        for p in home.rglob("locked"):
+            p.chmod(0o755)
 
 
 @pytest.fixture
