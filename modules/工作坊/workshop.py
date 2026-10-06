@@ -179,7 +179,7 @@ def snapshot(folder):
     files = [(p.relative_to(folder).as_posix(), p) for p in sorted(folder.rglob("*"))
              if p.is_file() and not _kept(p.relative_to(folder).parts)]
     try:
-        with zipfile.ZipFile(saved, "w", zipfile.ZIP_DEFLATED) as z:
+        with zipfile.ZipFile(saved, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as z:  # 1980 年以前的檔也收
             for rel, path in files:
                 z.write(path, rel)
     except OSError:

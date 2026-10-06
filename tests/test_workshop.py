@@ -620,6 +620,19 @@ def test_a_failed_snapshot_is_one_sentence_and_leaves_no_half_zip(workshop, mods
     assert tree(folder) == before, "資料夾逐位元組不變，.history/ 沒有新檔"
 
 
+def test_a_file_from_before_1980_does_not_break_the_snapshot(workshop, mods, src, tmp_path):
+    """Task 17 審查 I4：zip 記不了 1980 年以前的檔案時間。模組資料夾裡有這種檔（從舊備份還原的、時間被清成 0 的）時，
+    存快照照樣成功、照常裝好——以前是一句英文「ZIP does not support timestamps before 1980」、留下半個 zip，而且永遠更新不了。"""
+    folder = make_module(mods, "記帳", "print('v1')\n")
+    (folder / "舊帳.csv").write_text("1970\n", encoding="utf-8")
+    os.utime(folder / "舊帳.csv", (0, 0))
+    api = workshop.Api(FakeApp(tmp_path), [pack(src, "記帳", {"iplot.py": "print('v2')\n"})], mods)
+    assert api.install("記帳", True) == workshop.LABELS["installed"]
+    [saved] = list((folder / ".history").glob("*-folder.zip"))
+    with zipfile.ZipFile(saved) as z:
+        assert z.read("舊帳.csv") == b"1970\n"
+
+
 def test_a_rollback_that_cannot_finish_leaves_every_module_folder_asking(workshop, mods, tmp_path, monkeypatch):
     """放不回去時，資料夾裡可能留著新下載的程式：剩下的每一個模組資料夾都放 .unconfirmed，執行前一樣會問。"""
     folder = make_module(mods, "整理桌面", "x = 2\n")

@@ -76,7 +76,7 @@ def pack_module(folder: Path, out_dir: Path) -> Path:
     out = out_dir / f"{folder.name}.zip"
     files = sorted(p for p in folder.rglob("*")
                    if p.is_file() and not SKIP & {part.casefold() for part in p.relative_to(folder).parts})
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as z:  # 1980 年以前的檔記成 1980 年
         for p in files:
             z.write(p, f"{folder.name}/{p.relative_to(folder).as_posix()}")
     return out

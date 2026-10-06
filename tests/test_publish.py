@@ -57,6 +57,15 @@ def test_pack_module_layout_and_exclusions(publish, tmp_path):
         assert z.read("整理 桌面/helper.py") == b"x = 1\n"
 
 
+def test_pack_module_handles_files_from_before_1980(publish, tmp_path):
+    """Task 17 審查 I4：模組裡有 1980 年以前的檔案時間，打包照樣成功（zip 記成 1980 年），不是 traceback、不是半個 --out。"""
+    import os
+    folder = make_module(tmp_path / "modules", "舊模組")
+    os.utime(folder / "iplot.py", (0, 0))
+    with zipfile.ZipFile(publish.pack_module(folder, tmp_path / "out")) as z:
+        assert z.namelist() == ["舊模組/iplot.py"]
+
+
 def test_write_update_shape(publish, tmp_path):
     z = tmp_path / "iPLoT-v0.5.0.zip"
     z.write_bytes(b"zip bytes")
