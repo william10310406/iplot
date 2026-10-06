@@ -159,11 +159,22 @@ def test_main_refuses_a_package_whose_core_is_another_version(publish, repo, cap
     assert "9.9.9" in capsys.readouterr().out and not (out / "iPLoT-v1.0.0.zip").exists() and not (out / "update.json").exists()
 
 
-def test_failed_archive_does_not_destroy_the_previous_zip(publish, repo):
+def test_failed_archive_does_not_destroy_the_previous_zip(publish, repo, monkeypatch):
+    """git show 讀得到那一版、git archive 卻寫到一半失敗：上一次產生的 zip 不能被蓋壞，也不留 .part。
+    （獨立審查 I5：以前這裡用 --ref no-such-ref，在 git show 就停了，走不到 git archive；拿掉 .part 的保護照樣通過。）"""
     out = repo / "交付" / "發佈"
     assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
     good = (out / "iPLoT-v9.9.9.zip").read_bytes()
-    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--ref", "no-such-ref"], root=repo) == 1
+    real = subprocess.run
+
+    def run(args, **kwargs):
+        if "archive" in args:  # 寫了一半就失敗
+            Path(args[args.index("-o") + 1]).write_bytes(b"half a zip")
+            return subprocess.CompletedProcess(args, 128, "", "fatal: 模擬：寫到一半失敗")
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(publish.subprocess, "run", run)
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 1
     assert (out / "iPLoT-v9.9.9.zip").read_bytes() == good and not list(out.glob("*.part"))
 
 
