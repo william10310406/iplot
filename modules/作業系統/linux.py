@@ -42,6 +42,16 @@ def terminal(app, path):
     raise OSError("找不到終端機程式，試過：" + "、".join(name for name, _ in TERMINALS))
 
 
+def requirements(app):
+    """網頁面板要裝的套件清單：requirements/ 裡的檔名。空字串＝這個平台還沒有網頁面板。"""
+    return ""
+
+
+def webview_ready(app):
+    """網頁面板的前置條件都有就回 None，缺什麼就回一句話。Linux 要系統層的 GTK／WebKit2GTK，pip 裝不了。"""
+    return "這一版的網頁面板還不支援 Linux，請用安全模式：python3 main.py --safe"
+
+
 def trash(app, path):
     """照 XDG 規範搬到 ~/.local/share/Trash：東西進 files/，原本的位置與時間寫進 info/。
     同名就加「 2」「 3」…；回傳搬到哪裡。永遠不刪除。"""

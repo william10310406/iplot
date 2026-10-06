@@ -1,13 +1,14 @@
-"""tkinter 面板：薄的一層。只負責畫按鈕、把動作交給 Core，不做任何決定。"""
+"""tkinter 面板：安全模式（--safe）與網頁面板開不起來時的後備。薄的一層：只負責畫按鈕、
+把動作交給 Core，不做任何決定。"""
 
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, simpledialog
+from tkinter import filedialog, messagebox, simpledialog
 
-from .core import Core
-from .errors import describe
-from .text import T
-from .types import ErrorInfo, Group, ModuleInfo, Scope
+from core.core import Core
+from core.errors import describe
+from core.text import T
+from core.types import ErrorInfo, Group, ModuleInfo, Scope
 
 COLORS = {"here": "blue", "parent": "red", "extra": "green"}
 
@@ -52,13 +53,9 @@ class Panel:
         self.root.bind("<FocusIn>", self._focus)
 
     def attach(self, core: Core) -> None:
-        """接上 Core；之後按鈕的動作都交給它。"""
+        """接上 Core；之後按鈕的動作都交給它，tkinter 回呼裡沒接住的例外也交給它回報。"""
         self.core = core
-
-    @property
-    def window(self) -> tk.Tk:
-        """tkinter 主視窗。"""
-        return self.root
+        self.root.report_callback_exception = core.report_internal
 
     def mainloop(self) -> None:
         """進入 tkinter 的事件迴圈。"""
@@ -143,6 +140,10 @@ class Panel:
     def ask(self, prompt: str, default: str = "") -> str | None:
         """跳出對話框問一個字串；按取消回 None。"""
         return simpledialog.askstring(self.title, prompt, initialvalue=default, parent=self.root)
+
+    def confirm(self, prompt: str) -> bool:
+        """跳出「確定／取消」對話框；按確定回 True。"""
+        return messagebox.askokcancel(self.title, prompt, parent=self.root)
 
     def choose_files(self) -> list[Path]:
         """跳出檔案選擇視窗；按取消回空清單。"""

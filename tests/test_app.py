@@ -60,14 +60,26 @@ def test_ask_and_choose_delegate(fake_core, info):
     assert app.choose_files() == [Path("/f")] and app.choose_folder() == Path("/d")
 
 
-def test_api_version_is_1(fake_core, info):
-    assert App(fake_core, info).api_version == 1
+def test_api_version_is_2(fake_core, info):
+    assert App(fake_core, info).api_version == 2
+
+
+def test_no_window(fake_core, info):
+    """D66：沒有 tk 主視窗了，app.window 拿掉（api_version 2）。"""
+    assert not hasattr(App(fake_core, info), "window")
+
+
+def test_confirm_goes_to_view(fake_core, info):
+    fake_core.view.answers = [False]
+    assert App(fake_core, info).confirm("q") is False
+    assert App(fake_core, info).confirm("r") is True  # answers 用完之後預設 True
+    assert fake_core.view.confirmed == ["q", "r"]
 
 
 def test_all_members_have_docstrings():
     members = {k: v for k, v in vars(App).items()
                if not k.startswith("_") and (callable(v) or isinstance(v, property))}
-    assert set(members) >= {"module", "home", "modules", "memory", "window", "log", "open",
+    assert set(members) >= {"module", "home", "modules", "memory", "confirm", "log", "open",
                             "edit", "reveal", "terminal", "trash", "run", "rescan", "ask", "choose_files", "choose_folder"}
     for name, member in members.items():
         assert CJK.search(member.__doc__ or ""), name
@@ -76,4 +88,4 @@ def test_all_members_have_docstrings():
 
 def test_identity_members(fake_core, info, home):
     app = App(fake_core, info)
-    assert (app.module, app.home, app.modules, app.window) == (info, home, (), None)
+    assert (app.module, app.home, app.modules) == (info, home, ())

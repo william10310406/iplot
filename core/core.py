@@ -16,14 +16,13 @@ from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result,
 
 
 class View(Protocol):
-    """面板要做到的事：ui.Panel 實作，測試用 FakeView。"""
-
-    window: Any
+    """面板要做到的事：ui/ 裡的面板實作，測試用 FakeView。"""
 
     def show(self, scope: Scope) -> None: ...
     def log(self, text: str) -> None: ...
     def report(self, error: ErrorInfo) -> None: ...
     def ask(self, prompt: str, default: str = "") -> str | None: ...
+    def confirm(self, prompt: str) -> bool: ...
     def choose_files(self) -> list[Path]: ...
     def choose_folder(self) -> Path | None: ...
 
@@ -38,7 +37,7 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
         return DEFAULT_CONFIG, None
     try:
         ns = runpy.run_path(str(path))
-    except (Exception, SystemExit) as exc:  # noqa: BLE001  規格 §7 允許的兩處之一
+    except (Exception, SystemExit) as exc:  # noqa: BLE001  規格 §11 允許的三處之一
         return DEFAULT_CONFIG, from_exception(exc, None, "config")
     d = DEFAULT_CONFIG
     roots, editor = ns.get("ROOTS", d.roots), ns.get("EDITOR", d.editor)

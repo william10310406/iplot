@@ -1,0 +1,11 @@
+# NOT verified on a real Windows machine. Versions were resolved with pip --dry-run --platform win_amd64.
+# Also needs the Microsoft Edge WebView2 Runtime (built into Windows 11); modules/<OS module>/win.py checks for it.
+# Keep this file ASCII-only: older pip reads it with the system encoding (docs/07, section 9).
+bottle==0.13.4
+cffi==2.1.1
+clr_loader==0.3.1
+proxy_tools==0.1.0
+pycparser==3.0
+pythonnet==3.2.0
+pywebview==6.2.1
+typing_extensions==4.16.0

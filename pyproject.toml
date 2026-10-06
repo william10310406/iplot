@@ -11,4 +11,4 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["core"]
-omit = ["core/ui.py"]
+omit = ["ui/*"]

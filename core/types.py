@@ -17,6 +17,7 @@ class Meta:
     has_run: bool
     accepts_files: bool
     error: str | None
+    icon: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class ModuleInfo:
     accepts_files: bool
     has_children: bool
     error: str | None
+    icon: str | None = None
+    icon_file: Path | None = None
 
 
 @dataclass(frozen=True)

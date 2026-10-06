@@ -10,8 +10,10 @@ elif sys.platform == "win32":
 else:
     import linux as backend
 
+ICON = "🖥️"
 open, edit, reveal = backend.open, backend.edit, backend.reveal
 terminal, trash = backend.terminal, backend.trash
+requirements, webview_ready = backend.requirements, backend.webview_ready  # 第一次啟動的安裝會問這兩個
 
 
 def run(app):

@@ -1,0 +1,13 @@
+# Packages the iPLoT web panel needs on macOS, versions pinned. Installed into lib/ on first launch (ui/install.py).
+# To upgrade: pip install --target <dir> pywebview, then rewrite this file from pip freeze --path <dir>.
+# Keep this file ASCII-only: older pip reads it with the system encoding (docs/07, section 9).
+bottle==0.13.4
+proxy_tools==0.1.0
+pyobjc-core==12.2.2
+pyobjc-framework-Cocoa==12.2.2
+pyobjc-framework-Quartz==12.2.2
+pyobjc-framework-Security==12.2.2
+pyobjc-framework-UniformTypeIdentifiers==12.2.2
+pyobjc-framework-WebKit==12.2.2
+pywebview==6.2.1
+typing_extensions==4.16.0
