@@ -228,8 +228,12 @@ def main(argv):
     parser = argparse.ArgumentParser(description="0.5.0 驗收的自動部分，對 config.py 裡真的網址跑")
     parser.add_argument("--published", default=str(SRC.parent / "iplot-workshop"),
                         help="publish.py --out 的那個資料夾：等網路上的 json 跟它一樣才開始（沒有這個資料夾就不比）")
-    parser.add_argument("--keep", help="複本放哪裡（預設是暫存資料夾）；跑完留著，人工驗收可以接著用")
+    parser.add_argument("--keep", help="複本放在這個新的（或空的）資料夾；跑完留著，人工驗收可以接著用。預設是暫存資料夾")
     args = parser.parse_args(argv)
+    keep = Path(args.keep).resolve() if args.keep else None
+    if keep and keep.exists() and (not keep.is_dir() or any(keep.iterdir())):  # 不刪別人的東西：只用新的或空的資料夾
+        print(f"--keep 要給一個還不存在、或空的資料夾；{keep} 裡已經有東西，什麼都沒做")
+        return 1
     sys.path.insert(0, str(SRC))
     from core.core import load_config
     config, err = load_config(SRC / "config.py")
@@ -240,8 +244,8 @@ def main(argv):
     results = []
     update, index = check_site(config.update_url, config.workshop_url, published, results)
     if update:
-        acc = Path(args.keep or tempfile.mkdtemp(prefix="iplot-acceptance-")).resolve()
-        shutil.rmtree(acc, ignore_errors=True)
+        acc = keep or Path(tempfile.mkdtemp(prefix="iplot-acceptance-")).resolve()
+        acc.mkdir(parents=True, exist_ok=True)
         home = acc / "iPLoT"
         shutil.copytree(SRC, home, symlinks=True, ignore=shutil.ignore_patterns(
             ".git", ".venv", "交付", ".superpowers", "spikes", "__pycache__", ".pytest_cache", ".ruff_cache"))
