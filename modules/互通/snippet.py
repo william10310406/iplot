@@ -1,7 +1,7 @@
 """那一小段：直接執行模組的 iplot.py（python3 iplot.py）時交給「互通」用彈出式視窗跑（D84）。
 
 文字跟核心 ＋ 的範本（core/text.py 的 TEMPLATE）裡的那一段一字不差（tests/test_interop.py 擋）：
-0.5.1 起新模組由範本帶，舊模組由同步補一次（sync.py）。這裡只管文字、找插入的位置、加上去、認得出來。"""
+0.5.1 起新模組由範本帶，舊模組在「互通」的狀態頁按「加上」時加（iplot.py 的 patch，D87）。這裡只管文字、找插入的位置、加上去、認得出來。"""
 
 import ast
 import io

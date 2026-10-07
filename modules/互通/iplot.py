@@ -1,5 +1,5 @@
 """互通：任何模組都能在面板外打開——Spotlight、Dock、一行指令、直接 python3 iplot.py。
-按這裡會先同步一次（捷徑、讓舊模組能直接執行的那一小段），再顯示現在的狀態。"""
+按這裡會先同步一次捷徑，再顯示現在的狀態；舊模組要能直接執行，在狀態頁按「加上」。"""
 import ast
 import json
 import pathlib
@@ -36,8 +36,44 @@ EXAMPLE = "開工"  # 指令的例子優先用它；沒有就用最上層第一�
 # 所以這裡只 import 標準庫，同一個資料夾的 boot、sync…與 core 都在函式裡才 import
 
 
+def _read(file: pathlib.Path) -> str | None:
+    try:
+        return file.read_text(encoding="utf-8-sig")
+    except (OSError, ValueError):
+        return None
+
+
+def _parses(text: str) -> bool:
+    try:
+        ast.parse(text)
+        return True
+    except (SyntaxError, ValueError):
+        return False
+
+
+def candidates(home: pathlib.Path, config) -> list:
+    """可以加上那一小段的模組（D87）：在 iPLoT 的 modules/ 裡（包括它底下各層）、sync.why_not 回 None、
+    還沒有記號、ast 讀得懂。上一層（".."）與 ROOTS 另外加的根目錄底下的一律不算。回 [(ModuleInfo, 一路的名稱)]。"""
+    import snippet
+    import sync
+
+    from core import scan
+
+    roots = scan.roots_from_config(home, config.roots)
+    here = next((r.path for r in roots if r.level == "here"), None)
+    found = []
+    for info, titles in sync.modules(home, config):
+        if info.root != here or sync.why_not(info, roots) is not None:
+            continue
+        text = _read(info.file)
+        if text is not None and not snippet.has(text) and _parses(text):
+            found.append((info, titles))
+    return found
+
+
 def status(home: pathlib.Path, config, python: str, folder: pathlib.Path) -> dict:
-    """狀態頁要的資料：幾個模組能在面板外打開、幾個能直接執行、沒補的與原因、捷徑在哪、指令怎麼寫、上一次同步的問題。"""
+    """狀態頁要的資料：幾個模組能在面板外打開、幾個能直接執行、可以加上那一小段的（名稱與 iplot.py 的路徑）、
+    沒加的與原因、捷徑在哪、指令怎麼寫、上一次同步的問題。"""
     import shortcut
     import snippet
     import sync
@@ -45,36 +81,35 @@ def status(home: pathlib.Path, config, python: str, folder: pathlib.Path) -> dic
     from core import scan
     from core.text import SYSTEM_MODULE
 
-    roots, done = scan.roots_from_config(home, config.roots), sync.patched(folder)
-    total, direct, skipped, top = 0, 0, [], []
+    roots = scan.roots_from_config(home, config.roots)
+    parent = next((r.path for r in roots if r.level == "parent"), None)
+    can = {info.file for info, _ in candidates(home, config)}
+    total, direct, listed, skipped, top = 0, 0, [], [], []
     for info, titles in sync.modules(home, config):
+        name = " › ".join(titles)
         if info.level != "child":
             top.append(info.name)
         if not (info.level == "here" and info.name == SYSTEM_MODULE):
             total += 1
-        reason = sync.why_not(info, roots)
-        try:
-            text = info.file.read_text(encoding="utf-8-sig")
-        except (OSError, ValueError):
-            text = ""
-        if snippet.has(text) and reason != "在 ROOTS 另外加的資料夾裡":
-            direct += 1  # 自己帶著那一小段（例如工作坊裝來的新版）也算
-            continue
-        if reason is None:
-            try:
-                ast.parse(text)
-                reason = "拿掉了那一小段（不會再補）" if str(info.folder) in done else "還沒補（見上一次同步的問題）"
-            except (SyntaxError, ValueError):
-                reason = "有語法錯誤"
-        skipped.append({"name": " › ".join(titles), "reason": reason})
+        reason, text = sync.why_not(info, roots), _read(info.file)
+        if text is not None and snippet.has(text) and reason != "在 ROOTS 另外加的資料夾裡":
+            direct += 1  # 自己帶著那一小段（＋ 的範本、工作坊裝來的新版、按過「加上」的）
+        elif info.file in can:
+            listed.append({"name": name, "path": str(info.file)})
+        else:
+            if info.root == parent:
+                reason = "在 iPLoT 外面，不改"
+            elif reason is None:
+                reason = "讀不到" if text is None else "有語法錯誤"
+            skipped.append({"name": name, "reason": reason})
     others = [n for n in top if n not in ("互通", SYSTEM_MODULE)]
     example = EXAMPLE if EXAMPLE in top else (others[0] if others else "<模組名稱>")
     try:
         problems = (folder / sync.ERRORS).read_text(encoding="utf-8").splitlines()
     except (OSError, ValueError):
         problems = []
-    return {"total": total, "direct": direct, "skipped": skipped, "problems": problems, "python": python,
-            "shortcuts": str(folder / shortcut.FOLDER), "mac": sys.platform == "darwin",
+    return {"total": total, "direct": direct, "candidates": listed, "skipped": skipped, "problems": problems,
+            "python": python, "shortcuts": str(folder / shortcut.FOLDER), "mac": sys.platform == "darwin",
             "command": shlex.join([python, str(folder / "run.py"), example])}
 
 
@@ -85,7 +120,7 @@ def render(data: dict) -> str:
 
 
 class Api:
-    """狀態頁的 JS 用 pywebview.api.<方法> 呼叫的入口；自己的東西都以底線開頭，攤出去的只有這三個方法。"""
+    """狀態頁的 JS 用 pywebview.api.<方法> 呼叫的入口；自己的東西都以底線開頭，攤出去的只有這四個方法。"""
 
     def __init__(self, app, home: pathlib.Path, config, python: str, folder: pathlib.Path) -> None:
         self._app, self._home, self._config, self._python, self._folder = app, home, config, python, folder
@@ -107,6 +142,24 @@ class Api:
         import sync
         sync.sync(self._home, self._config, self._python, self._folder)
         return status(self._home, self._config, self._python, self._folder)
+
+    def patch(self) -> dict:
+        """「加上（N 個檔）」：不收頁面給的任何東西，在這裡重新算一次候選（candidates），每一個用 snippet.add 加上
+        （它先存快照）。回補了哪些、問題（一個一句）、新的狀態，頁面用 textContent 重畫。"""
+        import snippet
+
+        done, problems = [], []
+        for info, titles in candidates(self._home, self._config):
+            name = " › ".join(titles)
+            try:
+                if snippet.add(info.file, self._config.history_keep):
+                    done.append(name)
+            except SyntaxError:
+                problems.append(f"{name}：有語法錯誤，沒補")
+            except (OSError, ValueError) as exc:
+                problems.append(f"{name}：沒補：{exc}")
+        return {"patched": done, "problems": problems,
+                "status": status(self._home, self._config, self._python, self._folder)}
 
 
 def run(app):

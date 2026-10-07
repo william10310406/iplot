@@ -6,7 +6,7 @@ import ast
 import dataclasses
 import importlib
 import importlib.util
-import json
+import inspect
 import os
 import plistlib
 import re
@@ -657,7 +657,7 @@ def test_sync_clears_its_own_leftover_temporaries(load, tmp_path):
     assert _shortcuts(base) == []
 
 
-# ── sync：補那一小段、捷徑、紀錄，同一時間只做一個 ──
+# ── sync：捷徑與紀錄，同一時間只做一個；不改任何模組檔案（D87） ──
 
 @pytest.fixture
 def interop(home):
@@ -670,50 +670,34 @@ def do_sync(load, home, interop, config=None, **kw):
     return load("sync").sync(home, config or DEFAULT_CONFIG, sys.executable, interop, **kw)
 
 
-def patched(interop):
-    return json.loads((interop / ".patched").read_text(encoding="utf-8"))
-
-
-def test_sync_patches_each_module_once(load, home, interop):
-    a = make_module(home / "modules", "A", '"""a"""\ndef run(app):\n    pass\n')
-    already = '"""b"""\n# ── 互通 ── 自己加的\ndef run(app):\n    pass\n'
-    b = make_module(home / "modules", "B", already)
+def test_sync_never_changes_a_module_file(load, home, interop, tmp_path):
+    """D87：同步只做捷徑與紀錄。modules/ 與上一層（ROOTS 的 ".."）沒有記號的 iplot.py 一個位元組都不變、不存快照。"""
+    files = {}
+    for parent, name, src in [(home / "modules", "A", '"""a"""\ndef run(app):\n    pass\n'),
+                              (home / "modules" / "A", "C", '"""c"""\n'),
+                              (home / "modules", "S", "def run(app)\n"),
+                              (tmp_path, "旁邊", '"""旁邊"""\nprint(1)\n')]:
+        f = make_module(parent, name, src) / "iplot.py"
+        files[f] = f.read_bytes()
+    files[interop / "iplot.py"] = (interop / "iplot.py").read_bytes()
     assert do_sync(load, home, interop) == []
-    assert "# ── 互通 ──" in (a / "iplot.py").read_text(encoding="utf-8")
-    assert (b / "iplot.py").read_bytes() == already.encode() and not (b / ".history").exists()
-    assert {str(a), str(b)} <= set(patched(interop))
-    (a / "iplot.py").write_text('"""a"""\ndef run(app):\n    pass\n', encoding="utf-8")  # 不要那一段：刪掉
-    do_sync(load, home, interop)
-    assert "# ── 互通 ──" not in (a / "iplot.py").read_text(encoding="utf-8")
+    assert do_sync(load, home, interop, platform="darwin") == []  # 真的做捷徑（都在 tmp 裡）
+    assert {f: f.read_bytes() for f in files} == files
+    assert not any((f.parent / ".history").exists() for f in files) and not (interop / ".patched").exists()
 
 
-def test_sync_walks_into_child_modules(load, home, interop):
-    p = make_module(home / "modules", "P")
-    c = make_module(p, "C", '"""c"""\ndef run(app):\n    pass\n')
-    do_sync(load, home, interop)
-    assert "# ── 互通 ──" in (c / "iplot.py").read_text(encoding="utf-8") and str(c) in patched(interop)
+def test_sync_has_no_patched_record_any_more(load):
+    sync = load("sync")
+    assert not hasattr(sync, "patched") and not hasattr(sync, "PATCHED") and not hasattr(sync, "snippet")
 
 
-def test_sync_skips_workshop_bundled_and_extra_roots(load, home, interop, tmp_path):
-    b = make_module(home / "modules", "B")
-    (b / ".origin").write_text("{}", encoding="utf-8")
-    up = make_module(home / "modules", "更新")
-    e = make_module(tmp_path / "extra", "E")
-    config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules", "..", str(tmp_path / "extra")))
-    do_sync(load, home, interop, config)
-    for m in (b, up, e):
-        assert "互通" not in (m / "iplot.py").read_text(encoding="utf-8"), m
-
-
-def test_sync_does_not_patch_through_a_symlink(load, home, tmp_path, interop):    # Review Focus 2
+def test_sync_does_not_follow_a_symlinked_folder(load, home, tmp_path, interop):    # Review Focus 2
     real = make_module(tmp_path / "別處", "R", '"""r"""\n')
     (home / "modules" / "L").symlink_to(real, target_is_directory=True)
-    problems = load("sync").sync(home, DEFAULT_CONFIG, sys.executable, home / "modules" / "互通", platform="linux")
-    assert "L：是符號連結，沒補" in problems and "互通" not in (real / "iplot.py").read_text(encoding="utf-8")
+    assert do_sync(load, home, interop) == [] and (real / "iplot.py").read_text(encoding="utf-8") == '"""r"""\n'
 
 
-def test_sync_does_not_patch_a_symlinked_iplot_py_but_still_makes_its_shortcut(load, home, tmp_path, interop,
-                                                                                monkeypatch):
+def test_a_symlinked_iplot_py_still_gets_its_shortcut(load, home, tmp_path, interop, monkeypatch):
     target = tmp_path / "別處" / "f.py"  # 別處 不是模組（ROOTS 的 ".." 就是 tmp_path）
     target.parent.mkdir()
     target.write_text('"""f"""\n', encoding="utf-8")
@@ -721,40 +705,40 @@ def test_sync_does_not_patch_a_symlinked_iplot_py_but_still_makes_its_shortcut(l
     (home / "modules" / "F" / "iplot.py").symlink_to(target)
     wanted = []
     monkeypatch.setattr(load("shortcut"), "sync", lambda base, w, *a, **k: wanted.append(w) or [])
-    problems = do_sync(load, home, interop, platform="darwin")
-    assert "F：是符號連結，沒補" in problems and "互通" not in target.read_text(encoding="utf-8")
-    assert "F" in wanted[0]
+    assert do_sync(load, home, interop, platform="darwin") == []
+    assert target.read_text(encoding="utf-8") == '"""f"""\n' and "F" in wanted[0]
 
 
-def test_sync_reports_a_syntax_error_and_writes_the_record(load, home, interop):
-    a = make_module(home / "modules", "A", "def run(app)\n")
-    assert do_sync(load, home, interop) == ["A：有語法錯誤，沒補"]
-    assert (interop / ".sync-error").read_text(encoding="utf-8") == "A：有語法錯誤，沒補\n"
-    (a / "iplot.py").write_text("def run(app):\n    pass\n", encoding="utf-8")
-    assert do_sync(load, home, interop) == [] and not (interop / ".sync-error").exists()
+def test_sync_writes_shortcut_problems_to_the_record(load, home, interop, monkeypatch):
+    answers = [["捷徑「A」：做不出來：x"], []]
+    monkeypatch.setattr(load("shortcut"), "sync", lambda *a, **k: answers.pop(0))
+    assert do_sync(load, home, interop, platform="darwin") == ["捷徑「A」：做不出來：x"]
+    assert (interop / ".sync-error").read_text(encoding="utf-8") == "捷徑「A」：做不出來：x\n"
+    assert do_sync(load, home, interop, platform="darwin") == [] and not (interop / ".sync-error").exists()
 
 
-def test_a_fresh_lock_skips_and_a_stale_lock_is_taken(load, home, interop):
-    a = make_module(home / "modules", "A", '"""a"""\n')
+def test_a_fresh_lock_skips_and_a_stale_lock_is_taken(load, home, interop, monkeypatch):
+    calls = []
+    monkeypatch.setattr(load("shortcut"), "sync", lambda *a, **k: calls.append(1) or [])
     (interop / ".lock").write_text("", encoding="utf-8")
-    assert do_sync(load, home, interop) == [] and "互通" not in (a / "iplot.py").read_text(encoding="utf-8")
-    do_sync(load, home, interop, now=lambda: time.time() + 121)
-    assert "互通" in (a / "iplot.py").read_text(encoding="utf-8") and not (interop / ".lock").exists()
+    assert do_sync(load, home, interop, platform="darwin") == [] and calls == []
+    do_sync(load, home, interop, platform="darwin", now=lambda: time.time() + 121)
+    assert calls == [1] and not (interop / ".lock").exists()
 
 
 def test_records_are_replaced_atomically(load, home, interop, monkeypatch):      # Review Focus 5
-    make_module(home / "modules", "A", '"""a"""\n')
-    do_sync(load, home, interop)
-    before = (interop / ".patched").read_bytes()
-    make_module(home / "modules", "B", '"""b"""\n')
+    answers = [["第一次的問題"], ["第二次的問題"]]
+    monkeypatch.setattr(load("shortcut"), "sync", lambda *a, **k: answers.pop(0))
+    do_sync(load, home, interop, platform="darwin")
+    before = (interop / ".sync-error").read_bytes()
 
     def boom(*a, **k):
         raise OSError("磁碟滿了")
 
     monkeypatch.setattr(os, "replace", boom)
-    problems = do_sync(load, home, interop)
+    problems = do_sync(load, home, interop, platform="darwin")
     monkeypatch.undo()
-    assert (interop / ".patched").read_bytes() == before and json.loads(before)
+    assert (interop / ".sync-error").read_bytes() == before == "第一次的問題\n".encode()
     assert any("磁碟滿了" in p for p in problems) and not list(interop.glob(".*.tmp"))
     assert not (interop / ".lock").exists()
 
@@ -982,6 +966,8 @@ def test_button_remembers_python_syncs_and_opens_the_page(load, home, monkeypatc
     from core.scan import module_info
     copy = home / "modules" / "互通"
     shutil.copytree(INTEROP, copy, ignore=shutil.ignore_patterns("__pycache__", ".*", "捷徑"))
+    plain = make_module(home / "modules", "A", '"""a"""\ndef run(app):\n    pass\n') / "iplot.py"
+    mine = (copy / "iplot.py").read_bytes()
     before = {n: (INTEROP / n).stat().st_mtime_ns if (INTEROP / n).exists() else None for n in (".python", ".patched")}
     app, revealed = FakeApp(home), []
     app.reveal = revealed.append
@@ -989,39 +975,96 @@ def test_button_remembers_python_syncs_and_opens_the_page(load, home, monkeypatc
     result = run_module(module_info(copy, home / "modules", "here"), app)
     assert result.ok, result.error
     assert app.pages[0][0] == "互通" and (copy / ".python").read_text(encoding="utf-8") == sys.executable
+    assert plain.read_text(encoding="utf-8") == '"""a"""\ndef run(app):\n    pass\n'  # 按「互通」不改模組（D87）
+    assert (copy / "iplot.py").read_bytes() == mine and not (copy / ".patched").exists()
     after = {n: (INTEROP / n).stat().st_mtime_ns if (INTEROP / n).exists() else None for n in (".python", ".patched")}
-    assert (copy / ".patched").exists() and after == before  # repo 裡的 modules/互通 一個檔都沒動
+    assert after == before  # repo 裡的 modules/互通 一個檔都沒動
 
 
-def _status_tree(home, tmp_path):
-    a = make_module(home / "modules", "A", '"""a"""\n')
-    b = make_module(home / "modules", "B", 'TITLE = "<b>x</b>"\n')
-    (b / ".origin").write_text("{}", encoding="utf-8")
-    make_module(home / "modules", "更新")
-    make_module(home / "modules", "S", "def run(app)\n")
-    make_module(tmp_path / "extra", "E")
+def _patch_tree(home, tmp_path):
+    """modules/ 裡的候選 A 與它的下一層 C；不能補的 B（.origin）、更新（隨附）、T（turtle）、F（iplot.py 是符號連結）、
+    S（語法錯誤）、M（已經有記號）、互通（有記號）；上一層（tmp_path）的 旁邊；ROOTS 另外加的 E。"""
+    m = home / "modules"
+    made = {"A": make_module(m, "A", '"""a"""\ndef run(app):\n    pass\n'),
+            "B": make_module(m, "B", 'TITLE = "<b>x</b>"\n'),
+            "更新": make_module(m, "更新"), "T": make_module(m, "T", "import turtle\n"),
+            "S": make_module(m, "S", "def run(app)\n"), "M": make_module(m, "M", '"""m"""\n# ── 互通 ── 自己加的\n'),
+            "旁邊": make_module(tmp_path, "旁邊", '"""旁邊"""\n'), "E": make_module(tmp_path / "extra", "E")}
+    made["C"] = make_module(made["A"], "C", '"""c"""\n')
+    (made["B"] / ".origin").write_text("{}", encoding="utf-8")
     target = tmp_path / "別處" / "f.py"
     target.parent.mkdir()
     target.write_text('"""f"""\n', encoding="utf-8")
-    (home / "modules" / "F").mkdir()
-    (home / "modules" / "F" / "iplot.py").symlink_to(target)
-    interop = make_module(home / "modules", "互通")
+    (m / "F").mkdir()
+    (m / "F" / "iplot.py").symlink_to(target)
+    made["F"], made["f.py"] = m / "F", target
+    interop = make_module(m, "互通", '"""互通"""\n# ── 互通 ──\n')
     config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules", "..", str(tmp_path / "extra")))
-    return a, interop, config
+    return made, interop, config
 
 
-def test_status_counts_and_reasons(load, home, tmp_path):
-    a, interop, config = _status_tree(home, tmp_path)
-    load("sync").sync(home, config, "/py/python3", interop, platform="linux")
+def _snapshot(made):
+    files = [p / "iplot.py" if p.is_dir() else p for p in made.values()]
+    return {f: f.read_bytes() for f in files}
+
+
+def test_candidates_are_plain_modules_inside_modules_only(load, home, tmp_path):
+    made, interop, config = _patch_tree(home, tmp_path)
+    got = load_button().candidates(home, config)
+    assert [(" › ".join(titles), info.file) for info, titles in got] == [
+        ("A", made["A"] / "iplot.py"), ("A › C", made["C"] / "iplot.py")]
+
+
+def test_patch_adds_the_snippet_only_to_the_candidates(load, home, tmp_path):
+    made, interop, config = _patch_tree(home, tmp_path)
+    before = _snapshot(made)
+    api = load_button().Api(None, home, config, "/py", interop)
+    result = api.patch()
+    assert (result["patched"], result["problems"]) == (["A", "A › C"], [])
+    snip = load("snippet")
+    for name in ("A", "C"):
+        f = made[name] / "iplot.py"
+        assert snip.has(f.read_text(encoding="utf-8"))
+        [snap] = (made[name] / ".history").glob("*.py")
+        assert snap.read_bytes() == before[f]  # 補之前存了快照
+    after = _snapshot(made)
+    assert {f: b for f, b in after.items() if f.parent not in (made["A"], made["C"])} == \
+           {f: b for f, b in before.items() if f.parent not in (made["A"], made["C"])}  # 其餘一個位元組都沒變
+    assert result["status"]["candidates"] == []
+    again = api.patch()
+    assert (again["patched"], again["problems"]) == ([], []) and _snapshot(made) == after  # 按第二次不再改
+
+
+def test_patch_takes_no_arguments(load, home, tmp_path):
     button = load_button()
-    (a / "iplot.py").write_text('"""a"""\n', encoding="utf-8")  # 自己把那一段拿掉了
-    got = button.status(home, config, "/py/python3", interop)
+    assert list(inspect.signature(button.Api.patch).parameters) == ["self"]
+    made, interop, config = _patch_tree(home, tmp_path)
+    with pytest.raises(TypeError):
+        button.Api(None, home, config, "/py", interop).patch([str(made["旁邊"] / "iplot.py")])
+    assert "互通" not in (made["旁邊"] / "iplot.py").read_text(encoding="utf-8")
+
+
+def test_patch_says_one_sentence_per_problem(load, home, tmp_path, monkeypatch):
+    made, interop, config = _patch_tree(home, tmp_path)
+
+    def broken(path, keep):
+        raise OSError("唯讀")
+
+    monkeypatch.setattr(load("snippet"), "add", broken)
+    result = load_button().Api(None, home, config, "/py", interop).patch()
+    assert (result["patched"], result["problems"]) == ([], ["A：沒補：唯讀", "A › C：沒補：唯讀"])
+
+
+def test_status_counts_reasons_and_candidates(load, home, tmp_path):
+    made, interop, config = _patch_tree(home, tmp_path)
+    got = load_button().status(home, config, "/py/python3", interop)
     reasons = {s["name"]: s["reason"] for s in got["skipped"]}
-    assert reasons == {"<b>x</b>": "工作坊裝來的", "更新": "隨附模組", "S": "有語法錯誤", "E": "在 ROOTS 另外加的資料夾裡",
-                       "F": "是符號連結", "A": "拿掉了那一小段（不會再補）"}
-    assert (got["total"], got["direct"]) == (7, 1)  # 七個模組都能從面板外打開；直接執行的只有互通自己
-    assert got["shortcuts"] == str(interop / "捷徑") and got["python"] == "/py/python3"
-    assert got["problems"] == ["F：是符號連結，沒補", "S：有語法錯誤，沒補"]  # 照名稱的順序
+    assert reasons == {"<b>x</b>": "工作坊裝來的", "更新": "隨附模組", "T": "用了 tkinter 或 turtle", "F": "是符號連結",
+                       "S": "有語法錯誤", "旁邊": "在 iPLoT 外面，不改", "E": "在 ROOTS 另外加的資料夾裡"}
+    assert got["candidates"] == [{"name": "A", "path": str(made["A"] / "iplot.py")},
+                                 {"name": "A › C", "path": str(made["C"] / "iplot.py")}]
+    assert (got["total"], got["direct"]) == (11, 2)  # 十一個都能從面板外打開；直接執行的是 M 與互通
+    assert got["shortcuts"] == str(interop / "捷徑") and got["python"] == "/py/python3" and got["problems"] == []
     assert got["command"] == shlex.join(["/py/python3", str(interop / "run.py"), "A"])
 
 
@@ -1033,9 +1076,9 @@ def test_the_example_command_prefers_kaigong(load, home):
     assert got["command"] == shlex.join(["/py", str(interop / "run.py"), "開工"])
 
 
-def test_api_exposes_only_three_methods(load):
+def test_api_exposes_only_four_methods(load):
     api = load_button().Api
-    assert {n for n in vars(api) if not n.startswith("_")} == {"reveal", "copy", "resync"}
+    assert {n for n in vars(api) if not n.startswith("_")} == {"reveal", "copy", "resync", "patch"}
 
 
 def test_api_reveal_copy_and_resync(load, home, monkeypatch):
@@ -1056,13 +1099,17 @@ def test_api_reveal_copy_and_resync(load, home, monkeypatch):
 
 
 def test_names_reach_the_page_as_data_not_markup(load, home, tmp_path, monkeypatch):
-    _, interop, config = _status_tree(home, tmp_path)
+    made, interop, config = _patch_tree(home, tmp_path)
+    odd = make_module(home / "modules", "<b>z", 'TITLE = "<b>y</b>"\n')
     button = load_button()
     html = button.render(button.status(home, config, "/py", interop))
-    assert "<b>x</b>" not in html and "\\u003cb>x\\u003c/b>" in html and "__STATUS__" not in html
+    for raw in ("<b>x</b>", "<b>y</b>", "<b>z"):
+        assert raw not in html
+    assert "\\u003cb>x\\u003c/b>" in html and "\\u003cb>y\\u003c/b>" in html and "__STATUS__" not in html
     monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: [])
     data = button.Api(None, home, config, "/py", interop).resync()
     assert {"name": "<b>x</b>", "reason": "工作坊裝來的"} in data["skipped"]
+    assert {"name": "<b>y</b>", "path": str(odd / "iplot.py")} in data["candidates"]
 
 
 def test_page_html_is_self_contained_and_never_uses_inner_html():
@@ -1102,10 +1149,13 @@ def test_sync_rewrites_when_only_the_python_app_moves(load, tmp_path, monkeypatc
 
 @pytest.mark.parametrize("src", ["import turtle\nturtle.forward(10)\n", "from tkinter import messagebox\n",
                                  "import tkinter.ttk as ttk\n", "def run(app):\n    import turtle\n"])
-def test_sync_leaves_tkinter_and_turtle_modules_alone(load, home, interop, src):
-    """用 tkinter／turtle 的模組在面板外開不了視窗（run.py 擋著）；補了那一小段，原本能直接 python3 iplot.py 的就不能了。"""
+def test_tkinter_and_turtle_modules_are_never_candidates(load, home, src):
+    """用 tkinter／turtle 的模組在面板外開不了視窗（run.py 擋著）；加上那一小段，原本能直接 python3 iplot.py 的就不能了。"""
     t = make_module(home / "modules", "T", src)
-    do_sync(load, home, interop)
+    interop = make_module(home / "modules", "互通", '"""互通"""\n# ── 互通 ──\n')
+    button = load_button()
+    assert button.candidates(home, DEFAULT_CONFIG) == []
+    assert button.Api(None, home, DEFAULT_CONFIG, "/py", interop).patch()["patched"] == []
     assert (t / "iplot.py").read_text(encoding="utf-8") == src
     from core import scan
     sync = load("sync")
