@@ -19,7 +19,7 @@
 | 動作 | `app.reveal(path: Path)` → `None` | 在檔案總管裡顯示並選取這個檔案或資料夾。 |
 | 動作 | `app.terminal(path: Path)` → `None` | 在終端機打開這個資料夾。 |
 | 動作 | `app.trash(path: Path)` → `Path | None` | 搬到系統垃圾桶，永遠不直接刪除；回傳搬到哪裡（Windows 的資源回收筒沒有路徑，回 None）。 |
-| 動作 | `app.run(name: str | ModuleInfo)` → `Result` | 執行目前範圍內另一個模組；找不到或有兩個同名時丟 LookupError，不猜。 |
+| 動作 | `app.run(name: str | ModuleInfo)` → `Result` | 執行另一個模組：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 LookupError，不猜。 |
 | 動作 | `app.rescan()` → `None` | 重新掃描並重畫面板；在模組執行中呼叫時，會等這次執行結束後才做。 |
 | 問人 | `app.ask(prompt: str, default: str = '')` → `str | None` | 跳出對話框問一個字串；按取消回 None。 |
 | 問人 | `app.confirm(prompt: str)` → `bool` | 跳出對話框問「確定／取消」；按確定回 True。 |
