@@ -86,7 +86,8 @@ def _write(path: Path, text: str) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _patched(folder: Path) -> set[str]:
+def patched(folder: Path) -> set[str]:
+    """.patched 記著的模組資料夾（補過、或本來就有那一小段的）；讀不到就當作沒有。"""
     try:
         data = json.loads((folder / PATCHED).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -104,7 +105,7 @@ def sync(home: Path, config: Config, python: str, folder: Path, platform: str = 
         problems: list[str] = []
         roots = scan.roots_from_config(home, config.roots)
         found = modules(home, config)
-        done = _patched(folder)
+        done = patched(folder)
         before = set(done)
         for info, titles in found:
             reason, name = why_not(info, roots), " › ".join(titles)

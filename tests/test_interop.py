@@ -5,11 +5,13 @@
 import ast
 import dataclasses
 import importlib
+import importlib.util
 import json
 import os
 import plistlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -961,3 +963,107 @@ def test_a_module_with_a_helper_named_like_ours_gets_its_own(entry, home):
 def test_main_without_a_target_says_how_to_use(entry, capsys):
     assert entry.go([]) == 1 and entry.wv.windows == []
     assert "run.py <模組資料夾或名稱>" in capsys.readouterr().err
+
+
+# ── 在面板按「互通」：同步一次，看狀態、捷徑與指令 ──
+
+def load_button():
+    """modules/互通/iplot.py 當一般模組 import（同一個資料夾的 boot、sync 由 load 的 sys.path 找到）。"""
+    spec = importlib.util.spec_from_file_location("interop_button", INTEROP / "iplot.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_button_remembers_python_syncs_and_opens_the_page(load, home, monkeypatch):
+    from conftest import FakeApp
+
+    from core.runner import run_module
+    from core.scan import module_info
+    copy = home / "modules" / "互通"
+    shutil.copytree(INTEROP, copy, ignore=shutil.ignore_patterns("__pycache__", ".*", "捷徑"))
+    app, revealed = FakeApp(home), []
+    app.reveal = revealed.append
+    monkeypatch.setattr(sys, "platform", "linux")  # 這個測試不做捷徑
+    result = run_module(module_info(copy, home / "modules", "here"), app)
+    assert result.ok, result.error
+    assert app.pages[0][0] == "互通" and (copy / ".python").read_text(encoding="utf-8") == sys.executable
+    assert (copy / ".patched").exists() and not (INTEROP / ".python").exists() and not (INTEROP / ".patched").exists()
+
+
+def _status_tree(home, tmp_path):
+    a = make_module(home / "modules", "A", '"""a"""\n')
+    b = make_module(home / "modules", "B", 'TITLE = "<b>x</b>"\n')
+    (b / ".origin").write_text("{}", encoding="utf-8")
+    make_module(home / "modules", "更新")
+    make_module(home / "modules", "S", "def run(app)\n")
+    make_module(tmp_path / "extra", "E")
+    target = tmp_path / "別處" / "f.py"
+    target.parent.mkdir()
+    target.write_text('"""f"""\n', encoding="utf-8")
+    (home / "modules" / "F").mkdir()
+    (home / "modules" / "F" / "iplot.py").symlink_to(target)
+    interop = make_module(home / "modules", "互通")
+    config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules", "..", str(tmp_path / "extra")))
+    return a, interop, config
+
+
+def test_status_counts_and_reasons(load, home, tmp_path):
+    a, interop, config = _status_tree(home, tmp_path)
+    load("sync").sync(home, config, "/py/python3", interop, platform="linux")
+    button = load_button()
+    (a / "iplot.py").write_text('"""a"""\n', encoding="utf-8")  # 自己把那一段拿掉了
+    got = button.status(home, config, "/py/python3", interop)
+    reasons = {s["name"]: s["reason"] for s in got["skipped"]}
+    assert reasons == {"<b>x</b>": "工作坊裝來的", "更新": "隨附模組", "S": "有語法錯誤", "E": "在 ROOTS 另外加的資料夾裡",
+                       "F": "是符號連結", "A": "拿掉了那一小段（不會再補）"}
+    assert (got["total"], got["direct"]) == (7, 1)  # 七個模組都能從面板外打開；直接執行的只有互通自己
+    assert got["shortcuts"] == str(interop / "捷徑") and got["python"] == "/py/python3"
+    assert got["problems"] == ["F：是符號連結，沒補", "S：有語法錯誤，沒補"]  # 照名稱的順序
+    assert got["command"] == shlex.join(["/py/python3", str(interop / "run.py"), "A"])
+
+
+def test_the_example_command_prefers_kaigong(load, home):
+    interop = make_module(home / "modules", "互通")
+    make_module(home / "modules", "A")
+    make_module(home / "modules", "開工")
+    got = load_button().status(home, DEFAULT_CONFIG, "/py", interop)
+    assert got["command"] == shlex.join(["/py", str(interop / "run.py"), "開工"])
+
+
+def test_api_exposes_only_three_methods(load):
+    api = load_button().Api
+    assert {n for n in vars(api) if not n.startswith("_")} == {"reveal", "copy", "resync"}
+
+
+def test_api_reveal_copy_and_resync(load, home, monkeypatch):
+    from conftest import FakeApp
+    button, interop = load_button(), make_module(home / "modules", "互通")
+    app, revealed, runs = FakeApp(home), [], []
+    app.reveal = revealed.append
+    api = button.Api(app, home, DEFAULT_CONFIG, "/py", interop)
+    api.reveal()
+    assert revealed == [interop / "捷徑"]
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: runs.append((argv, kw)))
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert api.copy("x") is False and runs == []
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: [])
+    assert api.copy("指令") is True and runs == [(["pbcopy"], {"input": "指令".encode(), "check": False})]
+    assert api.resync()["shortcuts"] == str(interop / "捷徑")
+
+
+def test_names_reach_the_page_as_data_not_markup(load, home, tmp_path, monkeypatch):
+    _, interop, config = _status_tree(home, tmp_path)
+    button = load_button()
+    html = button.render(button.status(home, config, "/py", interop))
+    assert "<b>x</b>" not in html and "\\u003cb>x\\u003c/b>" in html and "__STATUS__" not in html
+    monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: [])
+    data = button.Api(None, home, config, "/py", interop).resync()
+    assert {"name": "<b>x</b>", "reason": "工作坊裝來的"} in data["skipped"]
+
+
+def test_page_html_is_self_contained_and_never_uses_inner_html():
+    html = (INTEROP / "page.html").read_text(encoding="utf-8")
+    assert not any(w in html for w in ("http://", "https://", "innerHTML", "style.css"))
+    assert "prefers-color-scheme: dark" in html and html.count("__STATUS__") == 1

@@ -64,7 +64,8 @@ def quiet(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊"])
+@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊",
+                                  "互通"])
 def test_bundled_meta(name):
     m = read_meta(MODULES / name / "iplot.py")
     assert (m.error, m.has_run) == (None, True) and m.description
