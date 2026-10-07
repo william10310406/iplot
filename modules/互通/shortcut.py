@@ -104,6 +104,8 @@ def _icon_stamp(module: Path) -> str:
 def write(base: Path, name: str, module: Path, python: str, run: Path, sips=subprocess.call) -> Path:
     """做一個捷徑：先寫到 base/.tmp-<name>.app，做好才換成 base/<name>.app。模組有 icon.png 才轉圖示，轉不出來就當作沒有。"""
     tmp, final = base / f".tmp-{name}.app", base / f"{name}.app"
+    if final.exists() and read(final) is None:  # 不是互通做的（APFS 不分大小寫，同名的寫法不同也算）：不碰
+        raise FileExistsError(f"那裡已經有一個不是「互通」做的 {final.name}，沒有動它")
     shutil.rmtree(tmp, ignore_errors=True)
     (tmp / "Contents" / "MacOS").mkdir(parents=True)
     info = {"CFBundleName": name, "CFBundleDisplayName": name, "CFBundleExecutable": EXECUTABLE,

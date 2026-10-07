@@ -1130,3 +1130,14 @@ def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
     assert popup.dock == [False, True] and popup.wv.windows[0].shown is False
     popup.wv.windows[1].fire("closed")
     t.join(3)
+
+
+def test_a_foreign_app_with_a_wanted_name_is_left_alone(load, tmp_path):
+    """別人放在 捷徑/ 裡、剛好跟模組同名的 .app（沒有 IPLoTInterop）：不刪、不蓋，說一句。"""
+    sc, base, a = load("shortcut"), tmp_path / "捷徑", make_module(tmp_path, "a")
+    foreign = base / "A.app" / "Contents"
+    foreign.mkdir(parents=True)
+    (foreign / "Info.plist").write_bytes(plistlib.dumps({"CFBundleName": "別人的"}))
+    problems = sc.sync(base, {"A": a}, "/py", tmp_path / "run.py", sips=pytest.fail)
+    assert plistlib.loads((foreign / "Info.plist").read_bytes()) == {"CFBundleName": "別人的"}
+    assert len(problems) == 1 and problems[0].startswith("捷徑「A」：") and not list(base.glob(".tmp-*"))
