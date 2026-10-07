@@ -3,7 +3,9 @@
 會開程式的呼叫一律換成記錄，要寫的資料夾一律在 tmp_path。"""
 
 import ast
+import dataclasses
 import importlib
+import json
 import os
 import plistlib
 import re
@@ -17,6 +19,8 @@ from pathlib import Path
 
 import pytest
 from conftest import make_module, until
+
+from core.types import DEFAULT_CONFIG
 
 INTEROP = Path(__file__).resolve().parents[1] / "modules" / "互通"
 NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run")
@@ -649,3 +653,133 @@ def test_sync_clears_its_own_leftover_temporaries(load, tmp_path):
     (base / ".tmp-A.app" / "Contents").mkdir(parents=True)
     sc.sync(base, {}, "/py", tmp_path / "run.py", sips=pytest.fail)
     assert _shortcuts(base) == []
+
+
+# ── sync：補那一小段、捷徑、紀錄，同一時間只做一個 ──
+
+@pytest.fixture
+def interop(home):
+    """home/modules/互通（假的「互通」資料夾：同步把紀錄寫在這裡）。"""
+    return make_module(home / "modules", "互通")
+
+
+def do_sync(load, home, interop, config=None, **kw):
+    kw.setdefault("platform", "linux")
+    return load("sync").sync(home, config or DEFAULT_CONFIG, sys.executable, interop, **kw)
+
+
+def patched(interop):
+    return json.loads((interop / ".patched").read_text(encoding="utf-8"))
+
+
+def test_sync_patches_each_module_once(load, home, interop):
+    a = make_module(home / "modules", "A", '"""a"""\ndef run(app):\n    pass\n')
+    already = '"""b"""\n# ── 互通 ── 自己加的\ndef run(app):\n    pass\n'
+    b = make_module(home / "modules", "B", already)
+    assert do_sync(load, home, interop) == []
+    assert "# ── 互通 ──" in (a / "iplot.py").read_text(encoding="utf-8")
+    assert (b / "iplot.py").read_bytes() == already.encode() and not (b / ".history").exists()
+    assert {str(a), str(b)} <= set(patched(interop))
+    (a / "iplot.py").write_text('"""a"""\ndef run(app):\n    pass\n', encoding="utf-8")  # 不要那一段：刪掉
+    do_sync(load, home, interop)
+    assert "# ── 互通 ──" not in (a / "iplot.py").read_text(encoding="utf-8")
+
+
+def test_sync_walks_into_child_modules(load, home, interop):
+    p = make_module(home / "modules", "P")
+    c = make_module(p, "C", '"""c"""\ndef run(app):\n    pass\n')
+    do_sync(load, home, interop)
+    assert "# ── 互通 ──" in (c / "iplot.py").read_text(encoding="utf-8") and str(c) in patched(interop)
+
+
+def test_sync_skips_workshop_bundled_and_extra_roots(load, home, interop, tmp_path):
+    b = make_module(home / "modules", "B")
+    (b / ".origin").write_text("{}", encoding="utf-8")
+    up = make_module(home / "modules", "更新")
+    e = make_module(tmp_path / "extra", "E")
+    config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules", "..", str(tmp_path / "extra")))
+    do_sync(load, home, interop, config)
+    for m in (b, up, e):
+        assert "互通" not in (m / "iplot.py").read_text(encoding="utf-8"), m
+
+
+def test_sync_does_not_patch_through_a_symlink(load, home, tmp_path, interop):    # Review Focus 2
+    real = make_module(tmp_path / "別處", "R", '"""r"""\n')
+    (home / "modules" / "L").symlink_to(real, target_is_directory=True)
+    problems = load("sync").sync(home, DEFAULT_CONFIG, sys.executable, home / "modules" / "互通", platform="linux")
+    assert "L：是符號連結，沒補" in problems and "互通" not in (real / "iplot.py").read_text(encoding="utf-8")
+
+
+def test_sync_does_not_patch_a_symlinked_iplot_py_but_still_makes_its_shortcut(load, home, tmp_path, interop,
+                                                                                monkeypatch):
+    target = tmp_path / "別處" / "f.py"  # 別處 不是模組（ROOTS 的 ".." 就是 tmp_path）
+    target.parent.mkdir()
+    target.write_text('"""f"""\n', encoding="utf-8")
+    (home / "modules" / "F").mkdir()
+    (home / "modules" / "F" / "iplot.py").symlink_to(target)
+    wanted = []
+    monkeypatch.setattr(load("shortcut"), "sync", lambda base, w, *a, **k: wanted.append(w) or [])
+    problems = do_sync(load, home, interop, platform="darwin")
+    assert "F：是符號連結，沒補" in problems and "互通" not in target.read_text(encoding="utf-8")
+    assert "F" in wanted[0]
+
+
+def test_sync_reports_a_syntax_error_and_writes_the_record(load, home, interop):
+    a = make_module(home / "modules", "A", "def run(app)\n")
+    assert do_sync(load, home, interop) == ["A：有語法錯誤，沒補"]
+    assert (interop / ".sync-error").read_text(encoding="utf-8") == "A：有語法錯誤，沒補\n"
+    (a / "iplot.py").write_text("def run(app):\n    pass\n", encoding="utf-8")
+    assert do_sync(load, home, interop) == [] and not (interop / ".sync-error").exists()
+
+
+def test_a_fresh_lock_skips_and_a_stale_lock_is_taken(load, home, interop):
+    a = make_module(home / "modules", "A", '"""a"""\n')
+    (interop / ".lock").write_text("", encoding="utf-8")
+    assert do_sync(load, home, interop) == [] and "互通" not in (a / "iplot.py").read_text(encoding="utf-8")
+    do_sync(load, home, interop, now=lambda: time.time() + 121)
+    assert "互通" in (a / "iplot.py").read_text(encoding="utf-8") and not (interop / ".lock").exists()
+
+
+def test_records_are_replaced_atomically(load, home, interop, monkeypatch):      # Review Focus 5
+    make_module(home / "modules", "A", '"""a"""\n')
+    do_sync(load, home, interop)
+    before = (interop / ".patched").read_bytes()
+    make_module(home / "modules", "B", '"""b"""\n')
+
+    def boom(*a, **k):
+        raise OSError("磁碟滿了")
+
+    monkeypatch.setattr(os, "replace", boom)
+    problems = do_sync(load, home, interop)
+    monkeypatch.undo()
+    assert (interop / ".patched").read_bytes() == before and json.loads(before)
+    assert any("磁碟滿了" in p for p in problems) and not list(interop.glob(".*.tmp"))
+    assert not (interop / ".lock").exists()
+
+
+def test_shortcuts_only_on_macos_and_never_for_the_os_module(load, home, interop, monkeypatch):
+    make_module(home / "modules", "作業系統")
+    make_module(home / "modules", "A")
+    do_sync(load, home, interop, platform="linux")
+    assert not (interop / "捷徑").exists()
+    calls = []
+    monkeypatch.setattr(load("shortcut"), "sync", lambda base, wanted, python, run, **k: calls.append(
+        (base, wanted, python, run)) or [])
+    do_sync(load, home, interop, platform="darwin")
+    [(base, wanted, python, run)] = calls
+    assert base == interop / "捷徑" and run == interop / "run.py" and python == sys.executable
+    assert "作業系統" not in wanted and wanted["A"] == home / "modules" / "A"
+
+
+def test_why_not_names_the_reason(load, home, tmp_path):
+    from core import scan
+    sync = load("sync")
+    b = make_module(home / "modules", "B")
+    (b / ".origin").write_text("{}", encoding="utf-8")
+    make_module(home / "modules", "工作坊")
+    make_module(home / "modules", "A")
+    make_module(tmp_path / "extra", "E")
+    config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules", "..", str(tmp_path / "extra")))
+    roots = scan.roots_from_config(home, config.roots)
+    got = {info.name: sync.why_not(info, roots) for info, _ in sync.modules(home, config)}
+    assert got == {"A": None, "B": "工作坊裝來的", "工作坊": "隨附模組", "E": "在 ROOTS 另外加的資料夾裡"}
