@@ -5,10 +5,15 @@
 import ast
 import importlib
 import os
+import re
 import sys
+import threading
+import time
+import types
 from pathlib import Path
 
 import pytest
+from conftest import until
 
 INTEROP = Path(__file__).resolve().parents[1] / "modules" / "互通"
 NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run")
@@ -199,3 +204,221 @@ def test_boot_and_run_read_on_python_3_8():
     for name in ("boot.py", "run.py"):
         if (INTEROP / name).exists():
             ast.parse((INTEROP / name).read_text(encoding="utf-8"), feature_version=(3, 8))
+
+
+# ── popup：彈出式視窗，平常藏著，有話才出來（D81） ──
+
+@pytest.fixture
+def popup(load, home):
+    """接好 Core 的 Popup：假的 webview，不開視窗；busy_after 縮短成 0.05 秒，exit 只記結束碼。"""
+    from conftest import FakeWebview
+
+    from core.core import Core
+    from core.types import DEFAULT_CONFIG
+
+    wv, exits, dock = FakeWebview(), [], []
+    p = load("popup").Popup(home, wv, "測試", busy_after=0.05, exit=exits.append, dock=dock.append)
+    p.attach(Core(home, DEFAULT_CONFIG, p))
+    return types.SimpleNamespace(p=p, wv=wv, exits=exits, dock=dock)
+
+
+def in_thread(fn):
+    """在另一條執行緒跑 fn，回那條執行緒與裝結果的盒子。"""
+    box = []
+    t = threading.Thread(target=lambda: box.append(fn()), daemon=True)
+    t.start()
+    return t, box
+
+
+def bridge(t):
+    return t.wv.windows[0].kw["js_api"]
+
+
+def test_popup_starts_hidden_and_a_silent_job_never_shows_it(popup):
+    p = popup.p
+    assert p.run(lambda: (p.done("ok", 0.0), 0)[1]) == 0
+    w = popup.wv.windows[0]
+    assert w.kw["hidden"] is True and not w.shown and w.destroyed and not w.calls("done")
+    assert (w.kw["width"], w.kw["height"], w.kw["min_size"]) == (460, 320, (360, 220))
+    assert w.kw["url"].startswith("file://") and w.kw["url"].endswith("popup.html")
+
+
+def test_dock_icon_only_while_shown(popup, load, home):
+    """藏著的期間不在 Dock（accessory），顯示時才回到一般的 App（Task 0 Step 5 的退路）。"""
+    from conftest import FakeWebview
+
+    p = popup.p
+    p.run(lambda: (p.done("ok", 0.0), 0)[1])
+    assert popup.dock == [False]
+    dock = []
+    q = load("popup").Popup(home, FakeWebview(), "測試", exit=popup.exits.append, dock=dock.append)
+    q.run(lambda: (q.log("x"), q.log("y"), 0)[2])
+    assert dock == [False, True]
+
+
+def test_log_shows_the_window_and_sends_text(popup):
+    p = popup.p
+    p.run(lambda: (p.log("<b>hi</b>"), 0)[1])
+    w = popup.wv.windows[0]
+    assert w.shown and w.calls("log") == [["<b>hi</b>"]]
+
+
+def test_init_tells_the_page_the_title(popup):
+    popup.p.run(lambda: 0)
+    assert popup.wv.windows[0].calls("init") == [[{"title": "測試"}]]
+
+
+def test_ask_roundtrip_shows_the_window(popup):
+    p, got = popup.p, []
+    t, box = in_thread(lambda: p.run(lambda: (got.append(p.ask("q", "d")), 0)[1]))
+    until(lambda: popup.wv.windows and popup.wv.windows[0].calls("ask"))
+    w = popup.wv.windows[0]
+    [[ask_id, prompt, default]] = w.calls("ask")
+    assert (prompt, default, w.shown) == ("q", "d", True)
+    bridge(popup).answer(ask_id, "yes")
+    t.join(3)
+    assert (got, box) == (["yes"], [0])
+
+
+@pytest.mark.parametrize(("value", "expected"), [(True, True), (False, False), (None, False)])
+def test_confirm_roundtrip(popup, value, expected):
+    p, got = popup.p, []
+    t, _ = in_thread(lambda: p.run(lambda: (got.append(p.confirm("要嗎？")), 0)[1]))
+    until(lambda: popup.wv.windows and popup.wv.windows[0].calls("confirm"))
+    [[ask_id, prompt]] = popup.wv.windows[0].calls("confirm")
+    bridge(popup).answer(ask_id, value)
+    t.join(3)
+    assert prompt == "要嗎？" and got == [expected]
+
+
+def test_closing_cancels_pending_dialog_and_stops_a_running_job(popup):
+    p, got = popup.p, []
+    t, _ = in_thread(lambda: p.run(lambda: (got.append(p.ask("q")), 0)[1]))
+    until(lambda: popup.wv.windows and popup.wv.windows[0].calls("ask"))
+    popup.wv.windows[0].fire("closing")
+    t.join(3)
+    assert got == [None] and popup.exits == [1]
+
+
+def test_closing_after_the_module_is_done_is_not_a_stop(popup):
+    p = popup.p
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1), 0)[2])
+    popup.wv.windows[0].fire("closing")
+    assert popup.exits == []
+
+
+def test_page_opens_a_second_window_and_does_not_show_the_popup(popup):
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
+    until(lambda: len(popup.wv.windows) == 2)
+    second = popup.wv.windows[1]
+    assert (second.title, second.kw["html"], second.kw["width"], second.kw["height"]) == ("頁", "<p>x</p>", 640, 520)
+    second.fire("closed")
+    t.join(3)
+    assert not t.is_alive() and popup.wv.windows[0].shown is False
+
+
+def test_choose_files_shows_the_window_first(popup):
+    p, seen = popup.p, []
+
+    def job():
+        w = popup.wv.windows[0]
+        w.dialog_result = ["/a"]
+        original = w.create_file_dialog
+        w.create_file_dialog = lambda *a, **k: (seen.append(w.shown), original(*a, **k))[1]
+        return p.choose_files()
+
+    assert p.run(job) == [Path("/a")] and seen == [True]
+
+
+def test_choose_folder(popup):
+    p = popup.p
+
+    def job():
+        popup.wv.windows[0].dialog_result = ["/d"]
+        return p.choose_folder()
+
+    assert p.run(job) == Path("/d") and popup.wv.windows[0].shown
+
+
+def test_done_after_showing_tells_the_page(popup):
+    p = popup.p
+    p.run(lambda: (p.log("x"), p.done("ok", 1.2), 0)[2])
+    w = popup.wv.windows[0]
+    assert w.calls("done") == [["ok", 1.2]] and not w.destroyed
+
+
+def test_done_error_tells_the_page(popup):
+    p = popup.p
+    p.run(lambda: (p.done("error", 0.1), 0)[1])
+    w = popup.wv.windows[0]
+    assert w.calls("done") == [["error", 0.1]] and w.shown and not w.destroyed
+
+
+def test_a_slow_job_shows_busy(popup):
+    p = popup.p
+    p.run(lambda: (time.sleep(0.3), 0)[1])
+    w = popup.wv.windows[0]
+    assert w.calls("busy") == [["測試"]] and w.shown
+
+
+def test_a_quick_job_never_shows_busy(popup):
+    p = popup.p
+    p.run(lambda: 0)
+    time.sleep(0.1)
+    w = popup.wv.windows[0]
+    assert not w.calls("busy") and not w.shown
+
+
+def test_stop_exits_with_1(popup):
+    popup.p.run(lambda: 0)
+    bridge(popup).stop()
+    assert popup.exits == [1]
+
+
+def test_close_destroys_the_window(popup):
+    popup.p.run(lambda: 0)
+    bridge(popup).close()
+    assert popup.wv.windows[0].destroyed
+
+
+def test_report_sends_the_sentence_file_line_and_details(popup):
+    from core.types import ErrorInfo
+
+    p = popup.p
+    err = ErrorInfo("NameError", "name 'x' is not defined", Path("/m/iplot.py"), 7, "Traceback…", "module", "M")
+    p.run(lambda: (p.report(err), 0)[1])
+    [[sent]] = popup.wv.windows[0].calls("report")
+    assert sent == {"kind": "NameError", "message": "name 'x' is not defined", "file": "/m/iplot.py", "line": 7,
+                    "traceback": "Traceback…", "sentence": "模組『M』第 7 行出錯：NameError，name 'x' is not defined",
+                    "id": 0}
+
+
+def test_open_error_edits_at_the_line(popup, monkeypatch):
+    from core.types import ErrorInfo
+
+    p, calls = popup.p, []
+    monkeypatch.setattr(p.core, "action", lambda *a: calls.append(a))
+    err = ErrorInfo("E", "m", Path("/m/iplot.py"), 7, "", "module", "M")
+    p.run(lambda: (p.report(err), 0)[1])
+    bridge(popup).open_error(0)
+    bridge(popup).open_error(5)  # 不認得的編號不理
+    until(lambda: calls)
+    time.sleep(0.05)
+    assert calls == [("edit", Path("/m/iplot.py"), None, 7)]
+
+
+def test_bridge_exposes_only_its_methods(load):
+    bridge_cls = load("popup").Bridge
+    assert {n for n in vars(bridge_cls) if not n.startswith("_")} == {"answer", "open_error", "stop", "close"}
+
+
+def test_popup_html_is_self_contained_and_never_uses_inner_html():
+    html = (INTEROP / "popup.html").read_text(encoding="utf-8")
+    assert not any(w in html for w in ("http://", "https://", "innerHTML", "style.css"))
+    assert "prefers-color-scheme: dark" in html
+
+
+def test_popup_html_defines_every_entry_python_calls():
+    defined = set(re.findall(r"^iplot\.(\w+) = ", (INTEROP / "popup.html").read_text(encoding="utf-8"), re.M))
+    assert defined == {"init", "log", "report", "ask", "confirm", "busy", "done"}
