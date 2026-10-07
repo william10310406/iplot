@@ -354,14 +354,14 @@ def test_done_after_showing_tells_the_page(popup):
     p = popup.p
     p.run(lambda: (p.log("x"), p.done("ok", 1.2), 0)[2])
     w = popup.wv.windows[0]
-    assert w.calls("done") == [["ok", 1.2]] and not w.destroyed
+    assert w.calls("done") == [["ok", 1.2, False]] and not w.destroyed
 
 
 def test_done_error_tells_the_page(popup):
     p = popup.p
     p.run(lambda: (p.done("error", 0.1), 0)[1])
     w = popup.wv.windows[0]
-    assert w.calls("done") == [["error", 0.1]] and w.shown and not w.destroyed
+    assert w.calls("done") == [["error", 0.1, False]] and w.shown and not w.destroyed
 
 
 def test_a_slow_job_shows_busy(popup):
@@ -419,7 +419,7 @@ def test_open_error_edits_at_the_line(popup, monkeypatch):
 
 def test_bridge_exposes_only_its_methods(load):
     bridge_cls = load("popup").Bridge
-    assert {n for n in vars(bridge_cls) if not n.startswith("_")} == {"answer", "open_error", "stop", "close"}
+    assert {n for n in vars(bridge_cls) if not n.startswith("_")} == {"answer", "open_error", "stop", "close", "panel"}
 
 
 def test_popup_html_is_self_contained_and_never_uses_inner_html():
@@ -853,7 +853,7 @@ def test_main_module_error_returns_1(entry, home):
     assert entry.go(["A"]) == 1
     w = entry.wv.windows[0]
     assert w.calls("report")[0][0]["kind"] == "ZeroDivisionError" and w.calls("done") == [["error", pytest.approx(
-        w.calls("done")[0][1])]]
+        w.calls("done")[0][1]), False]]
 
 
 def test_main_files_go_to_on_files_relative_to_cwd(entry, home, tmp_path):
@@ -1191,3 +1191,90 @@ def test_a_foreign_app_with_a_wanted_name_is_left_alone(load, tmp_path):
     problems = sc.sync(base, {"A": a}, "/py", tmp_path / "run.py", sips=pytest.fail)
     assert plistlib.loads((foreign / "Info.plist").read_bytes()) == {"CFBundleName": "別人的"}
     assert len(problems) == 1 and problems[0].startswith("捷徑「A」：") and not list(base.glob(".tmp-*"))
+
+
+# ── 小視窗回到主控面板（D88） ──
+
+FAKE_PANEL = '"""假的主控面板：不開真的面板，只說一句。"""\ndef run(app):\n    app.log("假的主控面板跑了")\n'
+
+
+def test_done_passes_on_whether_to_offer_the_panel(popup):
+    p = popup.p
+    p.run(lambda: (p.log("x"), p.done("ok", 1.2, panel=True), 0)[2])
+    assert popup.wv.windows[0].calls("done") == [["ok", 1.2, True]]
+
+
+def test_no_panel_button_while_the_module_runs(popup):
+    p, seen = popup.p, []
+
+    def job():
+        until(lambda: popup.wv.windows[0].calls("busy"))
+        seen.append((popup.wv.windows[0].calls("busy"), popup.wv.windows[0].calls("done")))
+        return 0
+
+    p.run(job)
+    assert seen == [([["測試"]], [])]  # 跑的時候底下只有「執行中」與「停止」；「主控面板」只跟著 done 來
+
+
+def test_the_panel_button_runs_the_panel_module_and_closes(popup, home):
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    p = popup.p
+    p.core.rescan()
+    assert p.run(lambda: (p.log("x"), p.done("ok", 0.1, panel=True), 7)[2]) == 7
+    w = popup.wv.windows[0]
+    bridge(popup).panel()
+    until(lambda: w.destroyed)
+    assert ["假的主控面板跑了"] in w.calls("log")
+
+
+def test_a_failing_panel_module_keeps_the_popup(popup, home):
+    make_module(home / "modules", "主控面板", "def run(app):\n    1/0\n")
+    p = popup.p
+    p.core.rescan()
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1, panel=True), 0)[2])
+    w = popup.wv.windows[0]
+    bridge(popup).panel()
+    until(lambda: w.calls("report"))
+    time.sleep(0.05)
+    assert w.calls("report")[0][0]["kind"] == "ZeroDivisionError" and not w.destroyed
+
+
+def test_the_panel_button_without_a_panel_module_says_one_sentence(popup):
+    from core.text import T
+    p = popup.p
+    p.core.rescan()
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1, panel=True), 0)[2])
+    w = popup.wv.windows[0]
+    bridge(popup).panel()
+    until(lambda: [T["not_found"].format(name="主控面板")] in w.calls("log"))
+    assert not w.destroyed
+
+
+def test_main_offers_the_panel_only_when_there_is_one_and_it_is_not_the_target(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    make_module(home / "modules", "E", "def run(app):\n    1/0\n")
+    entry.go(["A"])
+    assert entry.wv.windows[0].calls("done")[0][2] is False  # 最上層沒有「主控面板」
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    for target, outcome in (("A", "ok"), ("E", "error"), ("主控面板", "ok")):
+        entry.wv.windows.clear()
+        entry.go([target])
+        [[got, _, offer]] = entry.wv.windows[0].calls("done")
+        assert (got, offer) == (outcome, target != "主控面板"), target
+
+
+def test_pressing_the_panel_keeps_the_modules_exit_code(entry, home):
+    """出錯的模組（結束碼 1）跑完之後按「主控面板」：主控面板跑了、小視窗關了，結束碼仍然是 1。"""
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    make_module(home / "modules", "E", "def run(app):\n    1/0\n")
+
+    def start():
+        w = entry.wv.windows[0]
+        w.fire("loaded")
+        until(lambda: w.calls("done"))
+        w.kw["js_api"].panel()
+        until(lambda: w.destroyed)
+
+    entry.wv.start = start
+    assert entry.go(["E"]) == 1
+    assert ["假的主控面板跑了"] in entry.wv.windows[0].calls("log")

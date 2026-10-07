@@ -17,6 +17,7 @@ from core.errors import describe
 from core.types import ErrorInfo, Scope
 
 PAGE = Path(__file__).with_name("popup.html")
+PANEL = "主控面板"  # 跑完之後底下那一列的「主控面板」按鈕跑的模組（D88）
 
 
 def mac_dock(regular: bool) -> None:
@@ -36,7 +37,7 @@ def mac_dock(regular: bool) -> None:
 
 
 class Bridge:
-    """頁面的 JS 用 pywebview.api.<方法> 呼叫的入口；小視窗放在 _popup，攤出去的只有這四個方法。"""
+    """頁面的 JS 用 pywebview.api.<方法> 呼叫的入口；小視窗放在 _popup，攤出去的只有這五個方法。"""
 
     def __init__(self, popup: "Popup") -> None:
         self._popup = popup
@@ -57,6 +58,10 @@ class Bridge:
         """「關閉」與倒數結束：關掉小視窗。"""
         self._popup.window.destroy()
 
+    def panel(self) -> None:
+        """「主控面板」：跑最上層的「主控面板」模組；沒出錯就關掉小視窗（D88）。"""
+        self._popup.open_panel()
+
 
 class Popup:
     """面板外的 View：一個藏著的 460×320 小視窗。log、report、ask、confirm、選檔案、選資料夾、跑太久，才把它叫出來。"""
@@ -70,6 +75,7 @@ class Popup:
         self.errors: list[ErrorInfo] = []
         self._lock = threading.Lock()
         self._running = threading.Lock()  # 模組在跑的期間拿著；「打開檔案」等它跑完才做（runner 一次只跑一個）
+        self._panel = threading.Lock()  # 「主控面板」一次只跑一個：連按兩下不會開兩次
         self._ids = itertools.count(1)
         self._waiting: dict[int, tuple[threading.Event, list]] = {}
         self._worker: threading.Thread | None = None
@@ -145,15 +151,36 @@ class Popup:
                 event.set()
             self._waiting.clear()
 
-    def done(self, outcome: str, seconds: float) -> None:
+    def done(self, outcome: str, seconds: float, panel: bool = False) -> None:
         """模組跑完了：outcome 是 "ok"、"cancelled" 或 "error"。小視窗沒出現過、又沒出錯，就直接關；
-        否則交給頁面：成功是「完成（x 秒），3 秒後關閉」的倒數，出錯是「出錯了」與「關閉」。"""
+        否則交給頁面：成功是「完成（x 秒），3 秒後關閉」的倒數，出錯是「出錯了」與「關閉」。
+        panel 為真時，底下那一列多一個「主控面板」按鈕（D88；要不要給由 run.py 決定）。"""
         self._finished = True
         if not self._shown and outcome != "error":
             self.window.destroy()
             return
         self._reveal()
-        self._js("done", outcome, round(seconds, 1))
+        self._js("done", outcome, round(seconds, 1), bool(panel))
+
+    def open_panel(self) -> None:
+        """「主控面板」按鈕：在另一條執行緒上、等模組與同步跑完（跟「打開檔案」一樣），用這個 Core 跑最上層的
+        「主控面板」。沒出錯就關掉小視窗；出錯照一般的錯誤顯示，小視窗留著。程序的結束碼不變（還是原本那個模組的）。"""
+        def go() -> None:
+            if not self._panel.acquire(blocking=False):
+                return
+            try:
+                with self._running:
+                    try:
+                        result = self.core.run_by_name(PANEL)
+                    except LookupError as exc:  # 跑完之後才被刪掉、或有兩個
+                        self.log(str(exc))
+                        return
+                if result.ok:
+                    self.window.destroy()
+            finally:
+                self._panel.release()
+
+        threading.Thread(target=go, daemon=True).start()
 
     def open_error(self, error_id: int) -> None:
         """「打開檔案」：在另一條執行緒上交給「作業系統」模組的 edit；模組還在跑的話等它跑完。"""

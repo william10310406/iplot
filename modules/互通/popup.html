@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- 「互通」的彈出式視窗（popup.py 開的小視窗）。上面是模組的名稱，中間是訊息，下面是執行中／完成／出錯。
      Python → 頁面：iplot.init／log／report／ask／confirm／busy／done（這個檔的最下面）
-     頁面 → Python：pywebview.api.answer／open_error／stop／close
+     頁面 → Python：pywebview.api.answer／open_error／stop／close／panel
      來自模組的字一律用 textContent；不載入任何外部資源；長相跟面板一樣，但樣式都寫在這個檔裡，不引用面板的樣式檔（ui/ 是核心的一部分）。 -->
 <html lang="zh-Hant">
 <head>
@@ -122,23 +122,30 @@ function entry(text, error) {
   log.scrollTop = log.scrollHeight;
 }
 
-// ── 下面那一列：執行中＋停止、完成的倒數、出錯了＋關閉 ──
-function foot(text, isError, button, onclick) {
+// ── 下面那一列：執行中＋停止、完成的倒數、出錯了＋關閉；跑完時可能多一個「主控面板」（D88） ──
+function say(text, isError) {
   $("foot").hidden = false;
   const status = $("status");
   status.textContent = text;
   status.className = isError ? "status err" : "status";
-  const acts = $("footActs");
-  acts.replaceChildren();
-  if (button) {
-    const b = el("button", "btn", button);
-    b.type = "button";
-    b.onclick = onclick;
-    acts.append(b);
-    if (!isError && button === "關閉") b.focus();
-  }
+}
+function button(label, onclick, id) {
+  const b = el("button", "btn", label);
+  b.type = "button";
+  b.onclick = onclick;
+  if (id) b.id = id;
+  $("footActs").append(b);
+  return b;
+}
+// buttons：[[字, 按下去做什麼, id?], …]，照順序排在右邊
+function foot(text, isError, buttons) {
+  say(text, isError);
+  $("footActs").replaceChildren();
+  for (const [label, onclick, id] of buttons) button(label, onclick, id);
 }
 const close = () => api().close();
+// 「主控面板」：按下去先停住（Python 那邊在跑「主控面板」，跑完沒出錯就關掉這個小視窗）；出錯時 iplot.report 會讓它再能按
+const panel = (e) => { e.target.disabled = true; api().panel(); };
 
 let countdown = null;  // 倒數中的計時器；在視窗裡按任何一下就取消
 let interrupt = null;  // 倒數期間掛在 document 上的「按任何一下」；倒數結束或被取消就拿掉
@@ -192,7 +199,11 @@ iplot.init = (info) => {
 iplot.log = (text) => { entry(text); };
 
 // error：kind、message、file、line、traceback、sentence（白話那一句）、id（「打開檔案」用）
-iplot.report = (error) => { entry(error.sentence, error); };
+iplot.report = (error) => {
+  entry(error.sentence, error);
+  const again = $("panelBtn");
+  if (again) again.disabled = false;
+};
 
 // 問一個字串（模組的 input() 也是這個）；答案用 answer(編號, 字串或 null) 送回去
 iplot.ask = (id, prompt, initial) => { dialog("ask", prompt, initial).then((value) => api().answer(id, value)); };
@@ -203,29 +214,34 @@ iplot.confirm = (id, prompt) => { dialog("confirm", prompt).then((value) => api(
 // 跑了一秒還沒結束：「執行中：<名稱>…」與「停止」（結束這一個程序，面板不受影響）
 iplot.busy = (title) => {
   if (title === null) { $("foot").hidden = true; return; }
-  foot("執行中：" + title + "…", false, "停止", () => api().stop());
+  foot("執行中：" + title + "…", false, [["停止", () => api().stop()]]);
 };
 
-// 跑完了：成功或取消是「完成（x 秒），3 秒後關閉」的倒數，在視窗裡按任何一下就停下來、換成「關閉」；出錯是「出錯了」與「關閉」
-iplot.done = (outcome, seconds) => {
+// 跑完了：成功或取消是「完成（x 秒），3 秒後關閉」的倒數，在視窗裡按任何一下就停下來、多一個「關閉」；出錯是「出錯了」與「關閉」。
+// offer 為真時，那一列多一個「主控面板」（最上層有這個模組、而且跑的不是它自己，D88）
+iplot.done = (outcome, seconds, offer) => {
   if (countdown !== null) window.iplotClock.stop(countdown);
   countdown = null;
   listen(null);
-  if (outcome === "error") { foot("出錯了", true, "關閉", close); return; }
+  const extra = offer ? [["主控面板", panel, "panelBtn"]] : [];
+  if (outcome === "error") { foot("出錯了", true, [...extra, ["關閉", close]]); return; }
   const done = "完成（" + Number(seconds).toFixed(1) + " 秒）";
   let left = 3;
+  foot(done + "，" + left + " 秒後關閉", false, extra);
   const tick = () => {
     if (left === 0) { countdown = null; listen(null); close(); return; }
-    foot(done + "，" + left + " 秒後關閉", false, null);
+    say(done + "，" + left + " 秒後關閉", false);
     left -= 1;
     countdown = window.iplotClock.wait(1000, tick);
   };
   tick();
+  // 按任何一下：停住倒數，只改字、補上「關閉」，不重畫按鈕（重畫的話，按在「主控面板」上的那一下就落空了）
   listen(() => {
     window.iplotClock.stop(countdown);
     countdown = null;
     listen(null);
-    foot(done, false, "關閉", close);
+    say(done, false);
+    button("關閉", close).focus();
   });
 };
 </script>
