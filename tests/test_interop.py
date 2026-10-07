@@ -783,3 +783,181 @@ def test_why_not_names_the_reason(load, home, tmp_path):
     roots = scan.roots_from_config(home, config.roots)
     got = {info.name: sync.why_not(info, roots) for info, _ in sync.modules(home, config)}
     assert got == {"A": None, "B": "工作坊裝來的", "工作坊": "隨附模組", "E": "在 ROOTS 另外加的資料夾裡"}
+
+
+# ── run：面板外的入口 ──
+
+@pytest.fixture
+def entry(load, home, monkeypatch):
+    """run.main 的測試環境：Python 一律算對、同步與提示框只記錄、webview 是假的；互通的紀錄寫在 home/modules/互通。"""
+    from conftest import FakeWebview
+
+    run, boot, sync = load("run"), load("boot"), load("sync")
+    synced, alerts, wv = [], [], FakeWebview()
+    monkeypatch.setattr(boot, "ensure_python", lambda *a, **k: None)
+    monkeypatch.setattr(sync, "sync", lambda *a, **k: synced.append(a) or [])
+    monkeypatch.setattr(boot, "alert", lambda title, message, **k: alerts.append((title, message)))
+    folder = home / "modules" / "互通"
+    folder.mkdir()
+
+    def go(argv, cwd=None, **kw):
+        kw.setdefault("home", home)
+        return run.main(argv, folder=folder, webview=wv, cwd=cwd or home, **kw)
+
+    return types.SimpleNamespace(run=run, go=go, wv=wv, synced=synced, alerts=alerts, folder=folder)
+
+
+def started_core(home, config=DEFAULT_CONFIG):
+    from conftest import FakeView
+
+    from core.core import Core
+    c = Core(home, config, FakeView())
+    c.rescan()
+    return c
+
+
+def test_resolve_by_folder_iplot_py_nested_path_and_name(load, home):
+    from core import scan
+    run = load("run")
+    a = make_module(home / "modules", "A")
+    p = make_module(home / "modules", "P")
+    c = make_module(p, "C")
+    core = started_core(home)
+    top = scan.module_info(a, (home / "modules").resolve(), "here")
+    child = scan.module_info(c, (home / "modules").resolve(), "child")
+    assert run.resolve(core, str(a), home) == (top, None)
+    assert run.resolve(core, str(a / "iplot.py"), home) == (top, None)
+    assert run.resolve(core, "modules/P/C", home) == (child, None)
+    assert run.resolve(core, "A", home) == (top, None)
+
+
+def test_resolve_outside_every_root_is_extra(load, home, tmp_path):
+    run = load("run")
+    m = make_module(tmp_path / "遠方" / "更遠", "M")  # ROOTS 只有 modules：tmp_path 不是根目錄
+    core = started_core(home, dataclasses.replace(DEFAULT_CONFIG, roots=("modules",)))
+    info, problem = run.resolve(core, str(m), home)
+    assert problem is None and (info.level, info.root, info.folder) == ("extra", m.parent, m)
+
+
+def test_resolve_problems(load, home):
+    from core.text import T
+    run = load("run")
+    (home / "modules" / "空的").mkdir()
+    make_module(home / "modules", "A")
+    make_module(home.parent, "A")
+    core = started_core(home)
+    empty = home / "modules" / "空的"
+    assert run.resolve(core, str(empty), home) == (None, run.NOT_A_MODULE.format(path=empty))
+    assert run.resolve(core, "/x/y", home) == (None, run.GONE.format(path="/x/y"))
+    assert run.resolve(core, "nope", home) == (None, T["not_found"].format(name="nope"))
+    info, problem = run.resolve(core, "A", home)
+    assert info is None and problem.startswith(T["ambiguous"].split("：")[0].format(name="A"))
+
+
+def test_main_runs_a_module_quietly_and_returns_0(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    assert entry.go(["A"]) == 0
+    w = entry.wv.windows[0]
+    assert ["hi"] in w.calls("log") and not any("完成（" in c[0] for c in w.calls("log"))
+    assert len(entry.synced) == 1 and w.title == "A"
+
+
+def test_main_module_error_returns_1(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    1/0\n")
+    assert entry.go(["A"]) == 1
+    w = entry.wv.windows[0]
+    assert w.calls("report")[0][0]["kind"] == "ZeroDivisionError" and w.calls("done") == [["error", pytest.approx(
+        w.calls("done")[0][1])]]
+
+
+def test_main_files_go_to_on_files_relative_to_cwd(entry, home, tmp_path):
+    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
+    assert entry.go(["A", "x.txt", "/abs/y.txt"], cwd=tmp_path) == 0
+    assert [repr([tmp_path / "x.txt", Path("/abs/y.txt")])] in entry.wv.windows[0].calls("log")
+
+
+def test_main_unconfirmed_cancel_returns_1(entry, home, load, monkeypatch):
+    from core.text import T
+    a = make_module(home / "modules", "A")
+    (a / ".unconfirmed").write_text("", encoding="utf-8")
+    monkeypatch.setattr(load("popup").Popup, "confirm", lambda self, prompt: False)
+    assert entry.go(["A"]) == 1
+    assert [T["cancelled"].format(title="A")] in entry.wv.windows[0].calls("log")
+
+
+def test_main_not_found_returns_1_and_still_syncs(entry):
+    from core.text import T
+    assert entry.go(["nope"]) == 1
+    w = entry.wv.windows[0]
+    assert [T["not_found"].format(name="nope")] in w.calls("log") and w.calls("done")[0][0] == "error"
+    assert len(entry.synced) == 1
+
+
+def test_main_wrong_version_alerts_and_returns_2(entry, load, monkeypatch):
+    monkeypatch.setattr(load("boot"), "check_version", lambda *a: "版本不合的那一句")
+    assert entry.go(["A"]) == 2
+    assert entry.alerts == [("互通", "版本不合的那一句")] and entry.wv.windows == []
+
+
+def test_main_wrong_python_alerts_and_returns_2(entry, load, monkeypatch):
+    monkeypatch.setattr(load("boot"), "ensure_python", lambda *a, **k: "Python 不對的那一句")
+    assert entry.go(["A"]) == 2
+    assert entry.alerts == [("互通", "Python 不對的那一句")] and entry.wv.windows == []
+
+
+def test_main_remembers_the_python(entry, home):
+    make_module(home / "modules", "A")
+    entry.go(["A"])
+    assert (entry.folder / ".python").read_text(encoding="utf-8") == sys.executable
+
+
+def test_main_syncs_with_the_recorded_python(entry, home):
+    make_module(home / "modules", "A")
+    entry.go(["A"])
+    [(h, config, python, folder)] = entry.synced
+    assert (h, python, folder) == (home, sys.executable, entry.folder)
+
+
+def test_main_reports_a_broken_config_and_still_runs(entry, home):
+    (home / "config.py").write_text("ROOTS = 1\n", encoding="utf-8")
+    make_module(home / "modules", "A", "def run(app):\n    app.log('跑了')\n")
+    assert entry.go(["A"]) == 0
+    w = entry.wv.windows[0]
+    assert len(w.calls("report")) == 1 and w.calls("report")[0][0]["kind"] == "TypeError" and ["跑了"] in w.calls("log")
+
+
+def test_main_outside_modules_alerts_and_returns_2(entry, load, monkeypatch):
+    monkeypatch.setattr(load("boot"), "iplot_home", lambda run_file: None)
+    assert entry.go(["A"], home=None) == 2
+    assert entry.alerts[0][1].startswith("「互通」要放在 iPLoT 的 modules/ 裡才能用：")
+
+
+def test_main_popup_cannot_start_alerts_and_returns_2(entry, home):
+    make_module(home / "modules", "A")
+
+    def broken():
+        raise entry.wv.WebViewException("沒有 WebKit")
+
+    entry.wv.start = broken
+    assert entry.go(["A"]) == 2 and entry.alerts == [("互通", "彈出式視窗開不起來：沒有 WebKit")]
+
+
+def test_a_module_importing_tkinter_gets_the_sentence(entry, home, monkeypatch):
+    for name in ("tkinter", "_tkinter"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    make_module(home / "modules", "T", "import tkinter\n")
+    assert entry.go(["T"]) == 1
+    assert entry.wv.windows[0].calls("report")[0][0]["message"] == entry.run.NO_TK
+    assert not any(type(f).__name__ == "NoTk" for f in sys.meta_path)
+
+
+def test_a_module_with_a_helper_named_like_ours_gets_its_own(entry, home):
+    """run.py 自己的 sync.py、popup.py……不能蓋掉模組自己同名的 helper。"""
+    m = make_module(home / "modules", "A", "import sync\nprint(sync.VALUE)\n")
+    (m / "sync.py").write_text("VALUE = 42\n", encoding="utf-8")
+    assert entry.go(["A"]) == 0 and ["42"] in entry.wv.windows[0].calls("log")
+
+
+def test_main_without_a_target_says_how_to_use(entry, capsys):
+    assert entry.go([]) == 1 and entry.wv.windows == []
+    assert "run.py <模組資料夾或名稱>" in capsys.readouterr().err
