@@ -99,10 +99,23 @@ def test_template_snippet_does_nothing_inside_iplot(home, view, monkeypatch):
     assert c.press(next(m for m in c.all_modules() if m.name == "A")).ok
 
 
-def test_template_snippet_without_interop_says_one_sentence(tmp_path):
+def test_template_snippet_without_interop_runs_it_as_a_plain_script(tmp_path):
+    """找不到「互通」（例如從 0.5.0 更新上來、還沒裝）：說一句，然後照一般的 python3 iplot.py 跑，跟 0.5.0 一樣。"""
     _, folder = _tree(tmp_path, with_run_py=False)
+    (folder / "iplot.py").write_text(template() + 'print("最外層跑了")\n', encoding="utf-8")
     r = subprocess.run([sys.executable, "iplot.py"], cwd=folder, capture_output=True, text=True)
-    assert r.returncode == 1 and "找不到 iPLoT 的「互通」" in r.stderr
+    assert r.returncode == 0 and "找不到 iPLoT 的「互通」" in r.stderr and "最外層跑了" in r.stdout
+
+
+def test_template_snippet_with_iplot_direct_never_hands_over(tmp_path):
+    """IPLOT_DIRECT=1（例如在編輯器裡除錯）：就算找得到「互通」也不交出去，照一般腳本跑、不說話。"""
+    import os
+    home, folder = _tree(tmp_path, with_run_py=True)
+    (folder / "iplot.py").write_text(template() + 'print("最外層跑了")\n', encoding="utf-8")
+    env = {**os.environ, "IPLOT_DIRECT": "1"}
+    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True, env=env)
+    assert r.returncode == 0 and "最外層跑了" in r.stdout and r.stderr == ""
+    assert not (home / "modules" / "互通" / "run.py.argv.json").exists()
 
 
 def test_template_snippet_hands_folder_and_args_to_run_py(tmp_path):

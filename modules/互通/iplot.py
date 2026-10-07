@@ -22,8 +22,11 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
             names = [""]
         runs = (os.path.join(folder, n, "modules", "互通", "run.py") for n in names)
         run = next((r for r in runs if os.path.isfile(r)), None)
-    sys.exit(subprocess.call([sys.executable, run, here, *sys.argv[1:]]) if run
-             else "找不到 iPLoT 的「互通」：先在工作坊裝「互通」；模組要放在 iPLoT 資料夾裡或它旁邊")
+    if run and not os.environ.get("IPLOT_DIRECT"):  # IPLOT_DIRECT=1：不交出去，照一般腳本跑（例如在編輯器裡除錯）
+        sys.exit(subprocess.call([sys.executable, run, here, *sys.argv[1:]]))
+    if not run:
+        print("找不到 iPLoT 的「互通」（先在工作坊裝「互通」；模組要放在 iPLoT 資料夾裡或它旁邊），照一般的 python3 iplot.py 跑",
+              file=sys.stderr)
 # ── 互通 ──
 
 ICON = "🔗"

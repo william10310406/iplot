@@ -14,7 +14,7 @@
 
 **只在 macOS 驗過，而且只有一台機器（macOS 26.5、arm64、python.org 的 Python 3.14.7）。** 自動測試之外，2026-10-07 在那台 Mac 上、在一份暫存的 iPLoT 複本（路徑有空白與中文）裡真的走過：系統內建的 Python 3.9 執行 `run.py`，自動換成記下的 Python 3.14 跑完；從捷徑（交給 Python.app）打開；直接 `python3 iplot.py`；「主控面板」在面板沒開時開一個、面板被別的視窗蓋住時叫到最前面（從捷徑開、從終端機開各一次）。還沒驗的：乾淨的 Mac 上 macOS 對「Python 取用『文件』」是不是只問一次（這台在測之前就允許過）；藏著的小視窗打開檔案選擇視窗（要人按）；Windows（未經實機驗證）。
 
-量出來的數字：測試 487 → 666 個；核心邏輯 500 → 502 有效行（上限 500 → 505，D68 修訂）；`core/` 仍是 11 個檔，這一版改了其中 4 個（`core.py` 的 `run_by_name`、`app.py` 的 `App.run` 說明、`text.py` 的範本、`__init__.py` 的版本號），`ui/`、`main.py`、`requirements/` 沒動；`core/text.py` 的文字仍是 55 個 key；範本裡的那一小段 19 行；repo 裡的模組 7 → 9 個。「互通」7 個 Python 檔共 750 有效行、兩頁 HTML 205＋127 行，「主控面板」108 行，都是模組，不在核心預算裡。
+量出來的數字：測試 487 → 666 個；核心邏輯 500 → 502 有效行（上限 500 → 505，D68 修訂）；`core/` 仍是 11 個檔，這一版改了其中 4 個（`core.py` 的 `run_by_name`、`app.py` 的 `App.run` 說明、`text.py` 的範本、`__init__.py` 的版本號），`ui/`、`main.py`、`requirements/` 沒動；`core/text.py` 的文字仍是 55 個 key；範本裡的那一小段 22 行；repo 裡的模組 7 → 9 個。「互通」7 個 Python 檔共 750 有效行、兩頁 HTML 205＋127 行，「主控面板」108 行，都是模組，不在核心預算裡。
 
 這一版沒有做：常駐的背景程式（一有變動就同步、開機就跑、快捷鍵、監看資料夾、排程）；用名字叫下一層的模組；面板外的模組把訊息送進開著的面板、或跟面板共用 `app.memory`（要跨程序連線）；捷徑用 emoji 的 `ICON` 當圖示（只用 `icon.png`）；Windows、Linux 的捷徑與「叫到最前面」。
 
@@ -27,7 +27,7 @@
 
 ### 變更
 - `app.run`（`Core.run_by_name`）：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 `LookupError`，不猜（D83，`tests/test_core.py::test_run_by_name_falls_back_to_top_level` 等四個）。面板在最上層時行為跟 0.5.0 一樣。
-- ＋ 的範本：第一行的說明之後帶「互通」的那一小段（D84，`tests/test_create.py::test_template_*`）。在 iPLoT 裡執行時它不做事；直接執行時往上找 `modules/互通/run.py`，找不到就說一句、結束碼 1。
+- ＋ 的範本：第一行的說明之後帶「互通」的那一小段（D84，`tests/test_create.py::test_template_*`）。在 iPLoT 裡執行時它不做事；直接執行時往上找 `modules/互通/run.py`，找到就交給它；找不到就在 stderr 說一句、照一般的腳本繼續跑（跟 0.5.0 一樣）；環境變數 `IPLOT_DIRECT=1` 時一律不交出去（在編輯器裡除錯用）。
 - 核心邏輯的上限 500 → 505（D68 修訂）。
 - 隨附模組「開工」「打開核心原始碼」0.5.0 → 0.5.1，「重新啟動」「開Terminal」：檔頭帶那一小段，可以直接 `python3 iplot.py`（`tests/test_bundled.py::test_repo_modules_carry_the_interop_snippet`）；「作業系統」「更新」「工作坊」不帶（`::test_iplots_own_modules_stay_untouched`）。
 - `.gitignore` 加上「互通」自己產生的 `modules/互通/捷徑/`、`.python`、`.patched`、`.sync-error`、`.lock`。
