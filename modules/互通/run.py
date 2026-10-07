@@ -39,12 +39,20 @@ class NoTk:
             raise ImportError(NO_TK)
 
 
+def _expand(text: str) -> Path:
+    """~ 換成家目錄；「~打錯的名字/…」找不到那個使用者時 pathlib 丟 RuntimeError，那就照字面。"""
+    try:
+        return Path(text).expanduser()
+    except RuntimeError:
+        return Path(text)
+
+
 def resolve(core, target: str, cwd: Path):
     """目標 → (ModuleInfo, None)，或 (None, 說明為什麼的那一句)。名稱只找最上層（D83）。"""
     from core import scan
     from core.text import T
 
-    path = Path(target).expanduser()
+    path = _expand(target)
     path = path if path.is_absolute() else cwd / path
     if path.exists():
         folder = path.parent if path.is_file() and path.name == scan.MARKER else path
@@ -112,7 +120,7 @@ def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
     core.rescan()  # 在面板外一律是最上層
     info, problem = resolve(core, argv[0], cwd)
     popup.title = info.title if info is not None else "互通"
-    files = [cwd / Path(a).expanduser() for a in argv[1:]]
+    files = [cwd / _expand(a) for a in argv[1:]]
 
     def job() -> int:
         if config_error is not None:

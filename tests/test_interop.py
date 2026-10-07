@@ -1111,3 +1111,12 @@ def test_sync_leaves_tkinter_and_turtle_modules_alone(load, home, interop, src):
     sync = load("sync")
     [info] = [i for i, _ in sync.modules(home, DEFAULT_CONFIG) if i.name == "T"]
     assert sync.why_not(info, scan.roots_from_config(home, DEFAULT_CONFIG.roots)) == "用了 tkinter 或 turtle"
+
+
+def test_an_unknown_tilde_user_is_one_sentence_not_a_traceback(load, home, entry, tmp_path):
+    """「~打錯/x」：pathlib 找不到那個使用者會丟 RuntimeError；這裡要的是一句話。"""
+    run = load("run")
+    assert run.resolve(started_core(home), "~沒有這個人/x", home) == (None, run.GONE.format(path="~沒有這個人/x"))
+    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
+    assert entry.go(["A", "~沒有這個人/f.txt"], cwd=tmp_path) == 0
+    assert [repr([tmp_path / "~沒有這個人/f.txt"])] in entry.wv.windows[0].calls("log")
