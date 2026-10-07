@@ -5,7 +5,9 @@
 import ast
 import importlib
 import os
+import plistlib
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -513,3 +515,137 @@ def test_add_counts_lines_like_python_does(load, tmp_path, odd):
     load("snippet").add(f, 20)
     tree = ast.parse(f.read_text(encoding="utf-8"))
     assert ast.get_docstring(tree) == f"說明{odd}" and isinstance(tree.body[2], ast.If)
+
+
+# ── shortcut：macOS 的 .app 捷徑，交給 Python.app 開（D86） ──
+
+def test_plist_keys_and_executable(load, tmp_path):
+    sc, mod = load("shortcut"), make_module(tmp_path, "開工")
+    b = sc.write(tmp_path / "捷徑", "開工", mod, "/py/python3", tmp_path / "run.py", sips=pytest.fail)
+    info = plistlib.loads((b / "Contents" / "Info.plist").read_bytes())
+    assert (info["CFBundleExecutable"], info["CFBundlePackageType"], info["IPLoTInterop"]) == ("iplot-run", "APPL", 1)
+    assert (info["IPLoTModule"], info["IPLoTPython"], info["IPLoTIcon"]) == (str(mod), "/py/python3", "")
+    assert (b / "Contents" / "MacOS" / "iplot-run").stat().st_mode & 0o777 == 0o755
+    assert (info["CFBundleName"], info["CFBundleDisplayName"], info["CFBundleVersion"]) == ("開工", "開工", "1")
+    assert re.fullmatch(r"local\.iplot\.interop\.[0-9a-f]{12}", info["CFBundleIdentifier"])
+    assert info["IPLoTRun"] == str(tmp_path / "run.py") and "CFBundleIconFile" not in info
+    assert b == tmp_path / "捷徑" / "開工.app" and not list((tmp_path / "捷徑").glob(".tmp-*"))
+
+
+def test_script_quotes_every_path(load, tmp_path):                       # Review Focus 3
+    sc = load("shortcut")
+    text = sc.script("/我的 py/python3", tmp_path / "我的 iPLoT" / "run.py", tmp_path / "a 'b' $c", "a 'b' $c")
+    assert shlex.quote(str(tmp_path / "a 'b' $c")) in text and shlex.quote("/我的 py/python3") in text
+
+
+def test_script_alerts_when_python_or_run_py_is_missing(load, tmp_path):  # Review Focus 1
+    text = load("shortcut").script("/py", tmp_path / "run.py", tmp_path / "m", "m")
+    assert '[ ! -x "$py" ] || [ ! -f "$run" ]' in text and "/usr/bin/osascript" in text and "on run argv" in text
+    assert "這個捷徑找不到記下的 Python 或 iPLoT。在面板按一次「互通」，捷徑會重新整理。" in text
+
+
+def test_script_hands_over_to_the_python_app(load, tmp_path):
+    """有 Python.app 的 Python：交給它開（TCC 算在 Python 頭上，所有捷徑共用一次允許）。"""
+    exe, app, _ = fake_framework(tmp_path / "我的 fw")
+    text = load("shortcut").script(exe, tmp_path / "run.py", tmp_path / "模組 A", "模組 A")
+    assert f'exec /usr/bin/open -n -a "$app" --args "$run" {shlex.quote(str(tmp_path / "模組 A"))}' in text
+    assert f"app={shlex.quote(str(app))}" in text and '[ ! -d "$app" ]' in text
+
+
+def test_script_really_runs_in_sh_with_odd_paths(load, tmp_path):
+    """沒有 Python.app 的 Python：真的用 /bin/sh 跑產生的指令稿，假的 Python 把收到的參數寫出來。"""
+    py = tmp_path / "我的 py" / "python3"
+    py.parent.mkdir()
+    out = tmp_path / "argv.txt"
+    py.write_text(f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > {shlex.quote(str(out))}\n',
+                  encoding="utf-8")
+    py.chmod(0o755)
+    run, module = tmp_path / "我的 iPLoT" / "run.py", tmp_path / "a 'b' $c `d` \"e\""
+    run.parent.mkdir()
+    run.write_text("", encoding="utf-8")
+    script = tmp_path / "iplot-run"
+    script.write_text(load("shortcut").script(str(py), run, module, "名稱\n換行"), encoding="utf-8")
+    assert subprocess.run(["/bin/sh", str(script)], capture_output=True).returncode == 0
+    assert out.read_text(encoding="utf-8").splitlines() == [str(run), str(module)]
+
+
+def test_names_nested_sanitized_and_deduplicated(load, tmp_path):
+    sc, a, b, c = load("shortcut"), tmp_path / "a", tmp_path / "b", tmp_path / "c"
+    assert sc.names([(["父", "子"], a), (["x/y:z"], b), (["父", "子"], c)]) == {"父 › 子": a, "x／y：z": b, "父 › 子 2": c}
+
+
+def test_bundle_name_drops_control_characters_and_leading_dots(load):
+    assert load("shortcut").bundle_name(["..隱\t藏\n"]) == "隱藏"
+
+
+def test_long_names_are_cut_and_stay_unique(load, tmp_path):            # Review Focus 4
+    got = load("shortcut").names([(["很長" * 80, "一"], tmp_path / "a"), (["很長" * 80, "二"], tmp_path / "b")])
+    assert len(got) == 2 and all(len(n.encode()) <= 200 and n.endswith(("…", "… 2")) for n in got)
+
+
+def test_names_differing_only_in_case_do_not_collide(load, tmp_path):
+    """APFS 預設不分大小寫：Abc.app 與 abc.app 是同一個檔名。"""
+    got = load("shortcut").names([(["Abc"], tmp_path / "a"), (["abc"], tmp_path / "b")])
+    assert list(got) == ["Abc", "abc 2"]
+
+
+def _shortcuts(base):
+    return sorted(p.name for p in base.iterdir())
+
+
+def test_sync_adds_renames_removes_and_leaves_foreign_things(load, tmp_path):
+    sc, base, run = load("shortcut"), tmp_path / "捷徑", tmp_path / "run.py"
+    a, b = make_module(tmp_path, "a"), make_module(tmp_path, "b")
+    (base / "別人的.app" / "Contents").mkdir(parents=True)
+    (base / "別人的.app" / "Contents" / "Info.plist").write_bytes(plistlib.dumps({"CFBundleName": "x"}))
+    assert sc.sync(base, {"A": a, "B": b}, "/py", run, sips=pytest.fail) == []
+    assert _shortcuts(base) == ["A.app", "B.app", "別人的.app"]
+    assert sc.sync(base, {"A2": a}, "/py", run, sips=pytest.fail) == []
+    assert _shortcuts(base) == ["A2.app", "別人的.app"]
+    assert plistlib.loads((base / "別人的.app" / "Contents" / "Info.plist").read_bytes()) == {"CFBundleName": "x"}
+
+
+def test_sync_rewrites_when_python_or_run_or_icon_changes(load, tmp_path):
+    sc, base, run = load("shortcut"), tmp_path / "捷徑", tmp_path / "run.py"
+    a, calls = make_module(tmp_path, "a"), []
+    plist = base / "A.app" / "Contents" / "Info.plist"
+    sc.sync(base, {"A": a}, "/py1", run, sips=pytest.fail)
+    sc.sync(base, {"A": a}, "/py2", run, sips=pytest.fail)
+    assert plistlib.loads(plist.read_bytes())["IPLoTPython"] == "/py2"
+    sc.sync(base, {"A": a}, "/py2", tmp_path / "moved" / "run.py", sips=pytest.fail)
+    assert plistlib.loads(plist.read_bytes())["IPLoTRun"] == str(tmp_path / "moved" / "run.py")
+    (a / "icon.png").write_bytes(b"png")
+
+    def sips(argv):
+        calls.append(argv)
+        Path(argv[-1]).write_bytes(b"icns")
+        return 0
+
+    sc.sync(base, {"A": a}, "/py2", tmp_path / "moved" / "run.py", sips=sips)
+    info = plistlib.loads(plist.read_bytes())
+    assert len(calls) == 1 and calls[0][:4] == ["sips", "-s", "format", "icns"] and info["IPLoTIcon"] != ""
+    assert info["CFBundleIconFile"] == "icon" and (base / "A.app" / "Contents" / "Resources" / "icon.icns").exists()
+
+
+def test_sync_leaves_up_to_date_shortcuts_alone(load, tmp_path):
+    sc, base, run = load("shortcut"), tmp_path / "捷徑", tmp_path / "run.py"
+    a = make_module(tmp_path, "a")
+    sc.sync(base, {"A": a}, "/py", run, sips=pytest.fail)
+    plist = base / "A.app" / "Contents" / "Info.plist"
+    os.utime(plist, ns=(1, 1))
+    sc.sync(base, {"A": a}, "/py", run, sips=pytest.fail)
+    assert plist.stat().st_mtime_ns == 1
+
+
+def test_a_failed_icon_conversion_means_no_icon(load, tmp_path):
+    sc, a = load("shortcut"), make_module(tmp_path, "a")
+    (a / "icon.png").write_bytes(b"not a png")
+    b = sc.write(tmp_path / "捷徑", "A", a, "/py", tmp_path / "run.py", sips=lambda argv: 1)
+    assert "CFBundleIconFile" not in plistlib.loads((b / "Contents" / "Info.plist").read_bytes())
+
+
+def test_sync_clears_its_own_leftover_temporaries(load, tmp_path):
+    sc, base = load("shortcut"), tmp_path / "捷徑"
+    (base / ".tmp-A.app" / "Contents").mkdir(parents=True)
+    sc.sync(base, {}, "/py", tmp_path / "run.py", sips=pytest.fail)
+    assert _shortcuts(base) == []
