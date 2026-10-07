@@ -1120,3 +1120,13 @@ def test_an_unknown_tilde_user_is_one_sentence_not_a_traceback(load, home, entry
     make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
     assert entry.go(["A", "~沒有這個人/f.txt"], cwd=tmp_path) == 0
     assert [repr([tmp_path / "~沒有這個人/f.txt"])] in entry.wv.windows[0].calls("log")
+
+
+def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
+    """藏著的小視窗是 accessory（不在 Dock、不在 ⌘-Tab）；app.page 開的視窗要找得回來，所以開之前回到一般的 App。"""
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
+    until(lambda: len(popup.wv.windows) == 2)
+    assert popup.dock == [False, True] and popup.wv.windows[0].shown is False
+    popup.wv.windows[1].fire("closed")
+    t.join(3)

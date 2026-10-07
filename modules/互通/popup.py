@@ -225,7 +225,10 @@ class Popup:
         return self._dialog("confirm", prompt) is True
 
     def page(self, title: str, html: str, api: object | None) -> None:
-        """另開一個 640×520 的視窗顯示一頁 HTML（app.page），關掉才回來；不會因此把小視窗叫出來。"""
+        """另開一個 640×520 的視窗顯示一頁 HTML（app.page），關掉才回來；不會因此把小視窗叫出來。
+        開之前回到一般的 App（在 Dock、在 ⌘-Tab 裡）：被別的視窗蓋住時要找得回來，模組在等它關。"""
+        if self._dock:
+            self._dock(True)
         window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
         closed = threading.Event()
         window.events.closed += closed.set
