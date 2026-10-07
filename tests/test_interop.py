@@ -982,13 +982,15 @@ def test_button_remembers_python_syncs_and_opens_the_page(load, home, monkeypatc
     from core.scan import module_info
     copy = home / "modules" / "互通"
     shutil.copytree(INTEROP, copy, ignore=shutil.ignore_patterns("__pycache__", ".*", "捷徑"))
+    before = {n: (INTEROP / n).stat().st_mtime_ns if (INTEROP / n).exists() else None for n in (".python", ".patched")}
     app, revealed = FakeApp(home), []
     app.reveal = revealed.append
     monkeypatch.setattr(sys, "platform", "linux")  # 這個測試不做捷徑
     result = run_module(module_info(copy, home / "modules", "here"), app)
     assert result.ok, result.error
     assert app.pages[0][0] == "互通" and (copy / ".python").read_text(encoding="utf-8") == sys.executable
-    assert (copy / ".patched").exists() and not (INTEROP / ".python").exists() and not (INTEROP / ".patched").exists()
+    after = {n: (INTEROP / n).stat().st_mtime_ns if (INTEROP / n).exists() else None for n in (".python", ".patched")}
+    assert (copy / ".patched").exists() and after == before  # repo 裡的 modules/互通 一個檔都沒動
 
 
 def _status_tree(home, tmp_path):
@@ -1067,3 +1069,17 @@ def test_page_html_is_self_contained_and_never_uses_inner_html():
     html = (INTEROP / "page.html").read_text(encoding="utf-8")
     assert not any(w in html for w in ("http://", "https://", "innerHTML", "style.css"))
     assert "prefers-color-scheme: dark" in html and html.count("__STATUS__") == 1
+
+
+def test_add_after_imports_leaves_a_blank_line_so_ruff_is_happy(load, tmp_path):
+    """接在開頭的 import 後面時空一行：ruff 的 I001 要那一行（tests/test_create.py 的範本也過 ruff）。"""
+    pytest.importorskip("ruff")
+    f = tmp_path / "iplot.py"
+    f.write_text('"""說明。"""\nimport os\n\n\ndef run(app):\n    app.log(os.getcwd())\n', encoding="utf-8")
+    s = load("snippet")
+    s.add(f, 20)
+    assert f.read_text(encoding="utf-8").startswith('"""說明。"""\nimport os\n\n' + s.TEXT)
+    root = Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, "-m", "ruff", "check", "--config", str(root / "pyproject.toml"), str(f)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout

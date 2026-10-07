@@ -2,19 +2,38 @@
 按這裡會先同步一次（捷徑、讓舊模組能直接執行的那一小段），再顯示現在的狀態。"""
 import ast
 import json
+import pathlib
 import shlex
 import subprocess
+
+# ── 互通 ── 直接執行這個檔（python3 iplot.py）時交給 iPLoT 用彈出式視窗跑；從 iPLoT 裡執行時這段不做事。不要可以整段刪掉
 import sys
-from pathlib import Path
+
+if __name__ == "__main__" and "core.runner" not in sys.modules:
+    import os
+    import subprocess
+    here = folder = os.path.dirname(os.path.abspath(__file__))
+    run = None
+    while run is None and folder != os.path.dirname(folder):  # 往上一層層找 iPLoT：模組在它裡面或旁邊都找得到
+        folder = os.path.dirname(folder)
+        try:
+            names = [""] + sorted(os.listdir(folder))
+        except OSError:
+            names = [""]
+        runs = (os.path.join(folder, n, "modules", "互通", "run.py") for n in names)
+        run = next((r for r in runs if os.path.isfile(r)), None)
+    sys.exit(subprocess.call([sys.executable, run, here, *sys.argv[1:]]) if run
+             else "找不到 iPLoT 的「互通」：先在工作坊裝「互通」；模組要放在 iPLoT 資料夾裡或它旁邊")
+# ── 互通 ──
 
 ICON = "🔗"
-HERE = Path(__file__).resolve().parent
+HERE = pathlib.Path(__file__).resolve().parent
 EXAMPLE = "開工"  # 指令的例子優先用它；沒有就用最上層第一個模組
 # 這個檔被直接執行（python3 iplot.py）時，檔頭的 import 在那一小段之前跑，那時候 core 還不在 sys.path 上：
 # 所以這裡只 import 標準庫，同一個資料夾的 boot、sync…與 core 都在函式裡才 import
 
 
-def status(home: Path, config, python: str, folder: Path) -> dict:
+def status(home: pathlib.Path, config, python: str, folder: pathlib.Path) -> dict:
     """狀態頁要的資料：幾個模組能在面板外打開、幾個能直接執行、沒補的與原因、捷徑在哪、指令怎麼寫、上一次同步的問題。"""
     import shortcut
     import snippet
@@ -65,7 +84,7 @@ def render(data: dict) -> str:
 class Api:
     """狀態頁的 JS 用 pywebview.api.<方法> 呼叫的入口；自己的東西都以底線開頭，攤出去的只有這三個方法。"""
 
-    def __init__(self, app, home: Path, config, python: str, folder: Path) -> None:
+    def __init__(self, app, home: pathlib.Path, config, python: str, folder: pathlib.Path) -> None:
         self._app, self._home, self._config, self._python, self._folder = app, home, config, python, folder
 
     def reveal(self) -> None:

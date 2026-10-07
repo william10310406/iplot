@@ -66,7 +66,8 @@ def add(path: Path, keep: int) -> bool:
     lines = io.StringIO(text, newline="").readlines()  # 跟 Python 一樣只認 \n、\r\n、\r（splitlines 還認換頁字元等）
     if at and not lines[at - 1].endswith(("\n", "\r")):
         lines[at - 1] += newline
-    lines[at:at] = [TEXT.replace("\n", newline)]
+    after_import = any(isinstance(n, (ast.Import, ast.ImportFrom)) and n.end_lineno == at for n in ast.parse(text).body)
+    lines[at:at] = [(newline if after_import else "") + TEXT.replace("\n", newline)]  # 接在 import 後面空一行（ruff 的 I001）
     snapshot(path, keep)
     path.write_bytes((BOM if bom else b"") + "".join(lines).encode("utf-8"))
     return True
