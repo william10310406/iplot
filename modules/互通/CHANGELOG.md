@@ -1,0 +1,7 @@
+# Changelog
+
+「互通」這個模組的版本紀錄，格式跟 iPLoT 的 CHANGELOG.md 一樣（[Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)）。`tools/publish.py` 取最上面那一節的版本號當工作坊裡的版本，取那一節的第一段當清單頁上的「這一版」。
+
+## [0.1.0] - 2026-10-07
+
+第一版：任何模組都能在面板外打開——Spotlight 或 Dock 上的捷徑、一行指令、在模組資料夾直接 `python3 iplot.py`——打開之後跟在面板裡一樣拿得到 `app`，對話框與輸出用彈出式視窗。需要 iPLoT 0.5（0.5.1 起，＋ 建的新模組都能直接執行）；捷徑只在 macOS。
