@@ -7,3 +7,9 @@ __pycache__/
 .ruff_cache/
 .venv/
 .coverage
+# 「互通」自己產生的：捷徑與紀錄（各台電腦自己的，不進 git、不進發佈的包）
+modules/互通/捷徑/
+modules/互通/.python
+modules/互通/.patched
+modules/互通/.sync-error
+modules/互通/.lock

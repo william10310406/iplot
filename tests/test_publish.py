@@ -227,8 +227,10 @@ MODULE_LOG = ("# Changelog\n\n「整理桌面」的版本紀錄。\n\n## [Unrele
 
 def test_module_version_and_notes_come_from_its_changelog(publish, repo):
     """有 CHANGELOG.md 的模組：版本是最上面那一節（[Unreleased] 不算）的版本號，notes 是那一節的第一段；
-    CHANGELOG.md 跟著模組的 zip 一起出去。"""
+    CHANGELOG.md 跟著模組的 zip 一起出去（commit 過的才算：模組的包只收 git 追蹤的檔）。"""
     (repo / "modules" / "整理桌面" / "CHANGELOG.md").write_text(MODULE_LOG, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "log")
     out = repo / "交付" / "發佈"
     assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面"], root=repo) == 0
     [entry] = json.loads((out / "index.json").read_text(encoding="utf-8"))["modules"]
@@ -367,3 +369,31 @@ def test_a_module_changelog_whose_top_version_cannot_be_read_stops_before_writin
 def test_a_module_changelog_with_a_bom_is_read(publish, repo):
     (repo / "modules" / "整理桌面" / "CHANGELOG.md").write_text("﻿## [1.3.0] - 2026-10-06\n\n摘要。\n", encoding="utf-8")
     assert publish.latest(repo / "modules" / "整理桌面" / "CHANGELOG.md") == ("1.3.0", "摘要。")
+
+
+def test_main_packs_only_tracked_files(publish, repo):
+    (repo / "modules" / "整理桌面" / "沒追蹤.txt").write_text("x", encoding="utf-8")
+    (repo / "modules" / "整理桌面" / "捷徑").mkdir()
+    (repo / "modules" / "整理桌面" / "捷徑" / "a.txt").write_text("x", encoding="utf-8")
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x",
+                         "--modules", "整理桌面"], root=repo) == 0
+    with zipfile.ZipFile(repo / "交付" / "發佈" / "模組" / "整理桌面.zip") as z:
+        assert "整理桌面/沒追蹤.txt" not in z.namelist() and "整理桌面/iplot.py" in z.namelist()
+        assert z.namelist() == ["整理桌面/iplot.py"]
+
+
+def test_main_stops_for_a_module_git_does_not_track(publish, repo, capsys):
+    make_module(repo / "modules", "新的")
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x",
+                         "--modules", "新的"], root=repo) == 1
+    assert "「新的」沒有任何 git 追蹤的檔" in capsys.readouterr().out
+    assert not (repo / "交付" / "發佈" / "模組" / "新的.zip").exists()
+
+
+def test_pack_module_with_a_file_list_keeps_skip(publish, tmp_path):
+    folder = make_module(tmp_path / "modules", "M")
+    (folder / ".origin").write_text("{}", encoding="utf-8")
+    (folder / "a.txt").write_text("a", encoding="utf-8")
+    out = publish.pack_module(folder, tmp_path / "out", ["iplot.py", ".origin", "gone.txt"])
+    with zipfile.ZipFile(out) as z:
+        assert z.namelist() == ["M/iplot.py"]

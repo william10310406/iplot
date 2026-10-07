@@ -27,6 +27,7 @@ import json
 import re
 import subprocess
 import sys
+import unicodedata
 import urllib.parse
 import zipfile
 from pathlib import Path
@@ -79,16 +80,27 @@ def latest(changelog: Path) -> tuple[str | None, str]:
     return heads[0], changelog_notes(changelog, heads[0])
 
 
-def pack_module(folder: Path, out_dir: Path) -> Path:
-    """把模組資料夾壓成 out_dir/<名稱>.zip，最上層是 <名稱>/；SKIP 裡的名字不管在哪一層都不帶。"""
+def pack_module(folder: Path, out_dir: Path, files: list[str] | None = None) -> Path:
+    """把模組資料夾壓成 out_dir/<名稱>.zip，最上層是 <名稱>/；SKIP 裡的名字不管在哪一層都不帶。
+    給了 files（相對於模組資料夾的路徑，main 給的是 git 追蹤的檔）就只收那些，不在磁碟上的略過。"""
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{folder.name}.zip"
-    files = sorted(p for p in folder.rglob("*")
+    found = folder.rglob("*") if files is None else (folder / f for f in files)
+    files = sorted(p for p in found
                    if p.is_file() and not SKIP & {part.casefold() for part in p.relative_to(folder).parts})
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as z:  # 1980 年以前的檔記成 1980 年
         for p in files:
             z.write(p, f"{folder.name}/{p.relative_to(folder).as_posix()}")
     return out
+
+
+def tracked(root: Path, name: str) -> list[str]:
+    """modules/<name> 裡 git 追蹤的檔，相對於模組資料夾。自己產生的檔（例如互通的捷徑與紀錄）、
+    還沒 commit 的新檔都不在裡面（D79 之後的缺口，0.5.1 收掉）。"""
+    listed = subprocess.run(["git", "ls-files", "-z", "--", f"modules/{name}"], cwd=root, capture_output=True)
+    prefix = unicodedata.normalize("NFC", f"modules/{name}/")
+    paths = (unicodedata.normalize("NFC", p) for p in listed.stdout.decode("utf-8").split("\0") if p)
+    return [p[len(prefix):] for p in paths if p.startswith(prefix)]
 
 
 def _write(path: Path, data: dict) -> Path:
@@ -199,7 +211,11 @@ def main(argv: list[str], root: Path = ROOT) -> int:
             print(f"「{name}」：指令列寫 {ver}，modules/{name}/CHANGELOG.md 最上面那一節是 {logged}；"
                   "拿掉指令列的版本，或改 CHANGELOG.md，再發佈")
             return 1
-        wanted.append((name, ver or logged or version, notes))
+        files = tracked(root, name)
+        if not files:  # 整個資料夾都還沒 commit：包會是空的
+            print(f"「{name}」沒有任何 git 追蹤的檔：模組的包只收 git 追蹤的檔，先 commit 再發佈")
+            return 1
+        wanted.append((name, ver or logged or version, notes, files))
     out.mkdir(parents=True, exist_ok=True)
     ref, core_zip = args.ref or f"v{version}", out / f"iPLoT-v{version}.zip"
     git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)  # noqa: E731
@@ -222,9 +238,9 @@ def main(argv: list[str], root: Path = ROOT) -> int:
     update = update_data(core_zip, version, _url(args.base_url, core_zip.name), notes)
     made = [core_zip, _write(out / "update.json", update)]
     entries = []
-    for name, ver, module_notes in wanted:
+    for name, ver, module_notes, files in wanted:
         folder = root / "modules" / name
-        packed, meta = pack_module(folder, out / MODULES), read_meta(folder / "iplot.py")
+        packed, meta = pack_module(folder, out / MODULES, files), read_meta(folder / "iplot.py")
         entries.append({"name": name, "version": ver, "zip_url": _url(args.base_url, MODULES, packed.name),
                         "sha256": sha256_of(packed), "description": meta.description, "icon": meta.icon,
                         "notes": module_notes})
@@ -238,7 +254,8 @@ def main(argv: list[str], root: Path = ROOT) -> int:
     made += [write_html(update, entries, out), out / ".nojekyll"]
     print(f"產生在 {out}：\n" + "\n".join(f"  {p.relative_to(out)}" for p in made))
     if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
-        print(f"注意：工作目錄有還沒 commit 的改動；核心的包是從 {ref} 打的，不含那些改動（模組的包含）。")
+        print(f"注意：工作目錄有還沒 commit 的改動；核心的包是從 {ref} 打的，不含那些改動"
+              "（模組的包含：模組收的是 git 追蹤的檔在磁碟上的樣子）。")
     print(f"把 {out} 放上 --base-url 那個網址之後，在 config.py 填這兩行（從行首貼上，前面不要留空白）：\n"
           f'UPDATE_URL = "{_url(args.base_url, "update.json")}"\nWORKSHOP_URL = "{_url(args.base_url, "index.json")}"')
     return 0
