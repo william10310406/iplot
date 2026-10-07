@@ -6,6 +6,7 @@ import ast
 import importlib
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -13,7 +14,7 @@ import types
 from pathlib import Path
 
 import pytest
-from conftest import until
+from conftest import make_module, until
 
 INTEROP = Path(__file__).resolve().parents[1] / "modules" / "互通"
 NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run")
@@ -422,3 +423,93 @@ def test_popup_html_is_self_contained_and_never_uses_inner_html():
 def test_popup_html_defines_every_entry_python_calls():
     defined = set(re.findall(r"^iplot\.(\w+) = ", (INTEROP / "popup.html").read_text(encoding="utf-8"), re.M))
     assert defined == {"init", "log", "report", "ask", "confirm", "busy", "done"}
+
+
+# ── snippet：把那一小段補進現有的模組（每個模組一次，先存快照） ──
+
+def test_snippet_text_is_the_core_template_block(load):
+    from core.text import TEMPLATE
+    text = load("snippet").TEXT
+    assert text in TEMPLATE and text.startswith("# ── 互通 ──") and text.endswith("# ── 互通 ──\n")
+    end = "# ── 互通 ──\n"
+    assert TEMPLATE[TEMPLATE.index(end[:-1]):TEMPLATE.rindex(end) + len(end)] == text
+
+
+def test_where_goes_after_docstring_future_and_leading_imports(load):
+    src = '"""說明。"""\nfrom __future__ import annotations\nimport os\nimport sys\n\nICON = "x"\nprint(1)\n'
+    assert load("snippet").where(src) == 4
+
+
+def test_where_without_docstring_is_the_top(load):
+    assert load("snippet").where("print(1)\n") == 0
+
+
+def test_where_stops_at_the_first_other_statement(load):
+    src = '"""說明。"""\nimport os\nx = 1\nimport sys\n'
+    assert load("snippet").where(src) == 2
+
+
+def test_has_only_counts_the_mark_at_the_start_of_a_line(load):
+    s = load("snippet")
+    assert s.has("x = 1\n# ── 互通 ── 說明\n") and not s.has('print("# ── 互通 ──")\n')
+
+
+def test_add_inserts_once_and_snapshots_first(load, tmp_path):
+    f = make_module(tmp_path, "A", '"""說明。"""\ndef run(app):\n    pass\n') / "iplot.py"
+    s = load("snippet")
+    assert s.add(f, 20) is True and s.add(f, 20) is False
+    [snap] = (f.parent / ".history").glob("*.py")
+    assert s.MARK not in snap.read_text(encoding="utf-8") and f.read_text(encoding="utf-8").count(s.MARK) == 2
+    assert f.read_text(encoding="utf-8") == '"""說明。"""\n' + s.TEXT + "def run(app):\n    pass\n"
+
+
+def test_add_keeps_bom_and_crlf(load, tmp_path):
+    f = tmp_path / "iplot.py"
+    f.write_bytes(b"\xef\xbb\xbf" + '"""說明。"""\r\ndef run(app):\r\n    pass\r\n'.encode())
+    assert load("snippet").add(f, 20)
+    data = f.read_bytes()
+    assert data.startswith(b"\xef\xbb\xbf") and b"\n" not in data.replace(b"\r\n", b"")
+    assert data.count("# ── 互通 ──".encode()) == 2
+
+
+def test_add_to_a_file_without_a_trailing_newline(load, tmp_path):
+    f = tmp_path / "iplot.py"
+    f.write_text('"""說明。"""', encoding="utf-8")
+    s = load("snippet")
+    assert s.add(f, 20) and f.read_text(encoding="utf-8") == '"""說明。"""\n' + s.TEXT
+    ast.parse(f.read_text(encoding="utf-8"))
+
+
+def test_add_raises_on_syntax_error(load, tmp_path):
+    f = make_module(tmp_path, "A", "def run(app)\n    pass\n") / "iplot.py"
+    with pytest.raises(SyntaxError):
+        load("snippet").add(f, 20)
+    assert f.read_text(encoding="utf-8") == "def run(app)\n    pass\n" and not (f.parent / ".history").exists()
+
+
+def test_patched_module_still_reads_meta(load, tmp_path):
+    from core.meta import read_meta
+    f = make_module(tmp_path, "A", '"""說明。\n\n第二段。"""\nICON = "🧭"\ndef run(app):\n    pass\n') / "iplot.py"
+    load("snippet").add(f, 20)
+    m = read_meta(f)
+    assert (m.description, m.icon, m.has_run, m.error) == ("說明。", "🧭", True, None)
+
+
+def test_script_module_runs_top_level_only_once(load, tmp_path):
+    """沒有 run 的模組（D47）：直接執行時，最外層在交出去之前一行都不跑。"""
+    home, _ = fake_iplot(tmp_path / "iPLoT")
+    (home / "modules" / "互通" / "run.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    f = make_module(home / "modules", "S", 'print("最外層")\n') / "iplot.py"
+    load("snippet").add(f, 20)
+    r = subprocess.run([sys.executable, str(f)], capture_output=True, text=True)
+    assert r.returncode == 0 and "最外層" not in r.stdout
+
+
+@pytest.mark.parametrize("odd", ["\x0c", " ", "\x85"])
+def test_add_counts_lines_like_python_does(load, tmp_path, odd):
+    """換頁字元、\\u2028 這類字 str.splitlines 當成換行，Python 不當：行號要照 Python 算，那一小段才不會插進 docstring 裡。"""
+    f = tmp_path / "iplot.py"
+    f.write_text(f'"""說明{odd}"""\ndef run(app):\n    pass\n', encoding="utf-8")
+    load("snippet").add(f, 20)
+    tree = ast.parse(f.read_text(encoding="utf-8"))
+    assert ast.get_docstring(tree) == f"說明{odd}" and isinstance(tree.body[2], ast.If)
