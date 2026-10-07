@@ -20,7 +20,7 @@ from boot import python_app
 FOLDER = "捷徑"
 MAX_NAME_BYTES = 200  # 檔名上限是 255 bytes；留給「.app」與做的時候的「.tmp-」
 EXECUTABLE = "iplot-run"
-KEYS = ("IPLoTModule", "IPLoTPython", "IPLoTRun", "IPLoTIcon")  # 任何一個跟現在的不一樣就重做
+KEYS = ("IPLoTModule", "IPLoTPython", "IPLoTApp", "IPLoTRun", "IPLoTIcon")  # 任何一個跟現在的不一樣就重做
 GONE = "這個捷徑找不到記下的 Python 或 iPLoT。在面板按一次「互通」，捷徑會重新整理。"
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -86,6 +86,14 @@ def script(python: str, run: Path, module: Path, name: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _now(module: Path, python: str, run: Path) -> dict:
+    """捷徑寫進 Info.plist、同步時拿來比的值。IPLoTApp 是 Python.app 的路徑：Homebrew 的 Python 升小版本時，
+    python 的路徑不變、Python.app 卻搬到新的資料夾，指令稿要跟著重做。"""
+    app = python_app(python)
+    return {"IPLoTModule": str(module), "IPLoTPython": python, "IPLoTApp": "" if app is None else str(app),
+            "IPLoTRun": str(run), "IPLoTIcon": _icon_stamp(module)}
+
+
 def _icon_stamp(module: Path) -> str:
     try:
         return str((module / "icon.png").stat().st_mtime_ns)
@@ -100,8 +108,7 @@ def write(base: Path, name: str, module: Path, python: str, run: Path, sips=subp
     (tmp / "Contents" / "MacOS").mkdir(parents=True)
     info = {"CFBundleName": name, "CFBundleDisplayName": name, "CFBundleExecutable": EXECUTABLE,
             "CFBundleIdentifier": "local.iplot.interop." + hashlib.sha1(str(module).encode()).hexdigest()[:12],
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "IPLoTInterop": 1,
-            "IPLoTModule": str(module), "IPLoTPython": python, "IPLoTRun": str(run), "IPLoTIcon": _icon_stamp(module)}
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "IPLoTInterop": 1, **_now(module, python, run)}
     if info["IPLoTIcon"]:
         icns = tmp / "Contents" / "Resources" / "icon.icns"
         icns.parent.mkdir()
@@ -145,8 +152,7 @@ def sync(base: Path, wanted: dict[str, Path], python: str, run: Path, sips=subpr
         except OSError as exc:
             problems.append(f"捷徑「{name}」：拿不掉：{exc}")
     for name, module in wanted.items():
-        now = {"IPLoTModule": str(module), "IPLoTPython": python, "IPLoTRun": str(run),
-               "IPLoTIcon": _icon_stamp(module)}
+        now = _now(module, python, run)
         if name in have and all(have[name].get(k) == now[k] for k in KEYS):
             continue
         try:

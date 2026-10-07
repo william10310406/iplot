@@ -1083,3 +1083,18 @@ def test_add_after_imports_leaves_a_blank_line_so_ruff_is_happy(load, tmp_path):
     r = subprocess.run([sys.executable, "-m", "ruff", "check", "--config", str(root / "pyproject.toml"), str(f)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout
+
+
+def test_sync_rewrites_when_only_the_python_app_moves(load, tmp_path, monkeypatch):
+    """Homebrew 的 Python 升小版本：python 的路徑不變（opt/…/python3.14），Python.app 換到新的 Cellar 資料夾。"""
+    sc, base, run = load("shortcut"), tmp_path / "捷徑", tmp_path / "run.py"
+    a, apps = make_module(tmp_path, "a"), iter([tmp_path / "Cellar" / "3.14.7" / "Python.app",
+                                                tmp_path / "Cellar" / "3.14.8" / "Python.app"])
+    current = [next(apps)]
+    monkeypatch.setattr(sc, "python_app", lambda python: current[0])
+    sc.sync(base, {"A": a}, "/opt/py", run, sips=pytest.fail)
+    current[0] = next(apps)
+    sc.sync(base, {"A": a}, "/opt/py", run, sips=pytest.fail)
+    script = (base / "A.app" / "Contents" / "MacOS" / "iplot-run").read_text(encoding="utf-8")
+    assert "3.14.8" in script and "3.14.7" not in script
+    assert plistlib.loads((base / "A.app" / "Contents" / "Info.plist").read_bytes())["IPLoTApp"] == str(current[0])
