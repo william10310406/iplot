@@ -4,8 +4,36 @@
 
 ## [Unreleased]
 
-- `app.run` 在面板停在下一層時，找不到就退到最上層找（D83）。
-- ＋ 建的新模組帶「互通」的那一小段：裝了互通就能直接 `python3 iplot.py`（D84）。
+## [0.5.1] - 2026-10-07
+
+核心的小改版，給兩個新的工作坊模組用：`app.run` 在面板停在下一層時，目前這一層找不到就退到最上層找（D83）；＋ 建的新模組檔頭帶「互通」的那一小段，裝了「互通」就能直接 `python3 iplot.py`（D84）。新功能在工作坊：「互通」讓任何模組不開面板也能打開（Spotlight、Dock、一行指令、直接執行），「主控面板」讓任何模組用 `app.run("主控面板")` 叫出面板。
+
+**與 0.5.0 相容：既有模組不用改；`api_version` 仍是 3，`app` 沒有多也沒有少。** 從 0.5.0 更新：按「更新」（換掉 `core/`、`ui/`、`main.py`、`requirements/`；`requirements/` 這一版沒變，不會重裝 `lib/`）；「互通」「主控面板」從工作坊裝。隨附的「開工」「打開核心原始碼」升到 0.5.1（檔頭帶那一小段），工作坊上也是。
+
+**從這一版起，核心只在大版本（1.0.0、2.0.0…）才真正修改，新功能以工作坊模組上線（D80）；這一版是明講的例外。** 工作坊模組可以依賴的核心介面列在 `docs/07_接口與邊界.md` 第 13 節，到 1.0.0 前只加不改（D85，`tests/test_interfaces.py`）。
+
+**只在 macOS 驗過，而且只有一台機器（macOS 26.5、arm64、python.org 的 Python 3.14.7）。** 自動測試之外，2026-10-07 在那台 Mac 上、在一份暫存的 iPLoT 複本（路徑有空白與中文）裡真的走過：系統內建的 Python 3.9 執行 `run.py`，自動換成記下的 Python 3.14 跑完；從捷徑（交給 Python.app）打開；直接 `python3 iplot.py`；「主控面板」在面板沒開時開一個、面板被別的視窗蓋住時叫到最前面（從捷徑開、從終端機開各一次）。還沒驗的：乾淨的 Mac 上 macOS 對「Python 取用『文件』」是不是只問一次（這台在測之前就允許過）；藏著的小視窗打開檔案選擇視窗（要人按）；Windows（未經實機驗證）。
+
+量出來的數字：測試 487 → 666 個；核心邏輯 500 → 502 有效行（上限 500 → 505，D68 修訂）；`core/` 仍是 11 個檔，這一版改了其中 4 個（`core.py` 的 `run_by_name`、`app.py` 的 `App.run` 說明、`text.py` 的範本、`__init__.py` 的版本號），`ui/`、`main.py`、`requirements/` 沒動；`core/text.py` 的文字仍是 55 個 key；範本裡的那一小段 19 行；repo 裡的模組 7 → 9 個。「互通」7 個 Python 檔共 750 有效行、兩頁 HTML 205＋127 行，「主控面板」108 行，都是模組，不在核心預算裡。
+
+這一版沒有做：常駐的背景程式（一有變動就同步、開機就跑、快捷鍵、監看資料夾、排程）；用名字叫下一層的模組；面板外的模組把訊息送進開著的面板、或跟面板共用 `app.memory`（要跨程序連線）；捷徑用 emoji 的 `ICON` 當圖示（只用 `icon.png`）；Windows、Linux 的捷徑與「叫到最前面」。
+
+還留著的缺口：0.5.0 列的缺口裡，「發佈工具打模組的包…沒 commit 的檔會進去」這一條這一版收掉了，其餘照舊。新的：同步會補 iPLoT 旁邊（`ROOTS` 的 `".."`）的模組，那是 iPLoT 資料夾以外的檔（先存快照）；在面板外叫「主控面板」時，小視窗會先蓋在面板前面 3 秒；這一版的 Linux 在面板外打不開時，那一句說的是「lib/ 是給別的 Python 裝的」，不是「這一版的 Linux 沒有網頁面板」。
+
+### 新增
+- 工作坊模組「互通」0.1.0（`modules/互通`，圖示 🔗，D81、D84、D86）：`run.py` 是面板外唯一的入口（`<Python> <iPLoT>/modules/互通/run.py <模組資料夾或名稱> [檔案…]`，結束碼 0／1／2）；彈出式視窗照核心的 `View` 做，平常藏著，有話才出來；捷徑（macOS 的 `.app`，在 `modules/互通/捷徑/`，交給 Python 的 Python.app 開）；同步（補那一小段、捷徑、`.sync-error`），只在 `run.py` 跑完與按「互通」時做；在面板按「互通」看狀態頁。詳細在 `docs/07_接口與邊界.md` 第 12 節、README 的「在面板外打開模組」（`tests/test_interop.py`，105 個）。
+- 工作坊模組「主控面板」0.1.0（`modules/主控面板`，圖示 🎛️，D82）：打開面板，已經開著就叫到最前面；在面板外也一樣（`tests/test_open_panel.py`，17 個）。
+- `tests/test_interfaces.py`：釘住工作坊模組可以依賴的核心介面（D85，30 個）。
+
+### 變更
+- `app.run`（`Core.run_by_name`）：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 `LookupError`，不猜（D83，`tests/test_core.py::test_run_by_name_falls_back_to_top_level` 等四個）。面板在最上層時行為跟 0.5.0 一樣。
+- ＋ 的範本：第一行的說明之後帶「互通」的那一小段（D84，`tests/test_create.py::test_template_*`）。在 iPLoT 裡執行時它不做事；直接執行時往上找 `modules/互通/run.py`，找不到就說一句、結束碼 1。
+- 核心邏輯的上限 500 → 505（D68 修訂）。
+- 隨附模組「開工」「打開核心原始碼」0.5.0 → 0.5.1，「重新啟動」「開Terminal」：檔頭帶那一小段，可以直接 `python3 iplot.py`（`tests/test_bundled.py::test_repo_modules_carry_the_interop_snippet`）；「作業系統」「更新」「工作坊」不帶（`::test_iplots_own_modules_stay_untouched`）。
+- `.gitignore` 加上「互通」自己產生的 `modules/互通/捷徑/`、`.python`、`.patched`、`.sync-error`、`.lock`。
+
+### 修正
+- `tools/publish.py` 打模組的包只收 git 追蹤的檔（`git ls-files`），沒 commit 的檔、自己產生的紀錄不會被發出去；整個模組都還沒 commit 就停下來說一句（`tests/test_publish.py::test_main_packs_only_tracked_files`、`::test_main_stops_for_a_module_git_does_not_track`）。
 
 ## [0.5.0] - 2026-10-06
 
