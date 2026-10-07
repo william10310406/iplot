@@ -1098,3 +1098,16 @@ def test_sync_rewrites_when_only_the_python_app_moves(load, tmp_path, monkeypatc
     script = (base / "A.app" / "Contents" / "MacOS" / "iplot-run").read_text(encoding="utf-8")
     assert "3.14.8" in script and "3.14.7" not in script
     assert plistlib.loads((base / "A.app" / "Contents" / "Info.plist").read_bytes())["IPLoTApp"] == str(current[0])
+
+
+@pytest.mark.parametrize("src", ["import turtle\nturtle.forward(10)\n", "from tkinter import messagebox\n",
+                                 "import tkinter.ttk as ttk\n", "def run(app):\n    import turtle\n"])
+def test_sync_leaves_tkinter_and_turtle_modules_alone(load, home, interop, src):
+    """用 tkinter／turtle 的模組在面板外開不了視窗（run.py 擋著）；補了那一小段，原本能直接 python3 iplot.py 的就不能了。"""
+    t = make_module(home / "modules", "T", src)
+    do_sync(load, home, interop)
+    assert (t / "iplot.py").read_text(encoding="utf-8") == src
+    from core import scan
+    sync = load("sync")
+    [info] = [i for i, _ in sync.modules(home, DEFAULT_CONFIG) if i.name == "T"]
+    assert sync.why_not(info, scan.roots_from_config(home, DEFAULT_CONFIG.roots)) == "用了 tkinter 或 turtle"

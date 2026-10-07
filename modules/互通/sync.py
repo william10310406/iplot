@@ -3,6 +3,7 @@
 只在兩個時機做：run.py 每次跑完、在面板按「互通」。沒有背景程式（D84）。同一時間只有一個在做（.lock）。
 「互通」只寫自己的資料夾；例外只有一個：在沒有那一小段的模組 iplot.py 加上它（先存快照）。"""
 
+import ast
 import contextlib
 import json
 import os
@@ -20,6 +21,7 @@ from core.types import Config, ModuleInfo, Root
 LOCK, PATCHED, ERRORS = ".lock", ".patched", ".sync-error"
 STALE = 120  # 秒：比這個舊的鎖當作上次沒清掉
 BUNDLED = ("作業系統", "更新", "工作坊")  # iPLoT 自己要用的三個隨附模組，不補
+TK = ("tkinter", "_tkinter", "turtle")  # 在面板外開不了它們的視窗（run.py 擋著）
 
 
 def modules(home: Path, config: Config) -> list[tuple[ModuleInfo, list[str]]]:
@@ -47,7 +49,23 @@ def why_not(info: ModuleInfo, roots: list[Root]) -> str | None:
         return "隨附模組"
     if any(r.level == "extra" and r.path == info.root for r in roots):
         return "在 ROOTS 另外加的資料夾裡"  # 那一小段在那裡找不到 iPLoT
+    if _uses_tk(info.file):
+        return "用了 tkinter 或 turtle"  # 補了之後直接執行會交給 run.py，而 run.py 開不了 tkinter 的視窗
     return None
+
+
+def _uses_tk(file: Path) -> bool:
+    """iplot.py 裡有沒有 import tkinter／turtle（任何一層、任何寫法）；讀不懂就當作沒有，交給補的時候再說。"""
+    try:
+        tree = ast.parse(file.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                 else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+        if any(n.split(".")[0] in TK for n in names):
+            return True
+    return False
 
 
 def _links(roots: list[Root], found: list[tuple[ModuleInfo, list[str]]]) -> list[str]:
