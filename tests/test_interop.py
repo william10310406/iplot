@@ -341,13 +341,16 @@ def test_choose_files_shows_the_window_first(popup):
 
 
 def test_choose_folder(popup):
-    p = popup.p
+    p, seen = popup.p, []
 
     def job():
-        popup.wv.windows[0].dialog_result = ["/d"]
+        w = popup.wv.windows[0]
+        w.dialog_result = ["/d"]
+        original = w.create_file_dialog
+        w.create_file_dialog = lambda *a, **k: (seen.append(w.shown), original(*a, **k))[1]
         return p.choose_folder()
 
-    assert p.run(job) == Path("/d") and popup.wv.windows[0].shown
+    assert p.run(job) == Path("/d") and seen == [True]
 
 
 def test_done_after_showing_tells_the_page(popup):
@@ -1337,3 +1340,63 @@ def test_the_back_button_with_nothing_to_go_back_to_does_nothing(popup, home):
 def test_popup_html_puts_the_name_on_the_button():
     html_text = (INTEROP / "popup.html").read_text(encoding="utf-8")
     assert '[[offer, panel, "panelBtn"]]' in html_text and '"主控面板", panel' not in html_text
+
+
+# ── 頁面開著的時候，小視窗不冒出來、關它不結束程序；選完檔案藏回去（M5 設計第 15 節第 2 條） ──
+
+def test_a_page_open_longer_than_busy_after_never_shows_the_popup(popup):
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
+    until(lambda: len(popup.wv.windows) == 2)
+    time.sleep(p.busy_after * 4)
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+    assert popup.wv.windows[0].calls("busy") == [] and popup.wv.windows[0].shown is False
+
+
+def test_closing_the_popup_while_a_page_is_open_hides_it_and_does_not_exit(popup):
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.log("x"), p.page("頁", "<p>x</p>", None), p.log("y"), 0)[3]))
+    until(lambda: len(popup.wv.windows) == 2)
+    w = popup.wv.windows[0]
+    assert w.shown
+    assert w.events.closing.handlers[0]() is False and w.shown is False and popup.exits == []
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+    assert ["y"] in w.calls("log") and w.shown    # 頁面關了之後有話還能再出來
+
+
+def test_stop_still_exits_while_a_page_is_open(popup):
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.log("x"), p.page("頁", "<p>x</p>", None), 0)[2]))
+    until(lambda: len(popup.wv.windows) == 2)
+    bridge(popup).stop()
+    assert popup.exits == [1]
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+
+
+def test_choose_folder_hides_the_window_again_when_it_was_hidden(popup):
+    p, seen = popup.p, []
+
+    def job():
+        w = popup.wv.windows[0]
+        w.dialog_result = ["/d"]
+        original = w.create_file_dialog
+        w.create_file_dialog = lambda *a, **k: (seen.append(w.shown), original(*a, **k))[1]
+        got = p.choose_folder()
+        seen.append(w.shown)
+        return got
+
+    assert p.run(job) == Path("/d") and seen == [True, False] and popup.dock == [False, True]   # 沒有第三個 dock 呼叫
+
+
+def test_choose_folder_leaves_the_window_up_when_it_was_already_showing(popup):
+    p = popup.p
+
+    def job():
+        p.log("先說一句")
+        popup.wv.windows[0].dialog_result = ["/d"]
+        return p.choose_folder()
+
+    assert p.run(job) == Path("/d") and popup.wv.windows[0].shown

@@ -78,6 +78,7 @@ class Popup:
         self._running = threading.Lock()  # 模組在跑的期間拿著；「打開檔案」等它跑完才做（runner 一次只跑一個）
         self._panel = threading.Lock()  # 回去鈕一次只跑一個：連按兩下不會開兩次
         self._back: str | None = None  # 回去鈕跑的模組名稱；done 時由 run.py 給
+        self._paging = False  # app.page 的視窗開著：小視窗不因「跑太久」出來，關它也只是藏起來
         self._ids = itertools.count(1)
         self._waiting: dict[int, tuple[threading.Event, list]] = {}
         self._worker: threading.Thread | None = None
@@ -92,7 +93,7 @@ class Popup:
         """開藏著的小視窗，進入 pywebview 的事件迴圈（佔住主執行緒）；頁面載入後在工作執行緒上跑 job。
         視窗關掉、事件迴圈結束之後等 job 做完，回它的結果。"""
         self._shown = self._closed = self._finished = self._job_done = False
-        self._worker, self._result, self._back = None, [1], None
+        self._worker, self._result, self._back, self._paging = None, [1], None, False
         self.window = self.webview.create_window(
             self.title, url=PAGE.as_uri(), js_api=Bridge(self), width=460, height=320, min_size=(360, 220),
             hidden=True)
@@ -124,8 +125,9 @@ class Popup:
                 self._job_done = True
 
     def _busy(self) -> None:
-        """跑了 busy_after 秒還沒結束：叫出來，顯示「執行中：<名稱>…」與「停止」。"""
-        if not self._job_done and not self._finished:
+        """跑了 busy_after 秒還沒結束：叫出來，顯示「執行中：<名稱>…」與「停止」。app.page 開著的時候不算：
+        頁面就是模組的畫面（行事曆整天開著），多一個「執行中」的小視窗只會擋路。"""
+        if not self._job_done and not self._finished and not self._paging:
             self._reveal()
             self._js("busy", self.title)
 
@@ -139,12 +141,26 @@ class Popup:
             self._dock(True)
         self.window.show()
 
-    def _closing(self) -> None:
-        """使用者關掉小視窗：等著的對話框當作取消；模組還沒跑完就是「停止」，結束這個程序（結束碼 1）。"""
+    def _closing(self) -> bool | None:
+        """使用者關掉小視窗：等著的對話框當作取消；模組還沒跑完就是「停止」，結束這個程序（結束碼 1）。
+        app.page 的視窗開著時例外：只把小視窗藏起來（回 False，pywebview 就不關它），之後有話還能再出來；
+        要結束程序請按「停止」。"""
+        if self._paging:
+            self._cancel()
+            self._hide()
+            return False
         stopping = not self._job_done and not self._finished
         self._cancel(closed=True)
         if stopping:
             self.exit(1)
+
+    def _hide(self) -> None:
+        """藏回去：下一次有話要說時 _reveal 會再叫出來。App 留在 Dock（頁面開著，要找得回來）。"""
+        with self._lock:
+            if not self._shown:
+                return
+            self._shown = False
+        self.window.hide()
 
     def _cancel(self, closed: bool = False) -> None:
         with self._lock:
@@ -263,19 +279,33 @@ class Popup:
         開之前回到一般的 App（在 Dock、在 ⌘-Tab 裡）：被別的視窗蓋住時要找得回來，模組在等它關。"""
         if self._dock:
             self._dock(True)
-        window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
-        closed = threading.Event()
-        window.events.closed += closed.set
-        closed.wait()
+        self._paging = True
+        try:
+            window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
+            closed = threading.Event()
+            window.events.closed += closed.set
+            closed.wait()
+        finally:
+            self._paging = False
 
     def choose_files(self) -> list[Path]:
-        """先叫出小視窗，再開原生的檔案選擇視窗；按取消回空清單。"""
+        """先叫出小視窗，再開原生的檔案選擇視窗；按取消回空清單。小視窗原本藏著的話，選完就藏回去。"""
+        hidden = not self._shown
         self._reveal()
-        found = self.window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True)
+        try:
+            found = self.window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True)
+        finally:
+            if hidden:
+                self._hide()
         return [Path(p) for p in found or ()]
 
     def choose_folder(self) -> Path | None:
-        """先叫出小視窗，再開原生的資料夾選擇視窗；按取消回 None。"""
+        """先叫出小視窗，再開原生的資料夾選擇視窗；按取消回 None。小視窗原本藏著的話，選完就藏回去。"""
+        hidden = not self._shown
         self._reveal()
-        found = self.window.create_file_dialog(self.webview.FileDialog.FOLDER)
+        try:
+            found = self.window.create_file_dialog(self.webview.FileDialog.FOLDER)
+        finally:
+            if hidden:
+                self._hide()
         return Path(found[0]) if found else None
