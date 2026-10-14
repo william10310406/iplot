@@ -3,7 +3,10 @@
 上方的模組列叫得到任何模組；任何模組寫 app.run("行事曆") 就叫得到它。行事曆的頁面只在它自己另開的程序裡開（D89）：
 在面板裡、或被別的模組叫到時，經「互通」的 run.py 另開一個程序；已經開著就叫到最前面。資料在 ~/Documents/行事曆
 （⚙ 可以換），一天一個資料夾 <年>/<月>/<日>/，Finder 看得到；「發佈」只產生 發佈/ 資料夾，不上傳。"""
+import base64
+import binascii
 import datetime
+import functools
 import os
 import pathlib
 import subprocess
@@ -36,7 +39,7 @@ import unicodedata
 
 import diary
 import pages
-import photos  # noqa: F401  （Api 的圖片方法在 Task 6 用到）
+import photos
 
 try:  # 在 iPLoT 裡一定在；直接 python3 iplot.py（IPLOT_DIRECT=1）時 core 不在 sys.path 上
     from core import scan
@@ -55,6 +58,13 @@ NO_INTEROP = "行事曆要用「互通」另開視窗：到工作坊裝「互通
 OPENED = "打開行事曆"
 ALREADY = "行事曆已經開著"
 ALREADY_BEHIND = "行事曆已經開著（在 Dock 上找月曆的圖示）"
+CANNOT_WRITE = "存不進去：{why}。字還在，等一下會再試"
+UNREADABLE = "讀不到這個檔（不是 UTF-8），沒有覆寫它：{path}"
+NOT_FOUND = "找不到「{name}」（可能被改名或刪掉了）"
+CANNOT_LAUNCH = "打不開「{name}」：{why}"
+NO_PUBLIC = "還沒有打開「公開」的日子"
+UPLOAD_NOTE = "上傳方式還沒設定：把『發佈』裡的東西放到網頁空間"
+PANEL = "主控面板"
 # macOS 14 起，自己不在最前面的 App 叫別人到最前面會被拒絕；不是 App 的一般 python 程序叫就可以（跟「主控面板」同一段）。
 # 被拒絕時交給這一小段在子程序裡叫：argv 是 [-c, lib 的路徑, pid]
 HELPER = ("import sys\n"
@@ -163,14 +173,30 @@ def open_or_focus(app, folder: pathlib.Path, *, environ=os.environ, ps=_ps, pope
     app.log(OPENED)
 
 
+def _guarded(method):
+    """Api 的公開方法：抓同一把鎖（pywebview 每個呼叫各開一條執行緒，app.open／trash 改的是整個程序的狀態）；
+    日期格式不對、寫不進去，變成 {"error": 一句話} 給頁面的狀態列，不丟 traceback、不叫 app.log。"""
+    @functools.wraps(method)
+    def call(self, *args):
+        with self._lock:
+            try:
+                return method(self, *args)
+            except ValueError as exc:
+                return {"error": str(exc)}
+            except OSError as exc:
+                return {"error": CANNOT_WRITE.format(why=exc.strerror or exc)}
+    return call
+
+
 class Api:
-    """頁面的 JS 用 pywebview.api.<方法> 呼叫的入口。自己的屬性一律底線開頭（頁面碰不到）；頁面不傳路徑。"""
+    """頁面的 JS 用 pywebview.api.<方法> 呼叫的入口（設計第 7 節的 15 個方法）。自己的屬性一律底線開頭（頁面碰不到）；
+    頁面傳進來的只有日期、名稱、圖片的檔名與內容，沒有一個方法收路徑；路徑一律是絕對的。"""
 
     def __init__(self, app, settings_file: pathlib.Path, *, default_root: pathlib.Path | None = None,
                  run=subprocess.run, popen=subprocess.Popen, platform: str = sys.platform, environ=os.environ,
                  today=datetime.date.today, dock_icon=set_dock_icon) -> None:
         self._app, self._settings = app, pathlib.Path(settings_file).absolute()
-        self._default_root = default_root or pathlib.Path.home() / "Documents" / "行事曆"
+        self._default_root = (default_root or pathlib.Path.home() / "Documents" / "行事曆").absolute()
         self._run, self._popen, self._platform, self._environ = run, popen, platform, environ
         self._today, self._dock_icon, self._icon_done = today, dock_icon, False
         self._lock = threading.Lock()
@@ -178,13 +204,174 @@ class Api:
     def _root(self) -> pathlib.Path:
         return diary.load_root(self._settings, self._default_root)
 
-    def month(self, ym):
-        with self._lock:
-            return {}
+    def _images(self, date: str) -> list[dict]:
+        folder = diary.day_folder(self._root(), date)
+        return [{"name": name, "src": photos.thumbnail_url(folder, name, run=self._run, platform=self._platform)}
+                for name in diary.read_day(self._root(), date)["images"]]
 
-    def rebuild(self):
+    def _settings_now(self) -> dict:
+        root = self._root()
+        return {"folder": str(root), "public_days": len(diary.all_days(root, public_only=True))}
+
+    def _scan(self, panel: bool) -> list:
+        """最上層（與 ROOTS）現在的模組，每次重掃（設計第 15 節第 7 條）；不含作業系統與行事曆自己。"""
+        if scan is None:
+            return []
+        roots = scan.roots_from_config(self._app.home, self._app.config.roots)
+        found = [m for group in scan.find_modules(roots) for m in group.modules]
+        skip = {SYSTEM_MODULE, HERE.name} | (set() if panel else {PANEL})
+        return [m for m in found if m.name not in skip]
+
+    @_guarded
+    def month(self, ym):
+        if not self._icon_done:
+            self._icon_done = True
+            if self._platform == "darwin" and ICON_FILE.exists():
+                self._dock_icon(ICON_FILE, self._platform)
+        root = self._root()
+        return {"ym": ym, "today": self._today().isoformat(), "days": diary.month_summary(root, ym), "folder": str(root)}
+
+    @_guarded
+    def year(self, y):
+        root, year = self._root(), diary.parse_year(y)
+        months = {}
+        for m in range(1, 13):
+            days = diary.month_summary(root, f"{year:04d}-{m:02d}")
+            if days:
+                months[f"{m:02d}"] = {d: info["mood"] for d, info in days.items()}
+        return {"y": y, "months": months}
+
+    @_guarded
+    def day(self, date):
+        return {**diary.read_day(self._root(), date), "images": self._images(date)}
+
+    @_guarded
+    def save(self, date, fields):
+        fields = fields if isinstance(fields, dict) else {}
+        wanted = {k: v for k, v in fields.items() if k in ("行程", "看到", "做了") and isinstance(v, str)}
+        if "mood" in fields or "note" in fields:
+            mood, note = fields.get("mood", ""), fields.get("note", "")
+            wanted["心情"] = diary.mood_text(mood if isinstance(mood, str) else "", note if isinstance(note, str) else "")
+        root = self._root()
+        result = diary.save_day(root, date, wanted, self._app.config.history_keep)
+        if result["changed"]:
+            pages.rebuild_after_save(root, date)
+        return {"saved": result["changed"], "unreadable": [UNREADABLE.format(path=p) for p in result["unreadable"].values()]}
+
+    @_guarded
+    def set_public(self, date, on):
+        root = self._root()
+        diary.set_public(root, date, bool(on))
+        pages.rebuild_after_save(root, date)
+        return {"public": diary.read_day(root, date)["public"]}
+
+    @_guarded
+    def add_image(self, date, name, data):
+        name = photos.clean_name(name)
+        folder = diary.day_folder(self._root(), date)
+        try:
+            raw = base64.b64decode(str(data).split(",", 1)[-1], validate=True)
+        except (binascii.Error, ValueError):
+            return {"images": self._images(date), "error": photos.NOT_IMAGE.format(name=name)}
+        saved, problem = photos.add_image(folder, name, raw, run=self._run, platform=self._platform)
+        if saved is not None:
+            pages.rebuild_after_save(self._root(), date)
+        return {"images": self._images(date), **({"error": problem} if problem else {})}
+
+    @_guarded
+    def remove_image(self, date, name):
+        name, root = photos.clean_name(name), self._root()
+        folder = diary.day_folder(root, date)
+        if name in diary.read_day(root, date)["images"]:
+            stem = pathlib.Path(name).stem
+            for path in sorted(folder.iterdir()):
+                same = path.name == name or (path.stem == stem and path.suffix.lower() in photos.HEIC)
+                if same and path.is_file():
+                    self._app.trash(path)
+                    (folder / photos.THUMBS / f"{path.name}.jpg").unlink(missing_ok=True)
+            pages.rebuild_after_save(root, date)
+        return {"images": self._images(date)}
+
+    @_guarded
+    def open_page(self, kind, key):
+        """「看網頁」：開那一頁的本機網頁；還沒產生過就先產生（便宜），再交給 app.open。"""
+        root = self._root()
+        if kind == "day":
+            path, build = diary.day_folder(root, key) / "index.html", lambda: pages.build_day(root, key)
+        elif kind == "month":
+            y, m = diary.parse_ym(key)
+            path, build = root / f"{y:04d}" / f"{m:02d}" / "index.html", lambda: pages.build_month(root, key)
+        elif kind == "year":
+            path, build = root / f"{diary.parse_year(key):04d}" / "index.html", lambda: pages.build_year(root, key)
+        elif kind == "index":
+            path, build = root / "index.html", lambda: pages.build_index(root)
+        else:
+            raise ValueError(f"日期格式不對：{kind}")
+        if not path.exists():
+            build()
+        self._app.open(path)
+        return {}
+
+    @_guarded
+    def publish(self):
+        root = self._root()
+        days = len(diary.all_days(root, public_only=True))
+        if not days:
+            return {"error": NO_PUBLIC}
+        problems = []
+        folder = pages.publish(root, run=self._run, platform=self._platform, problems=problems)
+        self._app.open(folder)
+        return {"days": days, "folder": str(folder), "problems": problems, "note": UPLOAD_NOTE}
+
+    @_guarded
+    def modules(self):
+        mods = self._scan(panel=False)
+        everything = [m.name for m in self._scan(panel=True)]
+        return {"modules": [{"name": m.name, "icon": m.icon or m.title[:1], "title": m.title} for m in mods],
+                "panel": everything.count(PANEL) == 1}
+
+    @_guarded
+    def launch(self, name):
+        wanted = unicodedata.normalize("NFC", str(name))
+        found = [m for m in self._scan(panel=True) if unicodedata.normalize("NFC", m.name) == wanted]
+        if len(found) != 1:
+            return {"error": NOT_FOUND.format(name=name)}
+        run_py = self._app.home.joinpath(*RUN_PY)
+        if not run_py.is_file():
+            return {"error": NO_INTEROP}
+        try:
+            self._popen([sys.executable, str(run_py), str(found[0].folder)],
+                        env={k: v for k, v in self._environ.items() if k != ENV}, start_new_session=True,
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            return {"error": CANNOT_LAUNCH.format(name=name, why=exc)}
+        return {}
+
+    @_guarded
+    def settings(self):
+        return self._settings_now()
+
+    def change_folder(self):
+        """換資料夾：選擇視窗開著的期間不拿鎖（頁面的存照樣能進來）；選了才抓鎖寫設定。不搬資料。"""
+        chosen = self._app.choose_folder()
         with self._lock:
-            return {"pages": len(pages.rebuild_all(self._root()))}
+            if chosen is not None:
+                try:
+                    diary.save_root(self._settings, pathlib.Path(chosen).absolute())
+                except OSError as exc:
+                    return {"error": CANNOT_WRITE.format(why=exc.strerror or exc)}
+            return self._settings_now()
+
+    @_guarded
+    def reveal_folder(self):
+        root = self._root()
+        root.mkdir(parents=True, exist_ok=True)
+        self._app.open(root)
+        return {}
+
+    @_guarded
+    def rebuild(self):
+        return {"pages": len(pages.rebuild_all(self._root()))}
 
 
 def run(app):

@@ -31,9 +31,12 @@ def _now() -> datetime.datetime:
 def parse_date(text: str) -> datetime.date:
     """YYYY-MM-DD → date；格式不對或不是真的日子（2026-02-30）丟 ValueError。"""
     m = DATE.fullmatch(text) if isinstance(text, str) else None
-    if m is None:
-        raise ValueError(f"日期格式不對：{text}")
-    return datetime.date(*(int(g) for g in m.groups()))
+    try:
+        if m is None:
+            raise ValueError
+        return datetime.date(*(int(g) for g in m.groups()))
+    except ValueError:
+        raise ValueError(f"日期格式不對：{text}") from None
 
 
 def parse_ym(text: str) -> tuple[int, int]:

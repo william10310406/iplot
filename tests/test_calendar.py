@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import types
 import unicodedata
 import urllib.parse
@@ -947,3 +948,266 @@ def test_icon_png_is_a_small_valid_png():                                   # �
 
 def test_set_dock_icon_is_mac_only(load):
     assert load("iplot").set_dock_icon(CALENDAR / "icon.png", platform="linux") is False
+
+
+# ── Api：設計第 7 節的 15 個方法；一把鎖、模組列自己掃（設計第 15 節第 4、7 條） ──
+
+FIFTEEN = {"month", "year", "day", "save", "set_public", "add_image", "remove_image", "open_page", "publish",
+           "modules", "launch", "settings", "change_folder", "reveal_folder", "rebuild"}
+
+
+def test_api_exposes_exactly_the_fifteen_methods(load):
+    assert {n for n in vars(load("iplot").Api) if not n.startswith("_")} == FIFTEEN
+
+
+def test_month_returns_today_the_days_and_the_folder(load, tmp_path):
+    a = api(load, tmp_path)
+    write_day(tmp_path / "資料", "2026-10-14", 心情="🙂\n", 行程="開會")
+    got = a.month("2026-10")
+    assert got == {"ym": "2026-10", "today": "2026-10-14", "folder": str((tmp_path / "資料").resolve()),
+                   "days": {"14": {"mood": "🙂", "first": "開會", "images": False, "public": False}}}
+
+
+def test_month_sets_the_dock_icon_once(load, tmp_path):                       # 設計第 15 節第 9 條（Task 0 Step 9 過了）
+    calls = []
+    a = api(load, tmp_path, dock_icon=lambda path, platform: calls.append((path, platform)) or True)
+    a.month("2026-10")
+    a.month("2026-11")
+    assert calls == [(CALENDAR / "icon.png", "darwin")]
+    b = api(load, tmp_path, platform="linux", dock_icon=never)
+    b.month("2026-10")
+
+
+def test_year_lists_moods_per_month(load, tmp_path):
+    a = api(load, tmp_path)
+    write_day(tmp_path / "資料", "2026-10-14", 心情="🙂\n", 行程="x")
+    write_day(tmp_path / "資料", "2026-03-02", 做了="y")
+    assert a.year("2026") == {"y": "2026", "months": {"03": {"02": ""}, "10": {"14": "🙂"}}}
+
+
+def test_day_returns_the_fields_and_thumbnails_as_data_urls(load, tmp_path):  # Task 0 Step 4 的退路
+    a = api(load, tmp_path)
+    folder = write_day(tmp_path / "資料", "2026-10-14", 行程="開會", 心情="😐\n普通")
+    (folder / "a.png").write_bytes(b"png")
+    got = a.day("2026-10-14")
+    assert (got["行程"], got["mood"], got["note"], got["public"]) == ("開會", "😐", "普通", False)
+    assert got["images"] == [{"name": "a.png", "src": "data:image/jpeg;base64,cG5n"}]
+    assert "file:" not in json.dumps(got)
+
+
+def test_save_writes_the_four_fields_and_rebuilds_the_pages(load, tmp_path):
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    got = a.save("2026-10-14", {"行程": "開會", "看到": "雲", "做了": "寫字", "mood": "🙂", "note": "好", "路徑": "/etc"})
+    assert got == {"saved": ["行程", "心情", "看到", "做了"], "unreadable": []}
+    day = load("diary").read_day(root, "2026-10-14")
+    assert (day["行程"], day["看到"], day["做了"], day["mood"], day["note"]) == ("開會", "雲", "寫字", "🙂", "好")
+    for page in ("2026/10/14/index.html", "2026/10/index.html", "2026/index.html", "index.html"):
+        assert (root / page).exists(), page
+    assert a.save("2026-10-14", {"行程": "開會"}) == {"saved": [], "unreadable": []}   # 沒給 mood/note：心情不動
+    assert load("diary").read_day(root, "2026-10-14")["mood"] == "🙂"
+
+
+def test_save_reports_unreadable_fields_as_sentences(load, tmp_path):
+    a = api(load, tmp_path)
+    folder = write_day(tmp_path / "資料", "2026-10-14")
+    (folder / "做了.txt").write_bytes(b"\xff\xfe")
+    got = a.save("2026-10-14", {"做了": "x"})
+    assert got == {"saved": [], "unreadable": [f"讀不到這個檔（不是 UTF-8），沒有覆寫它：{(folder / '做了.txt').resolve()}"]}
+
+
+def test_save_into_a_missing_or_read_only_folder_is_one_sentence_and_keeps_the_text(load, tmp_path):  # Review Focus 5
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    root.mkdir()
+    root.chmod(0o500)                     # 唯讀：子資料夾建不起來（跟外接硬碟拔掉、權限改了同一條路）
+    try:
+        got = a.save("2026-10-14", {"行程": "x"})
+    finally:
+        root.chmod(0o700)
+    assert got["error"].startswith("存不進去：") and got["error"].endswith("。字還在，等一下會再試")
+    assert list(root.iterdir()) == [] and a._app.logs == []
+
+
+def test_save_keeps_history_keep_versions_from_app_config(load, tmp_path):
+    a = api(load, tmp_path, history_keep=2)
+    for text in ("v1", "v2", "v3", "v4"):
+        a.save("2026-10-14", {"行程": text})
+    assert len(list((tmp_path / "資料/2026/10/14/.history").glob("行程-*.txt"))) == 2
+
+
+def test_dates_are_checked_by_regex_and_datetime_at_the_api(load, tmp_path):
+    a = api(load, tmp_path)
+    for call in (lambda: a.day("2026-02-30"), lambda: a.day("2026-2-3"), lambda: a.month("2026-13"),
+                 lambda: a.year("26"), lambda: a.save("../../etc", {"行程": "x"}), lambda: a.set_public(None, True)):
+        assert call()["error"].startswith("日期格式不對：")
+    assert a.day("2024-02-29")["date"] == "2024-02-29"
+    assert not (tmp_path / "資料").exists()
+
+
+def test_api_calls_do_not_overlap(load, tmp_path, monkeypatch):                     # Review Focus 2、第 4 條
+    spans, d = [], load("diary")
+
+    def slow_open(path):
+        t = time.perf_counter()
+        time.sleep(0.2)
+        spans.append(("open", t, time.perf_counter()))
+
+    real = d.save_day
+    monkeypatch.setattr(d, "save_day", lambda *a, **k: (spans.append(("save", time.perf_counter(), None)), real(*a, **k))[1])
+    a = api(load, tmp_path)
+    a._app.open = slow_open
+    write_day(tmp_path / "資料", "2026-10-14", 行程="x")
+    a.rebuild()
+    t1, _ = in_thread(lambda: a.open_page("day", "2026-10-14"))
+    t2, _ = in_thread(lambda: (time.sleep(0.05), a.save("2026-10-14", {"行程": "y"}))[1])
+    t1.join(3)
+    t2.join(3)
+    [open_span] = [s for s in spans if s[0] == "open"]
+    [save_span] = [s for s in spans if s[0] == "save"]
+    assert save_span[1] >= open_span[2]
+
+
+def test_change_folder_releases_the_lock_while_the_dialog_is_open(load, tmp_path):   # 第 4 條
+    a, answer = api(load, tmp_path), threading.Event()
+    a._app.choose_folder = lambda: (answer.wait(3), tmp_path / "新")[1]
+    t, box = in_thread(a.change_folder)
+    time.sleep(0.05)
+    start = time.perf_counter()
+    assert a.save("2026-10-14", {"行程": "舊資料夾"}) == {"saved": ["行程"], "unreadable": []}
+    assert time.perf_counter() - start < 0.5
+    answer.set()
+    t.join(3)
+    assert box == [{"folder": str((tmp_path / "新").resolve()), "public_days": 0}]
+    assert (tmp_path / "資料/2026/10/14/行程.txt").exists() and a.settings()["folder"] == str((tmp_path / "新").resolve())
+
+
+def test_api_writes_absolute_paths_even_when_cwd_changes(load, tmp_path, monkeypatch):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    monkeypatch.chdir(tmp_path / "a")
+    a = load("iplot").Api(CalApp(tmp_path / "iPLoT"), pathlib_rel("設定.json"), default_root=pathlib_rel("資料"),
+                          run=fake_sips_ok, popen=never, platform="darwin", environ={})
+    monkeypatch.chdir(tmp_path / "b")     # app.open 跑「作業系統」時 cwd 會暫時換掉
+    a.save("2026-10-14", {"行程": "x"})
+    a.change_folder()
+    assert (tmp_path / "a/資料/2026/10/14/行程.txt").exists() and not (tmp_path / "b/資料").exists()
+
+
+def pathlib_rel(name):
+    return Path(name)
+
+
+def test_set_public_toggles_and_rebuilds(load, tmp_path):
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    write_day(root, "2026-10-14", 行程="x")
+    assert a.set_public("2026-10-14", True) == {"public": True} and (root / "2026/10/14/公開").exists()
+    assert (root / "2026/10/14/index.html").exists()
+    assert a.set_public("2026-10-14", False) == {"public": False} and not (root / "2026/10/14/公開").exists()
+
+
+def test_add_image_decodes_base64_and_rejects_junk(load, tmp_path):
+    import base64
+    a = api(load, tmp_path)
+    got = a.add_image("2026-10-14", "a.jpg", "data:image/jpeg;base64," + base64.b64encode(gps_jpeg()).decode())
+    assert [i["name"] for i in got["images"]] == ["a.jpg"] and "error" not in got
+    assert (tmp_path / "資料/2026/10/14/a.jpg").read_bytes() == gps_jpeg() and (tmp_path / "資料/2026/10/14/index.html").exists()
+    assert a.add_image("2026-10-14", "b.jpg", "not base64!")["error"] == "b.jpg：不是圖片"
+    big = base64.b64encode(b"\0" * (30 * 1024 * 1024 + 1)).decode()
+    assert a.add_image("2026-10-14", "c.jpg", big)["error"] == "c.jpg：太大（超過 30 MB）"
+
+
+def test_remove_image_trashes_the_jpg_and_the_heic_together(load, tmp_path):
+    a = api(load, tmp_path)
+    folder = write_day(tmp_path / "資料", "2026-10-14", 行程="x")
+    for name in ("a.jpg", "a.HEIC", "b.png"):
+        (folder / name).write_bytes(b"x")
+    a.day("2026-10-14")                                       # 做出縮圖
+    assert (folder / ".縮圖" / "a.jpg.jpg").exists()
+    got = a.remove_image("2026-10-14", "a.jpg")
+    assert sorted(p.name for p in a._app.trashed) == ["a.HEIC", "a.jpg"] and [i["name"] for i in got["images"]] == ["b.png"]
+    assert not (folder / ".縮圖" / "a.jpg.jpg").exists()
+    a.remove_image("2026-10-14", "../b.png")                  # 只取 basename：拿掉的是這一天的 b.png，不是別處的
+    a.remove_image("2026-10-14", "沒有.jpg")
+    assert sorted(p.name for p in a._app.trashed) == ["a.HEIC", "a.jpg", "b.png"]
+
+
+def test_open_page_builds_a_missing_page_then_opens_it(load, tmp_path):
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    write_day(root, "2026-10-14", 行程="x")
+    assert a.open_page("day", "2026-10-14") == {} and a._app.opened == [root.resolve() / "2026/10/14/index.html"]
+    assert (root / "2026/10/14/index.html").exists()
+    a.open_page("month", "2026-10")
+    a.open_page("year", "2026")
+    a.open_page("index", "")
+    assert a._app.opened[1:] == [root.resolve() / p for p in ("2026/10/index.html", "2026/index.html", "index.html")]
+    assert "error" in a.open_page("x", "2026") and "error" in a.open_page("day", "2026-13-01") and len(a._app.opened) == 4
+
+
+def test_publish_requires_a_public_day_then_opens_the_folder(load, tmp_path):
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    write_day(root, "2026-10-14", 行程="x")
+    assert a.publish() == {"error": "還沒有打開「公開」的日子"} and a._app.opened == []
+    a.set_public("2026-10-14", True)
+    got = a.publish()
+    assert got == {"days": 1, "folder": str(root.resolve() / "發佈"), "problems": [],
+                   "note": "上傳方式還沒設定：把『發佈』裡的東西放到網頁空間"}
+    assert a._app.opened == [root.resolve() / "發佈"] and a.settings()["public_days"] == 1
+
+
+def test_modules_excludes_the_os_module_and_itself_and_flags_the_panel(load, home, tmp_path):
+    for name in ("開工", "作業系統", "行事曆", "主控面板"):
+        conftest.make_module(home / "modules", name)
+    a = api(load, tmp_path, home=home)
+    assert a.modules() == {"modules": [{"name": "開工", "icon": "開", "title": "開工"}], "panel": True}
+    conftest.make_module(home.parent, "主控面板")             # 上一層（ROOTS 的 ".."）也有一個 → 不知道是哪一個
+    assert a.modules()["panel"] is False
+
+
+def test_modules_sees_a_module_installed_after_the_page_opened(load, home, tmp_path):    # 第 7 條
+    a = api(load, tmp_path, home=home)
+    assert a.modules()["modules"] == []
+    conftest.make_module(home / "modules", "新的", 'ICON = "🌱"\ndef run(app):\n    pass\n')
+    assert a.modules()["modules"] == [{"name": "新的", "icon": "🌱", "title": "新的"}]
+
+
+def test_launch_runs_run_py_without_the_env_and_only_for_known_names(load, home, tmp_path):
+    conftest.make_module(home / "modules", "開工")
+    conftest.make_module(home / "modules", "主控面板")
+    run_py, launched = with_run_py(home), []
+    a = api(load, tmp_path, home=home, popen=lambda argv, **kw: launched.append((argv, kw)),
+            environ={"IPLOT_CALENDAR": "1", "HOME": "/h"})
+    assert a.launch("開工") == {} and launched[0][0] == [sys.executable, str(run_py), str(home / "modules" / "開工")]
+    assert launched[0][1]["env"] == {"HOME": "/h"} and launched[0][1]["start_new_session"] is True
+    assert a.launch("主控面板") == {} and len(launched) == 2           # 「圖示面板」那顆鈕
+    assert a.launch("沒有") == {"error": "找不到「沒有」（可能被改名或刪掉了）"} and len(launched) == 2
+    assert a.launch("作業系統")["error"] == "找不到「作業系統」（可能被改名或刪掉了）"
+    conftest.make_module(home / "modules", "後來的")                   # 每點一次重掃一次
+    assert a.launch("後來的") == {} and len(launched) == 3
+
+
+def test_settings_change_folder_and_reveal(load, tmp_path):
+    a = api(load, tmp_path)
+    assert a.settings() == {"folder": str((tmp_path / "資料").resolve()), "public_days": 0}
+    assert a.change_folder() == a.settings() and not (tmp_path / "設定.json").exists()   # 按了取消
+    a._app.folder_answer = tmp_path / "新"
+    assert a.change_folder()["folder"] == str((tmp_path / "新").resolve())
+    assert json.loads((tmp_path / "設定.json").read_text(encoding="utf-8")) == {"資料夾": str(tmp_path / "新")}
+    assert a.reveal_folder() == {} and a._app.opened == [(tmp_path / "新").resolve()] and (tmp_path / "新").is_dir()
+
+
+def test_rebuild_counts_pages(load, tmp_path):
+    a = api(load, tmp_path)
+    write_day(tmp_path / "資料", "2026-10-14", 行程="x")
+    write_day(tmp_path / "資料", "2026-10-15", 行程="y")
+    assert a.rebuild() == {"pages": 2 + 1 + 1 + 1}
+
+
+def test_api_never_logs_while_the_page_is_open(load, home, tmp_path):
+    a = api(load, tmp_path, home=home)
+    a.save("2026-10-14", {"行程": "x"})
+    a.add_image("2026-10-14", "壞.jpg", "!!")
+    a.open_page("x", "")
+    a.publish()
+    a.launch("沒有")
+    a.month("2026-10")
+    a.day("2026-10-14")
+    assert a._app.logs == []
