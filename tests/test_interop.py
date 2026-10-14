@@ -7,6 +7,7 @@ import dataclasses
 import importlib
 import importlib.util
 import inspect
+import json
 import os
 import plistlib
 import re
@@ -453,12 +454,23 @@ def test_popup_html_defines_every_entry_python_calls():
 
 # ── snippet：把那一小段補進現有的模組（每個模組一次，先存快照） ──
 
-def test_snippet_text_is_the_core_template_block(load):
+SNIPPET_SHA256 = "0dbf45c3d39d9630d3f1e3d4a8a3f569dc03da18e7bd4bbb09c8c0c93f7364ba"  # 0.5.1 的那一小段（22 行），一字不改
+
+
+def test_snippet_text_is_fixed_and_no_longer_comes_from_the_core_template(load):
+    """那一小段的文字是「互通」自己的（D84 修訂）：一字不改，已經加過的模組才認得出來；核心的範本不再帶它。"""
+    import hashlib
+
     from core.text import TEMPLATE
-    text = load("snippet").TEXT
-    assert text in TEMPLATE and text.startswith("# ── 互通 ──") and text.endswith("# ── 互通 ──\n")
-    end = "# ── 互通 ──\n"
-    assert TEMPLATE[TEMPLATE.index(end[:-1]):TEMPLATE.rindex(end) + len(end)] == text
+    s = load("snippet")
+    assert hashlib.sha256(s.TEXT.encode("utf-8")).hexdigest() == SNIPPET_SHA256 and len(s.TEXT.splitlines()) == 22
+    assert s.TEXT.startswith("# ── 互通 ──") and s.TEXT.endswith("# ── 互通 ──\n") and s.MARK not in TEMPLATE
+    assert "core.text" not in (INTEROP / "snippet.py").read_text(encoding="utf-8")
+
+
+def test_snippet_text_reads_on_python_3_8(load):
+    """加了那一小段的模組可能被舊 Python 直接執行：那一段要在 3.8 讀得懂（換 Python 的事交給 run.py）。"""
+    ast.parse(load("snippet").TEXT, feature_version=(3, 8))
 
 
 def test_where_goes_after_docstring_future_and_leading_imports(load):
@@ -1447,3 +1459,78 @@ def test_choose_folder_keeps_the_busy_popup_up_after_a_slow_dialog(popup):   # �
         return 0 if w.shown else 1
 
     assert p.run(job) == 0
+
+
+# ── ＋ 建的新模組不帶那一小段：在「互通」按「加上」之後才能直接執行（D84 修訂） ──
+
+def _plus_tree(tmp_path, with_run_py):
+    """tmp/我的 iPLoT/modules/A 是用 ＋（core.create.new_module）建的模組；with_run_py 時放一個假的 modules/互通/run.py：
+    把收到的參數寫成 argv.json、以 3 結束。"""
+    from core.create import new_module
+    home = tmp_path / "我的 iPLoT"
+    (home / "modules").mkdir(parents=True)
+    (home / "main.py").write_text("", encoding="utf-8")
+    folder = new_module(home / "modules", "A")
+    if with_run_py:
+        run = home / "modules" / "互通" / "run.py"
+        run.parent.mkdir(parents=True)
+        run.write_text("import json, sys\nopen(sys.argv[0] + '.argv.json', 'w').write(json.dumps(sys.argv[1:]))\n"
+                       "sys.exit(3)\n", encoding="utf-8")
+    return home, folder
+
+
+def test_a_module_made_with_plus_is_offered_for_adding_the_snippet(load, tmp_path):
+    home, folder = _plus_tree(tmp_path, with_run_py=True)
+    got = load_button().candidates(home, DEFAULT_CONFIG)
+    assert [info.file for info, _ in got] == [folder / "iplot.py"]
+
+
+def test_after_adding_python3_iplot_py_hands_folder_and_args_to_run_py(load, tmp_path):
+    home, folder = _plus_tree(tmp_path, with_run_py=True)
+    assert load("snippet").add(folder / "iplot.py", 20)
+    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True)
+    argv = json.loads((home / "modules" / "互通" / "run.py.argv.json").read_text(encoding="utf-8"))
+    assert r.returncode == 3 and argv == [str(folder), "f.txt"]
+
+
+def test_an_added_snippet_does_nothing_inside_iplot(load, home, monkeypatch):
+    from conftest import FakeView
+
+    from core.core import Core
+    from core.create import new_module
+    load("snippet").add(new_module(home / "modules", "A") / "iplot.py", 20)
+    monkeypatch.setattr(subprocess, "call", lambda *a, **k: pytest.fail("在 iPLoT 裡不該交出去"))
+    c = Core(home, DEFAULT_CONFIG, FakeView())
+    c.rescan()
+    assert c.press(next(m for m in c.all_modules() if m.name == "A")).ok
+
+
+def test_an_added_snippet_without_interop_runs_it_as_a_plain_script(load, tmp_path):
+    """找不到「互通」：說一句，然後照一般的 python3 iplot.py 跑。"""
+    _, folder = _plus_tree(tmp_path, with_run_py=False)
+    f = folder / "iplot.py"
+    f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
+    load("snippet").add(f, 20)
+    r = subprocess.run([sys.executable, "iplot.py"], cwd=folder, capture_output=True, text=True)
+    assert r.returncode == 0 and "找不到 iPLoT 的「互通」" in r.stderr and "最外層跑了" in r.stdout
+
+
+def test_an_added_snippet_with_iplot_direct_never_hands_over(load, tmp_path):
+    """IPLOT_DIRECT=1（例如在編輯器裡除錯）：就算找得到「互通」也不交出去，照一般腳本跑、不說話。"""
+    home, folder = _plus_tree(tmp_path, with_run_py=True)
+    f = folder / "iplot.py"
+    f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
+    load("snippet").add(f, 20)
+    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True,
+                       env={**os.environ, "IPLOT_DIRECT": "1"})
+    assert r.returncode == 0 and "最外層跑了" in r.stdout and r.stderr == ""
+    assert not (home / "modules" / "互通" / "run.py.argv.json").exists()
+
+
+def test_an_added_snippet_finds_iplot_from_beside_it(load, tmp_path):
+    from core.create import new_module
+    _plus_tree(tmp_path, with_run_py=True)
+    beside = new_module(tmp_path, "旁邊的模組")            # 跟 iPLoT 資料夾同一層（ROOTS 的 ".."）
+    load("snippet").add(beside / "iplot.py", 20)
+    r = subprocess.run([sys.executable, "iplot.py"], cwd=beside, capture_output=True, text=True)
+    assert r.returncode == 3

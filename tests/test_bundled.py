@@ -351,9 +351,10 @@ CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "互�
 
 @pytest.mark.parametrize("name", CARRY)
 def test_repo_modules_carry_the_interop_snippet(name):
-    from core.text import TEMPLATE
-    block = TEMPLATE[TEMPLATE.index("# ── 互通 ──"):TEMPLATE.rindex("# ── 互通 ──\n") + len("# ── 互通 ──\n")]
-    assert block in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("snippet_text", MODULES / "互通" / "snippet.py")
+    snippet = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(snippet)
+    assert snippet.TEXT in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("name", ["作業系統", "更新", "工作坊"])

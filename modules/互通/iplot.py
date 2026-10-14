@@ -93,7 +93,7 @@ def status(home: pathlib.Path, config, python: str, folder: pathlib.Path) -> dic
             total += 1
         reason, text = sync.why_not(info, roots), _read(info.file)
         if text is not None and snippet.has(text) and reason != "在 ROOTS 另外加的資料夾裡":
-            direct += 1  # 自己帶著那一小段（＋ 的範本、工作坊裝來的新版、按過「加上」的）
+            direct += 1  # 自己帶著那一小段（工作坊裝來的新版、按過「加上」的）
         elif info.file in can:
             listed.append({"name": name, "path": str(info.file)})
         else:
