@@ -11,6 +11,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 MAX_BYTES = 30 * 1024 * 1024
@@ -172,17 +173,16 @@ def strip_metadata(src: Path, dst: Path) -> None:
 
 
 def public_copy(src: Path, dst: Path, *, run=subprocess.run, platform: str = sys.platform) -> None:
-    """公開版的一張圖：macOS 上 JPEG／PNG 先縮到長邊 1600，再拿掉中繼資料；GIF 與其他系統只拿掉中繼資料。"""
+    """公開版的一張圖：macOS 上 JPEG／PNG 先縮到長邊 1600，再拿掉中繼資料；GIF 與其他系統只拿掉中繼資料。
+    縮小的那一張還帶著中繼資料，所以放在系統的暫存資料夾、不放在 發佈/ 裡：中途被中斷，發佈/ 裡也只會有拿掉過的檔。"""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
     source = Path(src)
-    tmp = dst.with_name(f".{dst.name}.small-{os.getpid()}{dst.suffix}")
-    try:
-        if platform == "darwin" and source.suffix.lower() in (".jpg", ".jpeg", ".png") and shrink(source, tmp, run):
-            source = tmp
+    with tempfile.TemporaryDirectory(prefix="iplot-行事曆-") as work:
+        small = Path(work) / f"small{dst.suffix}"
+        if platform == "darwin" and source.suffix.lower() in (".jpg", ".jpeg", ".png") and shrink(source, small, run):
+            source = small
         strip_metadata(source, dst)
-    finally:
-        tmp.unlink(missing_ok=True)
 
 
 def thumbnail(src: Path, dst: Path, run=subprocess.run) -> bool:

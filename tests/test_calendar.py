@@ -1306,3 +1306,23 @@ def test_page_html_stays_on_the_day_when_saving_fails():                     # �
     """存不進去時，換檢視、換一天、發佈、換資料夾都先停下來（字留在輸入框裡）；離開日檢視之後 day 清掉，不會再去讀不存在的輸入框。"""
     html_text = page_html()
     assert html_text.count("if (!(await saveDay())) return") >= 3 and "day = null" in html_text
+
+
+def test_public_copy_never_puts_an_unstripped_file_inside_the_publish_folder(load, tmp_path, monkeypatch):
+    """縮小之後、拿掉中繼資料之前被中斷（這裡丟例外；真的會是程序被殺掉、finally 來不及跑）：
+    那一刻與之後，發佈/ 底下（包括隱藏檔）都沒有帶 APP1 的檔——中斷之後直接把資料夾拖上去也不會洩漏拍攝地點。"""
+    p = load("photos")
+    src, out = tmp_path / "資料" / "a.jpg", tmp_path / "資料" / "發佈"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(gps_jpeg())
+    dirty = lambda: [f for f in out.rglob("*") if f.is_file() and b"\xff\xe1" in f.read_bytes()]  # noqa: E731
+    seen = []
+
+    def interrupted(source, dst):
+        seen.append(dirty())
+        raise RuntimeError("中斷")
+
+    monkeypatch.setattr(p, "strip_metadata", interrupted)
+    with pytest.raises(RuntimeError):
+        p.public_copy(src, out / "2026" / "10" / "10" / "a.jpg", run=fake_sips_ok, platform="darwin")
+    assert seen == [[]] and dirty() == []
