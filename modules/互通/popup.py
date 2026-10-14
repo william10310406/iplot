@@ -143,9 +143,9 @@ class Popup:
 
     def _closing(self) -> bool | None:
         """使用者關掉小視窗：等著的對話框當作取消；模組還沒跑完就是「停止」，結束這個程序（結束碼 1）。
-        app.page 的視窗開著時例外：只把小視窗藏起來（回 False，pywebview 就不關它），之後有話還能再出來；
-        要結束程序請按「停止」。"""
-        if self._paging:
+        app.page 的視窗開著、小視窗也看得見時例外：只把它藏起來（回 False，pywebview 就不關它），之後有話還能再出來。
+        藏著的小視窗被問到，只會是整個 App 要結束（⌘Q、登出、關機：pywebview 會問每一個視窗）——那時不能擋。"""
+        if self._paging and self._shown:
             self._cancel()
             self._hide()
             return False

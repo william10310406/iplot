@@ -1400,3 +1400,15 @@ def test_choose_folder_leaves_the_window_up_when_it_was_already_showing(popup):
         return p.choose_folder()
 
     assert p.run(job) == Path("/d") and popup.wv.windows[0].shown
+
+
+def test_quitting_the_app_while_a_page_is_open_is_not_refused_by_the_hidden_popup(popup):   # 審查 C1
+    """結束 App（⌘Q、登出、關機）時 pywebview 問每一個視窗要不要關，藏著的小視窗也問；它回 False 就整個擋下來。"""
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
+    until(lambda: len(popup.wv.windows) == 2)
+    w = popup.wv.windows[0]
+    assert w.shown is False
+    assert w.events.closing.handlers[0]() is not False
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
