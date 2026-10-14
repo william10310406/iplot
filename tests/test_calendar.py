@@ -316,3 +316,140 @@ def test_settings_default_and_roundtrip(load, tmp_path):
     assert d.load_root(settings, default) == (tmp_path / "別處").resolve()
     settings.write_text("{壞掉", encoding="utf-8")
     assert d.load_root(settings, default) == default.resolve()
+
+
+# ── photos：收進來、HEIC 轉 JPG、縮圖、公開版縮小並拿掉中繼資料 ──
+
+def test_clean_name_takes_the_basename_and_drops_bad_characters(load):
+    p = load("photos")
+    assert p.clean_name("/Users/x/a:b.jpg") == "ab.jpg" and p.clean_name("..隱藏.png") == "隱藏.png"
+    assert p.clean_name("C:\\x\\y.JPG") == "y.JPG" and p.clean_name("") == "圖片" and p.clean_name("a\x00\nb.jpg") == "ab.jpg"
+
+
+def test_duplicate_names_get_a_number(load, tmp_path):
+    p = load("photos")
+    (tmp_path / "a.jpg").write_bytes(b"x")
+    assert p.unique_name(tmp_path, "a.jpg") == "a 2.jpg" and p.unique_name(tmp_path, "A.JPG") == "A 2.JPG"
+    (tmp_path / "a 2.jpg").write_bytes(b"x")
+    assert p.unique_name(tmp_path, "a.jpg") == "a 3.jpg"
+    (tmp_path / "b.heic").write_bytes(b"x")
+    assert p.unique_name(tmp_path, "b.jpg") == "b 2.jpg" and p.unique_name(tmp_path, "c.png") == "c.png"
+
+
+def test_add_image_rejects_too_big_and_non_images(load, tmp_path):
+    p = load("photos")
+    assert p.add_image(tmp_path, "x.jpg", b"\0" * (30 * 1024 * 1024 + 1)) == (None, "x.jpg：太大（超過 30 MB）")
+    assert p.add_image(tmp_path, "x.txt", b"hi") == (None, "x.txt：不是圖片")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_add_image_writes_atomically(load, tmp_path, monkeypatch):
+    p, seen, real = load("photos"), [], os.replace
+    monkeypatch.setattr(os, "replace", lambda src, dst: (seen.append((Path(src).name, Path(dst))), real(src, dst))[1])
+    assert p.add_image(tmp_path, "a.jpg", b"jpgdata") == ("a.jpg", None)
+    assert seen == [(f".a.jpg.tmp-{os.getpid()}", tmp_path / "a.jpg")] and (tmp_path / "a.jpg").read_bytes() == b"jpgdata"
+
+
+def test_add_image_creates_the_day_folder(load, tmp_path):
+    p = load("photos")
+    folder = tmp_path / "2026" / "10" / "14"
+    assert p.add_image(folder, "a.jpg", b"x") == ("a.jpg", None) and (folder / "a.jpg").exists()
+
+
+def test_heic_calls_sips_with_list_arguments(load, tmp_path):
+    p, calls = load("photos"), []
+
+    def run(argv, **kw):
+        calls.append((argv, kw))
+        Path(argv[-1]).write_bytes(b"jpg")
+        return types.SimpleNamespace(returncode=0)
+
+    assert p.add_image(tmp_path, "IMG_1.HEIC", b"heic", run=run, platform="darwin") == ("IMG_1.HEIC", None)
+    assert calls[0][0] == ["sips", "-s", "format", "jpeg", str(tmp_path / "IMG_1.HEIC"), "--out", str(tmp_path / "IMG_1.jpg")]
+    assert "shell" not in calls[0][1] and (tmp_path / "IMG_1.HEIC").exists() and (tmp_path / "IMG_1.jpg").exists()
+
+
+def test_heic_that_will_not_convert_keeps_the_original_and_says_so(load, tmp_path):
+    p = load("photos")
+    run = lambda argv, **kw: types.SimpleNamespace(returncode=1)  # noqa: E731
+    assert p.add_image(tmp_path, "IMG_1.HEIC", b"heic", run=run, platform="darwin") == (
+        "IMG_1.HEIC", "IMG_1.HEIC：轉不成 JPG，Chrome 看不到")
+    assert (tmp_path / "IMG_1.HEIC").exists() and not (tmp_path / "IMG_1.jpg").exists()
+
+
+def test_heic_elsewhere_is_kept_and_says_so(load, tmp_path):
+    p = load("photos")
+    assert p.add_image(tmp_path, "a.heif", b"heif", run=never, platform="linux") == ("a.heif", "a.heif：轉不成 JPG，Chrome 看不到")
+
+
+def test_jpeg_strip_removes_app1_and_app13(load, tmp_path):
+    p = load("photos")
+    src, dst = tmp_path / "gps.jpg", tmp_path / "clean.jpg"
+    src.write_bytes(gps_jpeg())
+    p.strip_metadata(src, dst)
+    out = dst.read_bytes()
+    assert b"\xff\xe1" not in out and b"\xff\xed" not in out and b"Exif" not in out and b"Photoshop" not in out
+    assert out[:2] == b"\xff\xd8" and out[-2:] == b"\xff\xd9" and b"JFIF" in out and b"\xff\xda" in out
+
+
+def test_png_strip_removes_text_and_exif_chunks(load, tmp_path):
+    p = load("photos")
+    src, dst = tmp_path / "a.png", tmp_path / "b.png"
+    src.write_bytes(png_with_text())
+    p.strip_metadata(src, dst)
+    out = dst.read_bytes()
+    assert out[:8] == b"\x89PNG\r\n\x1a\n" and all(k in out for k in (b"IHDR", b"IDAT", b"IEND"))
+    assert not any(k in out for k in (b"tEXt", b"iTXt", b"zTXt", b"eXIf", b"secret", b"Exif"))
+
+
+def test_gif_is_copied_as_is_and_others_are_refused(load, tmp_path):
+    p = load("photos")
+    (tmp_path / "a.gif").write_bytes(b"GIF89a\x01\x00\x01\x00rest")
+    p.strip_metadata(tmp_path / "a.gif", tmp_path / "b.gif")
+    assert (tmp_path / "b.gif").read_bytes() == b"GIF89a\x01\x00\x01\x00rest"
+    (tmp_path / "x.gif").write_bytes(b"BM....")
+    with pytest.raises(ValueError):
+        p.strip_metadata(tmp_path / "x.gif", tmp_path / "y.gif")
+    assert not (tmp_path / "y.gif").exists()
+
+
+def test_public_copy_shrinks_on_macos_then_strips(load, tmp_path):
+    p, calls = load("photos"), []
+    src = tmp_path / "a.jpg"
+    src.write_bytes(gps_jpeg())
+    p.public_copy(src, tmp_path / "out" / "a.jpg", run=lambda argv, **kw: (calls.append(argv), fake_sips_ok(argv))[1],
+                  platform="darwin")
+    assert calls[0][:3] == ["sips", "-Z", "1600"] and calls[0][3] == str(src) and calls[0][4] == "--out"
+    assert b"\xff\xe1" not in (tmp_path / "out" / "a.jpg").read_bytes()
+    p.public_copy(src, tmp_path / "out2" / "a.jpg", run=never, platform="linux")
+    assert b"\xff\xe1" not in (tmp_path / "out2" / "a.jpg").read_bytes() and not list((tmp_path / "out").glob(".*"))
+
+
+def test_thumbnail_is_made_once_with_sips_and_comes_back_as_a_data_url(load, tmp_path):   # Task 0 Step 4 的退路
+    p, calls = load("photos"), []
+    (tmp_path / "a.png").write_bytes(b"png")
+
+    def run(argv, **kw):
+        calls.append(argv)
+        Path(argv[-1]).write_bytes(b"thumb")
+        return types.SimpleNamespace(returncode=0)
+
+    url = p.thumbnail_url(tmp_path, "a.png", run=run, platform="darwin")
+    thumb = tmp_path / ".縮圖" / "a.png.jpg"
+    assert calls == [["sips", "-s", "format", "jpeg", "-Z", "320", str(tmp_path / "a.png"), "--out", str(thumb)]]
+    assert url == "data:image/jpeg;base64,dGh1bWI=" and p.thumbnail_url(tmp_path, "a.png", run=never, platform="darwin") == url
+    os.utime(tmp_path / "a.png", (thumb.stat().st_mtime + 10,) * 2)       # 原圖比縮圖新 → 重做
+    p.thumbnail_url(tmp_path, "a.png", run=run, platform="darwin")
+    assert len(calls) == 2
+
+
+def test_thumbnail_without_sips_uses_small_originals_only(load, tmp_path):
+    p = load("photos")
+    (tmp_path / "a.png").write_bytes(b"png")
+    (tmp_path / "b.heic").write_bytes(b"heic")
+    (tmp_path / "c.jpg").write_bytes(b"\0" * (5 * 1024 * 1024 + 1))
+    assert p.thumbnail_url(tmp_path, "a.png", run=never, platform="linux") == "data:image/png;base64,cG5n"
+    assert p.thumbnail_url(tmp_path, "b.heic", run=never, platform="linux") is None
+    assert p.thumbnail_url(tmp_path, "c.jpg", run=never, platform="linux") is None
+    failing = lambda argv, **kw: types.SimpleNamespace(returncode=1)  # noqa: E731
+    assert p.thumbnail_url(tmp_path, "b.heic", run=failing, platform="darwin") is None
