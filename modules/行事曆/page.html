@@ -329,6 +329,19 @@ async function loadModules() {
   $("panel").hidden = !r.panel;
 }
 
+// 行事曆整天開著：視窗重新拿到焦點時重掃模組列，也重新算今天（過了午夜就換掉「今天」）
+function onFocus() {
+  loadModules();
+  refreshToday();
+}
+
+function refreshToday() {
+  const now = ymd(new Date());
+  if (now === todayText) return;
+  todayText = now;
+  if (view !== "day") go(view);  // 月、年檢視重畫，今天的標記換過來；日檢視正在打字，不重畫（「今天」鈕已經用新的日子）
+}
+
 async function publish() {
   if (!(await saveDay())) return;
   const s = await call("settings");
@@ -388,7 +401,7 @@ function wire() {
   $("rebuild").addEventListener("click", async () => { const r = await call("rebuild"); if (!r.error) say("重建了 " + r.pages + " 頁"); });
   $("panel").addEventListener("click", () => call("launch", "主控面板"));
   $("files").addEventListener("change", (e) => { if (day) addFiles(e.target.files); e.target.value = ""; });
-  window.addEventListener("focus", loadModules);  // 視窗重新拿到焦點時重掃模組列（設計第 15 節第 7 條）
+  window.addEventListener("focus", onFocus);  // 重掃模組列（設計第 15 節第 7 條）、過了午夜換「今天」
   window.addEventListener("pagehide", saveDay);   // 關視窗時盡力再存一次
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => e.preventDefault());  // 拖到別處不要讓瀏覽器打開那張圖

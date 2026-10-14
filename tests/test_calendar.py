@@ -1354,3 +1354,13 @@ def test_public_copy_never_puts_an_unstripped_file_inside_the_publish_folder(loa
     with pytest.raises(RuntimeError):
         p.public_copy(src, out / "2026" / "10" / "10" / "a.jpg", run=fake_sips_ok, platform="darwin")
     assert seen == [[]] and dirty() == []
+
+
+def test_page_html_refreshes_today_when_the_window_gets_focus():
+    """行事曆整天開著：視窗重新拿到焦點時（跟重掃模組列同一個時候）重新算今天，過了午夜就換、重畫。"""
+    html_text = page_html()
+    assert 'addEventListener("focus", onFocus)' in html_text
+    on_focus = html_text[html_text.index("function onFocus()"):][:160]
+    assert "loadModules()" in on_focus and "refreshToday()" in on_focus
+    refresh = html_text[html_text.index("function refreshToday()"):][:300]
+    assert "new Date()" in refresh and "todayText" in refresh
