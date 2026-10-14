@@ -11,7 +11,7 @@
 - 資料（`diary.py`，D90）：一天一個資料夾、純文字加圖片、`公開` 標記；覆寫之前舊的存進 `.history/`（同一個欄位 10 分鐘內只存一份）；先寫暫存檔再換上去；不是 UTF-8 的檔不覆寫。
 - 網頁（`pages.py`，D91；設計原文叫 `site.py`，跟 Python 標準庫的 `site` 同名，改名）：日、月、年、綜合；存一天連前後有內容的日子與相鄰的月一起重產；公開版只放公開的日子、每頁 noindex、照片的中繼資料用白名單拿掉（到影像結尾為止）。
 - 程序（`iplot.py`，D89）：頁面只在自己另開的程序裡開（經「互通」的 `run.py`），已經開著就叫到最前面；模組列在頁面載入與視窗拿到焦點時重掃；Dock 圖示換成 `icon.png`（macOS）。
-- 量出來的數字：`tests/test_calendar.py` 99 個測試；有效行 `diary.py` 187、`photos.py` 164、`pages.py` 261、`iplot.py` 313（含「互通」那一小段 22 行），`page.html` 385 行。
+- 量出來的數字：`tests/test_calendar.py` 102 個測試；有效行 `diary.py` 198、`photos.py` 163、`pages.py` 261、`iplot.py` 313（含「互通」那一小段 22 行），`page.html` 395 行。
 
 ### 這一版沒有做
 - 上傳到網頁空間（只留 `pages.publish(root)` 這個接口，D92）；匯入 DavidSPACE 的舊資料；筆記裡寫到的模組名稱變成按鈕；週檢視；提醒與通知；搜尋；重複的行程；iPLoT 啟動時自動打開行事曆；多台電腦同步。
