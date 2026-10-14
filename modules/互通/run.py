@@ -76,6 +76,16 @@ def resolve(core, target: str, cwd: Path):
     return None, T["ambiguous" if found else "not_found"].format(name=name, paths=paths)
 
 
+def back_button(core, info, candidates):
+    """跑完之後的回去鈕跑哪個模組：依序找（行事曆、主控面板），最上層剛好一個、而且跑的不是它自己，就是它（D93、D88）；
+    都不是回 None（不給）。"""
+    names = [m.name for m in core.all_modules()]
+    for name in candidates:
+        if info is not None and info.name != name and names.count(name) == 1:
+            return name
+    return None
+
+
 def main(argv: list[str], *, home: Path | None = None, folder: Path | None = None, webview=None,
          cwd: Path | None = None) -> int:
     """跑一次：確認 Python、核對核心版本、記下 Python，開小視窗跑模組，跑完同步一次。回結束碼。"""
@@ -120,9 +130,7 @@ def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
     core.rescan()  # 在面板外一律是最上層
     info, problem = resolve(core, argv[0], cwd)
     popup.title = info.title if info is not None else "互通"
-    panel = popup_module.PANEL  # 跑完之後要不要給「主控面板」按鈕：最上層剛好有一個、而且不是它自己（D88）
-    offer = (info is not None and info.name != panel
-             and sum(m.name == panel for m in core.all_modules()) == 1)
+    back = back_button(core, info, (popup_module.CALENDAR, popup_module.PANEL))
     files = [cwd / _expand(a) for a in argv[1:]]
 
     def job() -> int:
@@ -139,7 +147,7 @@ def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
                 outcome, code = "ok", OK
             elif result.error is None:  # 工作坊裝來的模組，第一次問的時候按了取消
                 outcome = "cancelled"
-        popup.done(outcome, time.perf_counter() - start, panel=offer)
+        popup.done(outcome, time.perf_counter() - start, back=back)
         with contextlib.suppress(Exception):  # 同步出錯不能讓模組的結果變成錯的；它自己的問題寫在 .sync-error
             sync.sync(home, config, boot.recorded_python(folder) or sys.executable, folder)
         return code

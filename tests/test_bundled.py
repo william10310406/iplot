@@ -65,7 +65,7 @@ def quiet(monkeypatch):
 
 
 @pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊",
-                                  "互通", "主控面板"])
+                                  "互通", "主控面板", "行事曆"])
 def test_bundled_meta(name):
     m = read_meta(MODULES / name / "iplot.py")
     assert (m.error, m.has_run) == (None, True) and m.description
@@ -346,14 +346,15 @@ def test_system_module_answers_through_core_action(fake_core, monkeypatch):
     assert r.ok and r.value is None
 
 
-CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "互通", "主控面板")
+CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "互通", "主控面板", "行事曆")
 
 
 @pytest.mark.parametrize("name", CARRY)
 def test_repo_modules_carry_the_interop_snippet(name):
-    from core.text import TEMPLATE
-    block = TEMPLATE[TEMPLATE.index("# ── 互通 ──"):TEMPLATE.rindex("# ── 互通 ──\n") + len("# ── 互通 ──\n")]
-    assert block in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("snippet_text", MODULES / "互通" / "snippet.py")
+    snippet = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(snippet)
+    assert snippet.TEXT in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("name", ["作業系統", "更新", "工作坊"])

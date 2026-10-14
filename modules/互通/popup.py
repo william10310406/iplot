@@ -17,7 +17,8 @@ from core.errors import describe
 from core.types import ErrorInfo, Scope
 
 PAGE = Path(__file__).with_name("popup.html")
-PANEL = "主控面板"  # 跑完之後底下那一列的「主控面板」按鈕跑的模組（D88）
+PANEL = "主控面板"  # 跑完之後底下那一列的回去鈕：最上層剛好一個「行事曆」就回行事曆（D93），否則回主控面板（D88）
+CALENDAR = "行事曆"
 
 
 def mac_dock(regular: bool) -> None:
@@ -59,7 +60,7 @@ class Bridge:
         self._popup.window.destroy()
 
     def panel(self) -> None:
-        """「主控面板」：跑最上層的「主控面板」模組；沒出錯就關掉小視窗（D88）。"""
+        """回去鈕：跑最上層那個模組（「行事曆」或「主控面板」）；沒出錯就關掉小視窗（D93、D88）。"""
         self._popup.open_panel()
 
 
@@ -75,7 +76,10 @@ class Popup:
         self.errors: list[ErrorInfo] = []
         self._lock = threading.Lock()
         self._running = threading.Lock()  # 模組在跑的期間拿著；「打開檔案」等它跑完才做（runner 一次只跑一個）
-        self._panel = threading.Lock()  # 「主控面板」一次只跑一個：連按兩下不會開兩次
+        self._panel = threading.Lock()  # 回去鈕一次只跑一個：連按兩下不會開兩次
+        self._back: str | None = None  # 回去鈕跑的模組名稱；done 時由 run.py 給
+        self._paging = False  # app.page 的視窗開著：小視窗不因「跑太久」出來，關它也只是藏起來
+        self._said = 0  # 小視窗說過幾次話（訊息、錯誤、執行中、問問題、跑完）；選檔案時用來判斷能不能藏回去
         self._ids = itertools.count(1)
         self._waiting: dict[int, tuple[threading.Event, list]] = {}
         self._worker: threading.Thread | None = None
@@ -90,7 +94,7 @@ class Popup:
         """開藏著的小視窗，進入 pywebview 的事件迴圈（佔住主執行緒）；頁面載入後在工作執行緒上跑 job。
         視窗關掉、事件迴圈結束之後等 job 做完，回它的結果。"""
         self._shown = self._closed = self._finished = self._job_done = False
-        self._worker, self._result = None, [1]
+        self._worker, self._result, self._back, self._paging = None, [1], None, False
         self.window = self.webview.create_window(
             self.title, url=PAGE.as_uri(), js_api=Bridge(self), width=460, height=320, min_size=(360, 220),
             hidden=True)
@@ -122,8 +126,9 @@ class Popup:
                 self._job_done = True
 
     def _busy(self) -> None:
-        """跑了 busy_after 秒還沒結束：叫出來，顯示「執行中：<名稱>…」與「停止」。"""
-        if not self._job_done and not self._finished:
+        """跑了 busy_after 秒還沒結束：叫出來，顯示「執行中：<名稱>…」與「停止」。app.page 開著的時候不算：
+        頁面就是模組的畫面（行事曆整天開著），多一個「執行中」的小視窗只會擋路。"""
+        if not self._job_done and not self._finished and not self._paging:
             self._reveal()
             self._js("busy", self.title)
 
@@ -137,12 +142,26 @@ class Popup:
             self._dock(True)
         self.window.show()
 
-    def _closing(self) -> None:
-        """使用者關掉小視窗：等著的對話框當作取消；模組還沒跑完就是「停止」，結束這個程序（結束碼 1）。"""
+    def _closing(self) -> bool | None:
+        """使用者關掉小視窗：等著的對話框當作取消；模組還沒跑完就是「停止」，結束這個程序（結束碼 1）。
+        app.page 的視窗開著、小視窗也看得見時例外：只把它藏起來（回 False，pywebview 就不關它），之後有話還能再出來。
+        藏著的小視窗被問到，只會是整個 App 要結束（⌘Q、登出、關機：pywebview 會問每一個視窗）——那時不能擋。"""
+        if self._paging and self._shown:
+            self._cancel()
+            self._hide()
+            return False
         stopping = not self._job_done and not self._finished
         self._cancel(closed=True)
         if stopping:
             self.exit(1)
+
+    def _hide(self) -> None:
+        """藏回去：下一次有話要說時 _reveal 會再叫出來。App 留在 Dock（頁面開著，要找得回來）。"""
+        with self._lock:
+            if not self._shown:
+                return
+            self._shown = False
+        self.window.hide()
 
     def _cancel(self, closed: bool = False) -> None:
         with self._lock:
@@ -151,27 +170,32 @@ class Popup:
                 event.set()
             self._waiting.clear()
 
-    def done(self, outcome: str, seconds: float, panel: bool = False) -> None:
+    def done(self, outcome: str, seconds: float, back: str | None = None) -> None:
         """模組跑完了：outcome 是 "ok"、"cancelled" 或 "error"。小視窗沒出現過、又沒出錯，就直接關；
         否則交給頁面：成功是「完成（x 秒），3 秒後關閉」的倒數，出錯是「出錯了」與「關閉」。
-        panel 為真時，底下那一列多一個「主控面板」按鈕（D88；要不要給由 run.py 決定）。"""
-        self._finished = True
+        back 是回去鈕上的名字、按下去跑的模組（D93：「行事曆」或「主控面板」；給不給、給哪個由 run.py 決定）。"""
+        self._finished, self._back = True, back
         if not self._shown and outcome != "error":
             self.window.destroy()
             return
         self._reveal()
-        self._js("done", outcome, round(seconds, 1), bool(panel))
+        self._js("done", outcome, round(seconds, 1), back)
 
     def open_panel(self) -> None:
-        """「主控面板」按鈕：在另一條執行緒上、等模組與同步跑完（跟「打開檔案」一樣），用這個 Core 跑最上層的
-        「主控面板」。沒出錯就關掉小視窗；出錯照一般的錯誤顯示，小視窗留著。程序的結束碼不變（還是原本那個模組的）。"""
+        """回去鈕：在另一條執行緒上、等模組與同步跑完（跟「打開檔案」一樣），用這個 Core 跑最上層的 back 那個模組
+        （「行事曆」或「主控面板」）。沒出錯就關掉小視窗；出錯照一般的錯誤顯示，小視窗留著。沒有 back 就不做事。
+        程序的結束碼不變（還是原本那個模組的）。"""
+        back = self._back
+        if back is None:
+            return
+
         def go() -> None:
             if not self._panel.acquire(blocking=False):
                 return
             try:
                 with self._running:
                     try:
-                        result = self.core.run_by_name(PANEL)
+                        result = self.core.run_by_name(back)
                     except LookupError as exc:  # 跑完之後才被刪掉、或有兩個
                         self.log(str(exc))
                         return
@@ -198,6 +222,8 @@ class Popup:
 
     def _js(self, name: str, *args: Any) -> None:
         """呼叫頁面的 iplot.<name>(…)，參數寫成 JSON；視窗關了就不做。"""
+        if name != "init":
+            self._said += 1
         if not self._closed:
             with contextlib.suppress(Exception):  # 頁面壞了、視窗正在關：說不出來也不往外丟
                 self.window.evaluate_js(f"iplot.{name}({', '.join(json.dumps(a) for a in args)})")
@@ -256,19 +282,33 @@ class Popup:
         開之前回到一般的 App（在 Dock、在 ⌘-Tab 裡）：被別的視窗蓋住時要找得回來，模組在等它關。"""
         if self._dock:
             self._dock(True)
-        window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
-        closed = threading.Event()
-        window.events.closed += closed.set
-        closed.wait()
+        self._paging = True
+        try:
+            window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
+            closed = threading.Event()
+            window.events.closed += closed.set
+            closed.wait()
+        finally:
+            self._paging = False
 
     def choose_files(self) -> list[Path]:
-        """先叫出小視窗，再開原生的檔案選擇視窗；按取消回空清單。"""
+        """先叫出小視窗，再開原生的檔案選擇視窗；按取消回空清單。小視窗原本藏著、選的期間又沒說話，選完就藏回去。"""
+        hidden, said = not self._shown, self._said
         self._reveal()
-        found = self.window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True)
+        try:
+            found = self.window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True)
+        finally:
+            if hidden and self._said == said:  # 對話框開著的期間有話要說（例如「執行中」）就留著
+                self._hide()
         return [Path(p) for p in found or ()]
 
     def choose_folder(self) -> Path | None:
-        """先叫出小視窗，再開原生的資料夾選擇視窗；按取消回 None。"""
+        """先叫出小視窗，再開原生的資料夾選擇視窗；按取消回 None。小視窗原本藏著、選的期間又沒說話，選完就藏回去。"""
+        hidden, said = not self._shown, self._said
         self._reveal()
-        found = self.window.create_file_dialog(self.webview.FileDialog.FOLDER)
+        try:
+            found = self.window.create_file_dialog(self.webview.FileDialog.FOLDER)
+        finally:
+            if hidden and self._said == said:  # 對話框開著的期間有話要說（例如「執行中」）就留著
+                self._hide()
         return Path(found[0]) if found else None

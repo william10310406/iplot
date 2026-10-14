@@ -7,6 +7,7 @@ import dataclasses
 import importlib
 import importlib.util
 import inspect
+import json
 import os
 import plistlib
 import re
@@ -123,8 +124,23 @@ def test_lib_that_does_not_load_without_record_says_one_sentence(load, tmp_path)
 
     said = boot.ensure_python(home, Path(run_file).parent, run_file, [], importer=importer, environ={},
                               execv=never, exe="/x/python3")
-    assert said == ("這個 Python（/x/python3）載不進 iPLoT 的介面套件（lib/ 是給別的 Python 裝的）。"
+    assert said == ("這個 Python（/x/python3）載不進 iPLoT 的介面套件：bad magic number（lib/ 可能是給別的 Python 裝的）。"
                     "先在面板按一次「互通」，讓它記下面板用的 Python。")
+
+
+def test_the_real_reason_reaches_both_the_alert_and_stderr(load, tmp_path, capsys):
+    """載不進 lib/ 時，提示框與 stderr 都要看得到真正的原因（不然只能猜是哪個套件、為什麼）。"""
+    boot, (home, run_file) = load("boot"), fake_iplot(tmp_path / "iPLoT")
+
+    def importer(name):
+        if name == "webview":
+            raise ImportError("No module named 'objc._objc'")
+
+    said = boot.ensure_python(home, Path(run_file).parent, run_file, [], importer=importer, environ={},
+                              execv=never, exe="/x/python3")
+    calls = []
+    boot.alert("互通", said, platform="darwin", call=calls.append)
+    assert "No module named 'objc._objc'" in calls[0][-1] and "No module named 'objc._objc'" in capsys.readouterr().err
 
 
 def test_a_record_that_is_gone_or_is_this_python_is_not_tried(load, tmp_path):
@@ -341,27 +357,30 @@ def test_choose_files_shows_the_window_first(popup):
 
 
 def test_choose_folder(popup):
-    p = popup.p
+    p, seen = popup.p, []
 
     def job():
-        popup.wv.windows[0].dialog_result = ["/d"]
+        w = popup.wv.windows[0]
+        w.dialog_result = ["/d"]
+        original = w.create_file_dialog
+        w.create_file_dialog = lambda *a, **k: (seen.append(w.shown), original(*a, **k))[1]
         return p.choose_folder()
 
-    assert p.run(job) == Path("/d") and popup.wv.windows[0].shown
+    assert p.run(job) == Path("/d") and seen == [True]
 
 
 def test_done_after_showing_tells_the_page(popup):
     p = popup.p
     p.run(lambda: (p.log("x"), p.done("ok", 1.2), 0)[2])
     w = popup.wv.windows[0]
-    assert w.calls("done") == [["ok", 1.2, False]] and not w.destroyed
+    assert w.calls("done") == [["ok", 1.2, None]] and not w.destroyed
 
 
 def test_done_error_tells_the_page(popup):
     p = popup.p
     p.run(lambda: (p.done("error", 0.1), 0)[1])
     w = popup.wv.windows[0]
-    assert w.calls("done") == [["error", 0.1, False]] and w.shown and not w.destroyed
+    assert w.calls("done") == [["error", 0.1, None]] and w.shown and not w.destroyed
 
 
 def test_a_slow_job_shows_busy(popup):
@@ -435,12 +454,23 @@ def test_popup_html_defines_every_entry_python_calls():
 
 # ── snippet：把那一小段補進現有的模組（每個模組一次，先存快照） ──
 
-def test_snippet_text_is_the_core_template_block(load):
+SNIPPET_SHA256 = "0dbf45c3d39d9630d3f1e3d4a8a3f569dc03da18e7bd4bbb09c8c0c93f7364ba"  # 0.5.1 的那一小段（22 行），一字不改
+
+
+def test_snippet_text_is_fixed_and_no_longer_comes_from_the_core_template(load):
+    """那一小段的文字是「互通」自己的（D84 修訂）：一字不改，已經加過的模組才認得出來；核心的範本不再帶它。"""
+    import hashlib
+
     from core.text import TEMPLATE
-    text = load("snippet").TEXT
-    assert text in TEMPLATE and text.startswith("# ── 互通 ──") and text.endswith("# ── 互通 ──\n")
-    end = "# ── 互通 ──\n"
-    assert TEMPLATE[TEMPLATE.index(end[:-1]):TEMPLATE.rindex(end) + len(end)] == text
+    s = load("snippet")
+    assert hashlib.sha256(s.TEXT.encode("utf-8")).hexdigest() == SNIPPET_SHA256 and len(s.TEXT.splitlines()) == 22
+    assert s.TEXT.startswith("# ── 互通 ──") and s.TEXT.endswith("# ── 互通 ──\n") and s.MARK not in TEMPLATE
+    assert "core.text" not in (INTEROP / "snippet.py").read_text(encoding="utf-8")
+
+
+def test_snippet_text_reads_on_python_3_8(load):
+    """加了那一小段的模組可能被舊 Python 直接執行：那一段要在 3.8 讀得懂（換 Python 的事交給 run.py）。"""
+    ast.parse(load("snippet").TEXT, feature_version=(3, 8))
 
 
 def test_where_goes_after_docstring_future_and_leading_imports(load):
@@ -853,7 +883,7 @@ def test_main_module_error_returns_1(entry, home):
     assert entry.go(["A"]) == 1
     w = entry.wv.windows[0]
     assert w.calls("report")[0][0]["kind"] == "ZeroDivisionError" and w.calls("done") == [["error", pytest.approx(
-        w.calls("done")[0][1]), False]]
+        w.calls("done")[0][1]), None]]
 
 
 def test_main_files_go_to_on_files_relative_to_cwd(entry, home, tmp_path):
@@ -1200,8 +1230,8 @@ FAKE_PANEL = '"""假的主控面板：不開真的面板，只說一句。"""\nd
 
 def test_done_passes_on_whether_to_offer_the_panel(popup):
     p = popup.p
-    p.run(lambda: (p.log("x"), p.done("ok", 1.2, panel=True), 0)[2])
-    assert popup.wv.windows[0].calls("done") == [["ok", 1.2, True]]
+    p.run(lambda: (p.log("x"), p.done("ok", 1.2, back="主控面板"), 0)[2])
+    assert popup.wv.windows[0].calls("done") == [["ok", 1.2, "主控面板"]]
 
 
 def test_no_panel_button_while_the_module_runs(popup):
@@ -1220,7 +1250,7 @@ def test_the_panel_button_runs_the_panel_module_and_closes(popup, home):
     make_module(home / "modules", "主控面板", FAKE_PANEL)
     p = popup.p
     p.core.rescan()
-    assert p.run(lambda: (p.log("x"), p.done("ok", 0.1, panel=True), 7)[2]) == 7
+    assert p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="主控面板"), 7)[2]) == 7
     w = popup.wv.windows[0]
     bridge(popup).panel()
     until(lambda: w.destroyed)
@@ -1231,7 +1261,7 @@ def test_a_failing_panel_module_keeps_the_popup(popup, home):
     make_module(home / "modules", "主控面板", "def run(app):\n    1/0\n")
     p = popup.p
     p.core.rescan()
-    p.run(lambda: (p.log("x"), p.done("ok", 0.1, panel=True), 0)[2])
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="主控面板"), 0)[2])
     w = popup.wv.windows[0]
     bridge(popup).panel()
     until(lambda: w.calls("report"))
@@ -1243,7 +1273,7 @@ def test_the_panel_button_without_a_panel_module_says_one_sentence(popup):
     from core.text import T
     p = popup.p
     p.core.rescan()
-    p.run(lambda: (p.log("x"), p.done("ok", 0.1, panel=True), 0)[2])
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="主控面板"), 0)[2])
     w = popup.wv.windows[0]
     bridge(popup).panel()
     until(lambda: [T["not_found"].format(name="主控面板")] in w.calls("log"))
@@ -1254,13 +1284,13 @@ def test_main_offers_the_panel_only_when_there_is_one_and_it_is_not_the_target(e
     make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
     make_module(home / "modules", "E", "def run(app):\n    1/0\n")
     entry.go(["A"])
-    assert entry.wv.windows[0].calls("done")[0][2] is False  # 最上層沒有「主控面板」
+    assert entry.wv.windows[0].calls("done")[0][2] is None  # 最上層沒有「主控面板」
     make_module(home / "modules", "主控面板", FAKE_PANEL)
     for target, outcome in (("A", "ok"), ("E", "error"), ("主控面板", "ok")):
         entry.wv.windows.clear()
         entry.go([target])
         [[got, _, offer]] = entry.wv.windows[0].calls("done")
-        assert (got, offer) == (outcome, target != "主控面板"), target
+        assert (got, offer) == (outcome, "主控面板" if target != "主控面板" else None), target
 
 
 def test_pressing_the_panel_keeps_the_modules_exit_code(entry, home):
@@ -1278,3 +1308,229 @@ def test_pressing_the_panel_keeps_the_modules_exit_code(entry, home):
     entry.wv.start = start
     assert entry.go(["E"]) == 1
     assert ["假的主控面板跑了"] in entry.wv.windows[0].calls("log")
+
+
+# ── 小視窗回到行事曆（D93：有「行事曆」就回行事曆，否則照 D88 回主控面板） ──
+
+FAKE_CALENDAR = '"""假的行事曆：不開真的行事曆，只說一句。"""\ndef run(app):\n    app.log("假的行事曆跑了")\n'
+
+
+def test_main_offers_the_calendar_when_there_is_exactly_one(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
+    entry.go(["A"])
+    assert entry.wv.windows[0].calls("done")[0][2] == "行事曆"
+
+
+def test_two_calendars_fall_back_to_the_panel(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
+    make_module(home.parent, "行事曆", FAKE_CALENDAR)          # 上一層（ROOTS 的 ".."）也有一個
+    entry.go(["A"])
+    assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
+
+
+def test_running_the_calendar_itself_offers_the_panel(entry, home):
+    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
+    entry.go(["行事曆"])
+    assert entry.wv.windows[0].calls("done")[0][2] is None     # 沒有主控面板
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    entry.wv.windows.clear()
+    entry.go(["行事曆"])
+    assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
+
+
+def test_the_back_button_runs_the_named_module_and_closes(popup, home):
+    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
+    p = popup.p
+    p.core.rescan()
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="行事曆"), 0)[2])
+    w = popup.wv.windows[0]
+    bridge(popup).panel()
+    until(lambda: w.destroyed)
+    assert ["假的行事曆跑了"] in w.calls("log")
+
+
+def test_the_back_button_with_nothing_to_go_back_to_does_nothing(popup, home):
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    p = popup.p
+    p.core.rescan()
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back=None), 0)[2])
+    w = popup.wv.windows[0]
+    bridge(popup).panel()
+    time.sleep(0.1)
+    assert not w.destroyed and ["假的主控面板跑了"] not in w.calls("log")
+
+
+def test_popup_html_puts_the_name_on_the_button():
+    html_text = (INTEROP / "popup.html").read_text(encoding="utf-8")
+    assert '[[offer, panel, "panelBtn"]]' in html_text and '"主控面板", panel' not in html_text
+
+
+# ── 頁面開著的時候，小視窗不冒出來、關它不結束程序；選完檔案藏回去（M5 設計第 15 節第 2 條） ──
+
+def test_a_page_open_longer_than_busy_after_never_shows_the_popup(popup):
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
+    until(lambda: len(popup.wv.windows) == 2)
+    time.sleep(p.busy_after * 4)
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+    assert popup.wv.windows[0].calls("busy") == [] and popup.wv.windows[0].shown is False
+
+
+def test_closing_the_popup_while_a_page_is_open_hides_it_and_does_not_exit(popup):
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.log("x"), p.page("頁", "<p>x</p>", None), p.log("y"), 0)[3]))
+    until(lambda: len(popup.wv.windows) == 2)
+    w = popup.wv.windows[0]
+    assert w.shown
+    assert w.events.closing.handlers[0]() is False and w.shown is False and popup.exits == []
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+    assert ["y"] in w.calls("log") and w.shown    # 頁面關了之後有話還能再出來
+
+
+def test_stop_still_exits_while_a_page_is_open(popup):
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.log("x"), p.page("頁", "<p>x</p>", None), 0)[2]))
+    until(lambda: len(popup.wv.windows) == 2)
+    bridge(popup).stop()
+    assert popup.exits == [1]
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+
+
+def test_choose_folder_hides_the_window_again_when_it_was_hidden(popup):
+    p, seen = popup.p, []
+
+    def job():
+        w = popup.wv.windows[0]
+        w.dialog_result = ["/d"]
+        original = w.create_file_dialog
+        w.create_file_dialog = lambda *a, **k: (seen.append(w.shown), original(*a, **k))[1]
+        got = p.choose_folder()
+        seen.append(w.shown)
+        return got
+
+    assert p.run(job) == Path("/d") and seen == [True, False] and popup.dock == [False, True]   # 沒有第三個 dock 呼叫
+
+
+def test_choose_folder_leaves_the_window_up_when_it_was_already_showing(popup):
+    p = popup.p
+
+    def job():
+        p.log("先說一句")
+        popup.wv.windows[0].dialog_result = ["/d"]
+        return p.choose_folder()
+
+    assert p.run(job) == Path("/d") and popup.wv.windows[0].shown
+
+
+def test_quitting_the_app_while_a_page_is_open_is_not_refused_by_the_hidden_popup(popup):   # 審查 C1
+    """結束 App（⌘Q、登出、關機）時 pywebview 問每一個視窗要不要關，藏著的小視窗也問；它回 False 就整個擋下來。"""
+    p = popup.p
+    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
+    until(lambda: len(popup.wv.windows) == 2)
+    w = popup.wv.windows[0]
+    assert w.shown is False
+    assert w.events.closing.handlers[0]() is not False
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+
+
+def test_choose_folder_keeps_the_busy_popup_up_after_a_slow_dialog(popup):   # 審查 I5
+    """沒有頁面的一般模組：對話框開著的期間跑超過 busy_after，「執行中／停止」出來了；選完不能把它藏回去。"""
+    p = popup.p
+
+    def job():
+        w = popup.wv.windows[0]
+        w.dialog_result = ["/d"]
+        original = w.create_file_dialog
+
+        def slow(*a, **k):
+            until(lambda: w.calls("busy"))
+            return original(*a, **k)
+
+        w.create_file_dialog = slow
+        p.choose_folder()
+        return 0 if w.shown else 1
+
+    assert p.run(job) == 0
+
+
+# ── ＋ 建的新模組不帶那一小段：在「互通」按「加上」之後才能直接執行（D84 修訂） ──
+
+def _plus_tree(tmp_path, with_run_py):
+    """tmp/我的 iPLoT/modules/A 是用 ＋（core.create.new_module）建的模組；with_run_py 時放一個假的 modules/互通/run.py：
+    把收到的參數寫成 argv.json、以 3 結束。"""
+    from core.create import new_module
+    home = tmp_path / "我的 iPLoT"
+    (home / "modules").mkdir(parents=True)
+    (home / "main.py").write_text("", encoding="utf-8")
+    folder = new_module(home / "modules", "A")
+    if with_run_py:
+        run = home / "modules" / "互通" / "run.py"
+        run.parent.mkdir(parents=True)
+        run.write_text("import json, sys\nopen(sys.argv[0] + '.argv.json', 'w').write(json.dumps(sys.argv[1:]))\n"
+                       "sys.exit(3)\n", encoding="utf-8")
+    return home, folder
+
+
+def test_a_module_made_with_plus_is_offered_for_adding_the_snippet(load, tmp_path):
+    home, folder = _plus_tree(tmp_path, with_run_py=True)
+    got = load_button().candidates(home, DEFAULT_CONFIG)
+    assert [info.file for info, _ in got] == [folder / "iplot.py"]
+
+
+def test_after_adding_python3_iplot_py_hands_folder_and_args_to_run_py(load, tmp_path):
+    home, folder = _plus_tree(tmp_path, with_run_py=True)
+    assert load("snippet").add(folder / "iplot.py", 20)
+    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True)
+    argv = json.loads((home / "modules" / "互通" / "run.py.argv.json").read_text(encoding="utf-8"))
+    assert r.returncode == 3 and argv == [str(folder), "f.txt"]
+
+
+def test_an_added_snippet_does_nothing_inside_iplot(load, home, monkeypatch):
+    from conftest import FakeView
+
+    from core.core import Core
+    from core.create import new_module
+    load("snippet").add(new_module(home / "modules", "A") / "iplot.py", 20)
+    monkeypatch.setattr(subprocess, "call", lambda *a, **k: pytest.fail("在 iPLoT 裡不該交出去"))
+    c = Core(home, DEFAULT_CONFIG, FakeView())
+    c.rescan()
+    assert c.press(next(m for m in c.all_modules() if m.name == "A")).ok
+
+
+def test_an_added_snippet_without_interop_runs_it_as_a_plain_script(load, tmp_path):
+    """找不到「互通」：說一句，然後照一般的 python3 iplot.py 跑。"""
+    _, folder = _plus_tree(tmp_path, with_run_py=False)
+    f = folder / "iplot.py"
+    f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
+    load("snippet").add(f, 20)
+    r = subprocess.run([sys.executable, "iplot.py"], cwd=folder, capture_output=True, text=True)
+    assert r.returncode == 0 and "找不到 iPLoT 的「互通」" in r.stderr and "最外層跑了" in r.stdout
+
+
+def test_an_added_snippet_with_iplot_direct_never_hands_over(load, tmp_path):
+    """IPLOT_DIRECT=1（例如在編輯器裡除錯）：就算找得到「互通」也不交出去，照一般腳本跑、不說話。"""
+    home, folder = _plus_tree(tmp_path, with_run_py=True)
+    f = folder / "iplot.py"
+    f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
+    load("snippet").add(f, 20)
+    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True,
+                       env={**os.environ, "IPLOT_DIRECT": "1"})
+    assert r.returncode == 0 and "最外層跑了" in r.stdout and r.stderr == ""
+    assert not (home / "modules" / "互通" / "run.py.argv.json").exists()
+
+
+def test_an_added_snippet_finds_iplot_from_beside_it(load, tmp_path):
+    from core.create import new_module
+    _plus_tree(tmp_path, with_run_py=True)
+    beside = new_module(tmp_path, "旁邊的模組")            # 跟 iPLoT 資料夾同一層（ROOTS 的 ".."）
+    load("snippet").add(beside / "iplot.py", 20)
+    r = subprocess.run([sys.executable, "iplot.py"], cwd=beside, capture_output=True, text=True)
+    assert r.returncode == 3

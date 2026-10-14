@@ -1,16 +1,12 @@
-import ast
 import contextlib
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from core.core import Core
 from core.create import AlreadyExists, BadName, new_module, template
 from core.meta import read_meta
-from core.types import DEFAULT_CONFIG
 
 SNIPPET_MARK = "# ── 互通 ──"
 
@@ -71,69 +67,11 @@ def test_template_says_run_is_optional():
     assert "可省略" in template()
 
 
-def _tree(tmp_path, with_run_py):
-    """tmp/我的 iPLoT/modules/A 是用範本建的模組；with_run_py 時放一個假的 modules/互通/run.py：
-    把收到的參數寫成 argv.json、以 3 結束。"""
-    home = tmp_path / "我的 iPLoT"
-    (home / "modules").mkdir(parents=True)
-    folder = new_module(home / "modules", "A")
-    if with_run_py:
-        run = home / "modules" / "互通" / "run.py"
-        run.parent.mkdir(parents=True)
-        run.write_text("import json, sys\nopen(sys.argv[0] + '.argv.json', 'w').write(json.dumps(sys.argv[1:]))\n"
-                       "sys.exit(3)\n", encoding="utf-8")
-    return home, folder
-
-
-def test_template_carries_the_interop_snippet_after_the_docstring():
-    tree = ast.parse(template())
-    assert ast.get_docstring(tree) == "一句話說明這個模組做什麼。"
-    assert template().splitlines()[1].startswith(SNIPPET_MARK)
-
-
-def test_template_snippet_does_nothing_inside_iplot(home, view, monkeypatch):
-    new_module(home / "modules", "A")
-    monkeypatch.setattr(subprocess, "call", lambda *a, **k: pytest.fail("在 iPLoT 裡不該交出去"))
-    c = Core(home, DEFAULT_CONFIG, view)
-    c.rescan()
-    assert c.press(next(m for m in c.all_modules() if m.name == "A")).ok
-
-
-def test_template_snippet_without_interop_runs_it_as_a_plain_script(tmp_path):
-    """找不到「互通」（例如從 0.5.0 更新上來、還沒裝）：說一句，然後照一般的 python3 iplot.py 跑，跟 0.5.0 一樣。"""
-    _, folder = _tree(tmp_path, with_run_py=False)
-    (folder / "iplot.py").write_text(template() + 'print("最外層跑了")\n', encoding="utf-8")
-    r = subprocess.run([sys.executable, "iplot.py"], cwd=folder, capture_output=True, text=True)
-    assert r.returncode == 0 and "找不到 iPLoT 的「互通」" in r.stderr and "最外層跑了" in r.stdout
-
-
-def test_template_snippet_with_iplot_direct_never_hands_over(tmp_path):
-    """IPLOT_DIRECT=1（例如在編輯器裡除錯）：就算找得到「互通」也不交出去，照一般腳本跑、不說話。"""
-    import os
-    home, folder = _tree(tmp_path, with_run_py=True)
-    (folder / "iplot.py").write_text(template() + 'print("最外層跑了")\n', encoding="utf-8")
-    env = {**os.environ, "IPLOT_DIRECT": "1"}
-    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True, env=env)
-    assert r.returncode == 0 and "最外層跑了" in r.stdout and r.stderr == ""
-    assert not (home / "modules" / "互通" / "run.py.argv.json").exists()
-
-
-def test_template_snippet_hands_folder_and_args_to_run_py(tmp_path):
-    home, folder = _tree(tmp_path, with_run_py=True)
-    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True)
-    argv = json.loads((home / "modules" / "互通" / "run.py.argv.json").read_text(encoding="utf-8"))
-    assert r.returncode == 3 and argv == [str(folder), "f.txt"]
-
-
-def test_template_snippet_finds_iplot_from_beside_it(tmp_path):
-    home, _ = _tree(tmp_path, with_run_py=True)
-    beside = new_module(tmp_path, "旁邊的模組")            # 跟 iPLoT 資料夾同一層（ROOTS 的 ".."）
-    r = subprocess.run([sys.executable, "iplot.py"], cwd=beside, capture_output=True, text=True)
-    assert r.returncode == 3
-
-
-def test_template_snippet_reads_on_python_3_8():
-    ast.parse(template(), feature_version=(3, 8))
+def test_new_module_has_no_interop_snippet(tmp_path):
+    """0.5.1 的範本回到 0.5.0 的樣子：＋ 建出來的 iplot.py 不帶「互通」那一小段（要直接執行就在「互通」按「加上」）。"""
+    assert SNIPPET_MARK not in template()
+    folder = new_module(tmp_path, "A")
+    assert SNIPPET_MARK not in (folder / "iplot.py").read_text(encoding="utf-8")
 
 
 def test_template_passes_ruff():
