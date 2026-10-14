@@ -167,6 +167,47 @@ def test_run_by_name_not_found_raises(home, view):
     assert str(ei.value) == T["not_found"].format(name="nope")
 
 
+def test_run_by_name_falls_back_to_top_level(home, view):
+    make_module(home / "modules", "A", "def run(app):\n    print('A ran')\n")
+    p = make_module(home / "modules", "P")
+    make_module(p, "C", "def run(app):\n    app.run('A')\n")
+    c = started(home, view)
+    c.enter(find(c, "P"))
+    assert c.press(find(c, "C")).ok and "A ran" in view.logs
+
+
+def test_run_by_name_prefers_current_level(home, view):
+    make_module(home / "modules", "X", "def run(app):\n    print('top X')\n")
+    p = make_module(home / "modules", "P")
+    make_module(p, "X", "def run(app):\n    print('child X')\n")
+    c = started(home, view)
+    c.enter(find(c, "P"))
+    c.run_by_name("X")
+    assert "child X" in view.logs and "top X" not in view.logs
+
+
+def test_run_by_name_not_found_from_a_sub_level(home, view):
+    make_module(home / "modules", "P")
+    make_module(home / "modules" / "P", "C")
+    c = started(home, view)
+    c.enter(find(c, "P"))
+    with pytest.raises(LookupError) as ei:
+        c.run_by_name("nope")
+    assert str(ei.value) == T["not_found"].format(name="nope")
+
+
+def test_run_by_name_ambiguous_at_top_from_a_sub_level(home, view):
+    make_module(home / "modules", "A")
+    make_module(home.parent, "A")          # 上一層（ROOTS 的 ".."）也有一個 A
+    make_module(home / "modules", "P")
+    make_module(home / "modules" / "P", "C")
+    c = started(home, view)
+    c.enter(find(c, "P"))
+    with pytest.raises(LookupError) as ei:
+        c.run_by_name("A")
+    assert str(ei.value).startswith(T["ambiguous"].split("：")[0].format(name="A"))
+
+
 def test_create_already_exists_logs(home, view):
     make_module(home / "modules", "A")
     c = started(home, view)

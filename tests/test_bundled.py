@@ -64,7 +64,8 @@ def quiet(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊"])
+@pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊",
+                                  "互通", "主控面板"])
 def test_bundled_meta(name):
     m = read_meta(MODULES / name / "iplot.py")
     assert (m.error, m.has_run) == (None, True) and m.description
@@ -343,3 +344,25 @@ def test_system_module_answers_through_core_action(fake_core, monkeypatch):
     assert run_module(info, App(fake_core, info), "requirements").value == "web-mac.txt"
     r = run_module(info, App(fake_core, info), "webview_ready")
     assert r.ok and r.value is None
+
+
+CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "互通", "主控面板")
+
+
+@pytest.mark.parametrize("name", CARRY)
+def test_repo_modules_carry_the_interop_snippet(name):
+    from core.text import TEMPLATE
+    block = TEMPLATE[TEMPLATE.index("# ── 互通 ──"):TEMPLATE.rindex("# ── 互通 ──\n") + len("# ── 互通 ──\n")]
+    assert block in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", ["作業系統", "更新", "工作坊"])
+def test_iplots_own_modules_stay_untouched(name):
+    assert "# ── 互通 ──" not in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", ["開工", "打開核心原始碼"])
+def test_changed_workshop_modules_say_so_in_their_changelog(name):
+    text = (MODULES / name / "CHANGELOG.md").read_text(encoding="utf-8")
+    top = text[text.index("## ["):]
+    assert top.startswith("## [0.5.1] - ") and "加上「互通」的那一小段：可以直接 python3 iplot.py。" in top.split("## [0.5.0]")[0]

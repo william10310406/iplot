@@ -76,7 +76,7 @@ class App:
         return self._core.action("trash", Path(path).absolute())
 
     def run(self, name: str | ModuleInfo) -> Result:
-        """執行目前範圍內另一個模組；找不到或有兩個同名時丟 LookupError，不猜。"""
+        """執行另一個模組：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 LookupError，不猜。"""
         return self._core.run_by_name(name)
 
     def rescan(self) -> None:

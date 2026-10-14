@@ -134,7 +134,17 @@ class FakeWindow:
     def __init__(self, title, kw):
         self.title, self.kw = title, kw
         self.js, self.dialogs, self.dialog_result, self.js_error = [], [], None, None
+        self.shown, self.destroyed = False, False  # show()／hide()／destroy() 只記狀態
         self.events = types.SimpleNamespace(loaded=FakeEvent(), closing=FakeEvent(), closed=FakeEvent())
+
+    def show(self):
+        self.shown = True
+
+    def hide(self):
+        self.shown = False
+
+    def destroy(self):
+        self.destroyed = True
 
     def evaluate_js(self, script):
         if self.js_error and script.startswith(self.js_error):  # 模擬頁面那一頭的 JS 丟例外

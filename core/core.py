@@ -136,10 +136,13 @@ class Core:
                 self.rescan()
 
     def run_by_name(self, name: str | ModuleInfo) -> Result:
-        """依資料夾名稱執行目前範圍內的模組（先 NFC 正規化）；找不到或不只一個就丟 LookupError。"""
+        """執行另一個模組：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 LookupError，不猜。
+        名稱先 NFC 正規化。面板在最上層時只找一次，跟 0.5.0 一樣（D83）。"""
         if isinstance(name, str):
             name = unicodedata.normalize("NFC", name)
             found = [m for m in self.all_modules() if m.name == name]
+            if not found and self._stack:  # 面板停在下一層：退到最上層找
+                found = [m for g in scan.find_modules(self.roots()) for m in g.modules if m.name == name]
             if len(found) != 1:
                 paths = "\n".join(str(m.folder) for m in found)
                 raise LookupError(T["ambiguous" if found else "not_found"].format(name=name, paths=paths))
