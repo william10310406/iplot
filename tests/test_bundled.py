@@ -65,7 +65,7 @@ def quiet(monkeypatch):
 
 
 @pytest.mark.parametrize("name", ["開工", "打開核心原始碼", "開Terminal", "重新啟動", "作業系統", "更新", "工作坊",
-                                  "互通", "主控面板"])
+                                  "互通", "主控面板", "行事曆"])
 def test_bundled_meta(name):
     m = read_meta(MODULES / name / "iplot.py")
     assert (m.error, m.has_run) == (None, True) and m.description
@@ -346,7 +346,7 @@ def test_system_module_answers_through_core_action(fake_core, monkeypatch):
     assert r.ok and r.value is None
 
 
-CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "互通", "主控面板")
+CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "互通", "主控面板", "行事曆")
 
 
 @pytest.mark.parametrize("name", CARRY)

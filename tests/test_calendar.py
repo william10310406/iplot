@@ -5,18 +5,23 @@
 import dataclasses
 import datetime
 import importlib
+import inspect
+import json
 import os
 import re
 import shutil
 import struct
+import subprocess
 import sys
 import threading
 import types
+import unicodedata
 import urllib.parse
 import zlib
 from html.parser import HTMLParser
 from pathlib import Path
 
+import conftest
 import pytest
 
 from core.types import DEFAULT_CONFIG
@@ -759,3 +764,186 @@ def test_publish_with_no_public_days_leaves_an_empty_site(load, tmp_path):
     three_days(tmp_path, public=())
     out = pg.publish(tmp_path, run=fake_sips_ok, platform="darwin")
     assert [p.name for p in out.iterdir()] == ["index.html"]
+
+
+# ── 程序：面板裡另開程序、自己的程序裡開頁面、已經開著就叫到最前面（D89） ──
+
+PS = "  101 /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 {run} {folder}\n  202 /usr/bin/python3 /x/main.py\n"
+
+
+def with_run_py(home):
+    run_py = home / "modules" / "互通" / "run.py"
+    run_py.parent.mkdir(parents=True, exist_ok=True)
+    run_py.write_text("", encoding="utf-8")
+    return run_py
+
+
+def test_in_the_panel_process_launches_detached_with_the_env(load, home, tmp_path):
+    mod, app, folder = load("iplot"), CalApp(home), tmp_path / "行事曆"
+    run_py, launched = with_run_py(home), []
+    mod.open_or_focus(app, folder, environ={"PATH": "/bin"}, ps=lambda: "",
+                      popen=lambda argv, **kw: launched.append((argv, kw)), activate=never, platform="darwin", me=999)
+    [(argv, kw)] = launched
+    assert argv == [sys.executable, str(run_py), str(folder)]
+    assert kw["env"] == {"PATH": "/bin", "IPLOT_CALENDAR": "1"} and kw["start_new_session"] is True
+    assert (kw["stdin"], kw["stdout"], kw["stderr"]) == (subprocess.DEVNULL,) * 3 and app.logs == ["打開行事曆"] and app.pages == []
+
+
+def test_without_interop_says_one_sentence_and_does_not_launch(load, home, tmp_path):
+    mod, app = load("iplot"), CalApp(home)
+    mod.open_or_focus(app, tmp_path / "行事曆", environ={}, ps=lambda: "", popen=never, activate=never, me=999)
+    assert app.logs == ["行事曆要用「互通」另開視窗：到工作坊裝「互通」"]
+
+
+def test_a_launch_that_fails_is_one_sentence(load, home, tmp_path):
+    mod, app = load("iplot"), CalApp(home)
+    with_run_py(home)
+
+    def popen(argv, **kw):
+        raise OSError("沒有這個程式")
+
+    mod.open_or_focus(app, tmp_path / "行事曆", environ={}, ps=lambda: "", popen=popen, activate=never, me=999)
+    assert app.logs == ["打不開行事曆：沒有這個程式"]
+
+
+def test_in_own_process_removes_the_env_first_writes_pid_opens_the_page_then_removes_pid(load, home, tmp_path):
+    mod, app, env, seen = load("iplot"), CalApp(home), {"IPLOT_CALENDAR": "1", "HOME": "/h"}, []
+    folder = tmp_path / "行事曆"
+    folder.mkdir()
+    (folder / "page.html").write_text("<title>行事曆</title>", encoding="utf-8")
+    app.on_page = lambda: seen.append((dict(env), (folder / ".pid").read_text(encoding="utf-8")))
+    marker = object()
+    mod.open_or_focus(app, folder, environ=env, ps=lambda: "", popen=never, activate=never, me=999, api=marker)
+    assert seen == [({"HOME": "/h"}, str(os.getpid()))] and not (folder / ".pid").exists()
+    assert app.pages == [("行事曆", "<title>行事曆</title>", marker)] and app.logs == []
+
+
+def test_pid_is_removed_even_if_the_page_raises(load, home, tmp_path):
+    mod, app = load("iplot"), CalApp(home)
+    folder = tmp_path / "行事曆"
+    folder.mkdir()
+    (folder / "page.html").write_text("x", encoding="utf-8")
+
+    def boom():
+        raise RuntimeError("頁面壞了")
+
+    app.on_page = boom
+    with pytest.raises(RuntimeError):
+        mod.open_or_focus(app, folder, environ={"IPLOT_CALENDAR": "1"}, ps=lambda: "", popen=never, activate=never,
+                          me=999, api=object())
+    assert not (folder / ".pid").exists()
+
+
+def test_a_live_calendar_is_brought_forward_and_nothing_new_is_opened(load, home, tmp_path):
+    mod, app, folder = load("iplot"), CalApp(home), tmp_path / "行事曆"
+    folder.mkdir()
+    (folder / ".pid").write_text("101", encoding="utf-8")
+    activated = []
+    mod.open_or_focus(app, folder, environ={"IPLOT_CALENDAR": "1"},
+                      ps=lambda: PS.format(run=home / "modules/互通/run.py", folder=folder), popen=never,
+                      activate=lambda pid, platform: activated.append(pid) or True, platform="darwin", me=999)
+    assert activated == [101] and app.logs == ["行事曆已經開著"] and app.pages == []
+
+
+def test_a_live_calendar_that_will_not_come_forward_says_where_to_find_it(load, home, tmp_path):
+    mod, app, folder = load("iplot"), CalApp(home), tmp_path / "行事曆"
+    folder.mkdir()
+    (folder / ".pid").write_text("101", encoding="utf-8")
+    mod.open_or_focus(app, folder, environ={}, ps=lambda: PS.format(run="/i/modules/互通/run.py", folder=folder),
+                      popen=never, activate=lambda pid, platform: False, platform="darwin", me=999)
+    assert app.logs == [mod.ALREADY_BEHIND] and mod.ALREADY_BEHIND.startswith("行事曆已經開著（在 Dock 上找")
+
+
+def test_a_dead_pid_opens_a_new_one(load, home, tmp_path):
+    mod, app, folder, launched = load("iplot"), CalApp(home), tmp_path / "行事曆", []
+    with_run_py(home)
+    folder.mkdir()
+    (folder / ".pid").write_text("101", encoding="utf-8")
+    mod.open_or_focus(app, folder, environ={}, ps=lambda: "  202 /usr/bin/python3 /x/main.py\n",
+                      popen=lambda argv, **kw: launched.append(argv), activate=never, platform="darwin", me=999)
+    assert len(launched) == 1 and app.logs == ["打開行事曆"]
+
+
+def test_a_reused_pid_whose_command_is_not_the_calendar_counts_as_stale(load, home, tmp_path):   # Review Focus 3
+    mod, app, folder, launched = load("iplot"), CalApp(home), tmp_path / "行事曆", []
+    with_run_py(home)
+    folder.mkdir()
+    (folder / ".pid").write_text("202", encoding="utf-8")
+    mod.open_or_focus(app, folder, environ={}, ps=lambda: PS.format(run="/i/modules/互通/run.py", folder=folder),
+                      popen=lambda argv, **kw: launched.append(argv), activate=never, platform="darwin", me=999)
+    assert len(launched) == 1
+
+
+def test_running_pid_matches_an_nfd_path_in_ps_output(load, tmp_path):     # Review Focus 3（NFC/NFD）
+    mod, folder = load("iplot"), tmp_path / "行事曆"
+    nfd = unicodedata.normalize("NFD", str(folder))
+    assert mod.running_pid(folder, pid_file_with(tmp_path, "101"), ps=lambda: f"  101 python3 /i/modules/互通/run.py {nfd}\n",
+                           me=999) == 101
+    assert mod.running_pid(folder, pid_file_with(tmp_path, "101"), ps=lambda: f"  101 python3 /i/main.py {nfd}\n",
+                           me=999) is None
+
+
+def test_running_pid_ignores_itself_and_garbage(load, tmp_path):
+    mod = load("iplot")
+    assert mod.running_pid(tmp_path, pid_file_with(tmp_path, "101"), ps=never, me=101) is None
+    assert mod.running_pid(tmp_path, pid_file_with(tmp_path, "abc"), ps=never, me=999) is None
+    assert mod.running_pid(tmp_path, tmp_path / "沒有.pid", ps=never, me=999) is None
+
+
+def test_elsewhere_a_live_calendar_is_only_announced_never_activated_or_relaunched(load, home, tmp_path):
+    mod, app, folder = load("iplot"), CalApp(home), tmp_path / "行事曆"
+    folder.mkdir()
+    (folder / ".pid").write_text("101", encoding="utf-8")
+    mod.open_or_focus(app, folder, environ={}, ps=lambda: PS.format(run="/i/modules/互通/run.py", folder=folder),
+                      popen=never, activate=never, platform="linux", me=999)
+    assert app.logs == [mod.ALREADY_BEHIND]
+
+
+def test_helper_names_do_not_shadow_stdlib():                                # 設計第 15 節第 3 條
+    assert "site" in sys.stdlib_module_names and "calendar" in sys.stdlib_module_names
+    for name in ("diary", "pages", "photos"):
+        assert name not in sys.stdlib_module_names and (CALENDAR / f"{name}.py").exists(), name
+    assert not (CALENDAR / "site.py").exists()
+
+
+def test_iplot_runs_through_the_real_runner(home, tmp_path, monkeypatch):    # 第 3 條；跑的是複本，repo 的 modules/行事曆 一個檔都不動
+    from core.app import App
+    from core.runner import run_module
+    from core.scan import module_info
+
+    copy = home / "modules" / "行事曆"
+    shutil.copytree(CALENDAR, copy, ignore=shutil.ignore_patterns(".pid", "設定.json", "__pycache__"))
+    (copy / "設定.json").write_text(json.dumps({"資料夾": str(tmp_path / "資料")}, ensure_ascii=False), encoding="utf-8")
+    before = sorted(p.name for p in CALENDAR.iterdir())
+    for n in NAMES:
+        monkeypatch.delitem(sys.modules, n, raising=False)
+    seen = []
+
+    class View(conftest.FakeView):
+        def page(self, title, html, api):
+            seen.append(api)
+            api.rebuild()   # 會用到 pages；資料夾還沒建 → 只寫綜合
+
+    monkeypatch.setenv("IPLOT_CALENDAR", "1")                                 # 第 2 步：寫 .pid、開頁面；沒有 .pid 所以不叫 ps
+    info = module_info(copy, home / "modules", "here")
+    result = run_module(info, App(conftest.FakeCore(home, DEFAULT_CONFIG, View()), info))
+    assert result.ok, result.error
+    assert seen and type(seen[0]).__name__ == "Api" and not (copy / ".pid").exists()
+    assert (tmp_path / "資料" / "index.html").exists() and "IPLOT_CALENDAR" not in os.environ
+    assert sorted(p.name for p in CALENDAR.iterdir()) == before
+
+
+def test_iplot_imports_helpers_at_module_level(load):                       # 第 4 條
+    mod = load("iplot")
+    assert all(Path(getattr(mod, n).__file__).parent == CALENDAR for n in ("diary", "pages", "photos"))
+    assert not re.search(r"^\s+(import |from \S+ import )", inspect.getsource(mod.Api), re.M)
+
+
+def test_icon_png_is_a_small_valid_png():                                   # 設計第 15 節第 9 條（Task 0 Step 9 過了）
+    data = (CALENDAR / "icon.png").read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR" and len(data) < 1024 * 1024
+    assert struct.unpack(">II", data[16:24]) == (256, 256)
+
+
+def test_set_dock_icon_is_mac_only(load):
+    assert load("iplot").set_dock_icon(CALENDAR / "icon.png", platform="linux") is False
