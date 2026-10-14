@@ -123,8 +123,23 @@ def test_lib_that_does_not_load_without_record_says_one_sentence(load, tmp_path)
 
     said = boot.ensure_python(home, Path(run_file).parent, run_file, [], importer=importer, environ={},
                               execv=never, exe="/x/python3")
-    assert said == ("這個 Python（/x/python3）載不進 iPLoT 的介面套件（lib/ 是給別的 Python 裝的）。"
+    assert said == ("這個 Python（/x/python3）載不進 iPLoT 的介面套件：bad magic number（lib/ 可能是給別的 Python 裝的）。"
                     "先在面板按一次「互通」，讓它記下面板用的 Python。")
+
+
+def test_the_real_reason_reaches_both_the_alert_and_stderr(load, tmp_path, capsys):
+    """載不進 lib/ 時，提示框與 stderr 都要看得到真正的原因（不然只能猜是哪個套件、為什麼）。"""
+    boot, (home, run_file) = load("boot"), fake_iplot(tmp_path / "iPLoT")
+
+    def importer(name):
+        if name == "webview":
+            raise ImportError("No module named 'objc._objc'")
+
+    said = boot.ensure_python(home, Path(run_file).parent, run_file, [], importer=importer, environ={},
+                              execv=never, exe="/x/python3")
+    calls = []
+    boot.alert("互通", said, platform="darwin", call=calls.append)
+    assert "No module named 'objc._objc'" in calls[0][-1] and "No module named 'objc._objc'" in capsys.readouterr().err
 
 
 def test_a_record_that_is_gone_or_is_this_python_is_not_tried(load, tmp_path):
