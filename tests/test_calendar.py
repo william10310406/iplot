@@ -1249,3 +1249,36 @@ def test_remove_image_leaves_an_unrelated_heic_with_the_same_stem(load, tmp_path
         (folder / name).write_bytes(b"x")
     a.remove_image("2026-10-14", "a.png")
     assert [p.name for p in a._app.trashed] == ["a.png"] and (folder / "a.heic").exists()
+
+
+def test_jpeg_strip_keeps_only_image_segments_and_stops_at_the_end_of_the_image(load, tmp_path):   # 審查 I4
+    p = load("photos")
+    second = b"\xff\xd8" + _segment(0xE1, _exif_gps()) + b"\xff\xd9"          # Motion Photo、MPF 的第二張圖放在 EOI 之後
+    scan = b"\x12\xff\x00\x34\xff\xd0\x56"                                    # 位元填充（FF 00）與 RST0 都是影像資料
+    data = (b"\xff\xd8" + _segment(0xE0, b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+            + _segment(0xE1, _exif_gps()) + _segment(0xE6, b"GoPro GPMF GPS5 25.03 121.56")
+            + _segment(0xFE, b"secret comment") + _segment(0xE2, b"ICC_PROFILE\x00\x01\x01icc")
+            + _segment(0xE2, b"MPF\x00II*\x00") + _segment(0xEE, b"Adobe\x00\x64\x00\x00\x00\x00\x01")
+            + _segment(0xDB, b"\x00" + bytes(range(1, 65))) + _segment(0xC2, b"\x08\x00\x01\x00\x01\x01\x01\x11\x00")
+            + _segment(0xC4, b"\x00" + b"\x01" + bytes(15) + b"\x00") + _segment(0xDA, b"\x01\x01\x00\x00\x3f\x00") + scan
+            + _segment(0xC4, b"\x10" + b"\x01" + bytes(15) + b"\x00") + _segment(0xDA, b"\x01\x01\x00\x00\x3f\x00") + scan
+            + b"\xff\xd9" + second)
+    (tmp_path / "a.jpg").write_bytes(data)
+    p.strip_metadata(tmp_path / "a.jpg", tmp_path / "b.jpg")
+    out = (tmp_path / "b.jpg").read_bytes()
+    assert not any(k in out for k in (b"Exif", b"GoPro", b"secret", b"MPF"))
+    assert all(k in out for k in (b"JFIF", b"ICC_PROFILE", b"Adobe")) and out.count(scan) == 2
+    assert out.endswith(scan + b"\xff\xd9") and out.count(b"\xff\xd8") == 1
+
+
+def test_png_strip_keeps_only_image_chunks_and_stops_at_iend(load, tmp_path):   # 審查 I4
+    p = load("photos")
+    base = png_with_text()
+    iend = base.index(b"IEND") - 4
+    data = (base[:iend] + _png_chunk(b"tIME", b"\x07\xea\x0a\x0e\x09\x1e\x00") + _png_chunk(b"caBX", b"c2pa")
+            + base[iend:] + b"trailing Exif data after IEND")
+    (tmp_path / "a.png").write_bytes(data)
+    p.strip_metadata(tmp_path / "a.png", tmp_path / "b.png")
+    out = (tmp_path / "b.png").read_bytes()
+    assert not any(k in out for k in (b"tIME", b"caBX", b"trailing", b"tEXt", b"eXIf"))
+    assert out.endswith(_png_chunk(b"IEND", b"")) and b"IHDR" in out and b"IDAT" in out
