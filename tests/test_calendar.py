@@ -1282,3 +1282,21 @@ def test_png_strip_keeps_only_image_chunks_and_stops_at_iend(load, tmp_path):   
     out = (tmp_path / "b.png").read_bytes()
     assert not any(k in out for k in (b"tIME", b"caBX", b"trailing", b"tEXt", b"eXIf"))
     assert out.endswith(_png_chunk(b"IEND", b"")) and b"IHDR" in out and b"IDAT" in out
+
+
+def test_rebuild_all_and_publish_scan_the_folder_a_fixed_number_of_times(load, tmp_path, monkeypatch):   # 審查 I2
+    pg, d = load("pages"), load("diary")
+    for i in range(20):
+        date = (datetime.date(2026, 9, 1) + datetime.timedelta(days=i)).isoformat()
+        write_day(tmp_path, date, 行程="x")
+        d.set_public(tmp_path, date, True)
+    calls, real = [], d.all_days
+    monkeypatch.setattr(d, "all_days", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    pg.rebuild_all(tmp_path)
+    rebuild = len(calls)
+    calls.clear()
+    pg.publish(tmp_path, run=fake_sips_ok, platform="darwin")
+    publish = len(calls)
+    calls.clear()
+    pg.rebuild_after_save(tmp_path, "2026-09-10")
+    assert (rebuild, publish, len(calls)) == (1, 1, 1)    # 日子一多，每一頁各掃一次整個資料夾會變成平方

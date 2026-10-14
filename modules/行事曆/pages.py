@@ -118,14 +118,16 @@ def neighbours(days: list[str], date: str) -> tuple[str | None, str | None]:
     return (days[i - 1] if i > 0 else None), (days[j] if j < len(days) else None)
 
 
-def render_day(root: Path, date: str, *, public: bool = False, skip: frozenset = frozenset()) -> str:
+def render_day(root: Path, date: str, *, public: bool = False, skip: frozenset = frozenset(),
+               days: list[str] | None = None) -> str:
+    """一天的頁。days 是有內容（公開版：公開）的日子，算前後一天用；一次產生很多頁時由呼叫的一方掃一次傳進來。"""
     d = diary.parse_date(date)
     day = diary.read_day(root, date)
     body = [f'<nav class="crumbs"><a href="../../../index.html">綜合</a> › <a href="../../index.html">{d.year}</a> › '
             f'<a href="../index.html">{d.month} 月</a></nav>', f"<h1>{_long_date(date)}</h1>"]
     content = _mood(day) + _fields(day, public) + _photo_list(day, public, skip=skip)
     body.append(content or f'<p class="muted">{EMPTY_DAY}</p>')
-    before, after = neighbours(diary.all_days(root, public_only=public), date)
+    before, after = neighbours(diary.all_days(root, public_only=public) if days is None else days, date)
     prev_link = f'<a href="../../../{_day_path(before)}/index.html">‹ {before}</a>' if before else "<span></span>"
     next_link = f'<a href="../../../{_day_path(after)}/index.html">{after} ›</a>' if after else "<span></span>"
     body.append(f'<nav class="pager">{prev_link}{next_link}</nav>')
@@ -199,8 +201,9 @@ def render_year(root: Path, y: str, *, public: bool = False) -> str:
     return _page(f"{year} 年", body, public)
 
 
-def render_index(root: Path, *, public: bool = False, skip: frozenset = frozenset()) -> str:
-    days = diary.all_days(root, public_only=public)
+def render_index(root: Path, *, public: bool = False, skip: frozenset = frozenset(),
+                 days: list[str] | None = None) -> str:
+    days = diary.all_days(root, public_only=public) if days is None else days
     articles = []
     for date in reversed(days[-RECENT:]):
         day = diary.read_day(root, date)
@@ -227,9 +230,9 @@ def _out(root: Path, public: bool, out: Path | None) -> Path:
 
 
 def build_day(root: Path, date: str, *, public: bool = False, out: Path | None = None,
-              skip: frozenset = frozenset()) -> Path:
+              skip: frozenset = frozenset(), days: list[str] | None = None) -> Path:
     path = _out(root, public, out) / _day_path(date) / "index.html"
-    diary.write_text(path, render_day(root, date, public=public, skip=skip))
+    diary.write_text(path, render_day(root, date, public=public, skip=skip, days=days))
     return path
 
 
@@ -246,9 +249,10 @@ def build_year(root: Path, y: str, *, public: bool = False, out: Path | None = N
     return path
 
 
-def build_index(root: Path, *, public: bool = False, out: Path | None = None, skip: frozenset = frozenset()) -> Path:
+def build_index(root: Path, *, public: bool = False, out: Path | None = None, skip: frozenset = frozenset(),
+                days: list[str] | None = None) -> Path:
     path = _out(root, public, out) / "index.html"
-    diary.write_text(path, render_index(root, public=public, skip=skip))
+    diary.write_text(path, render_index(root, public=public, skip=skip, days=days))
     return path
 
 
@@ -256,13 +260,14 @@ def rebuild_after_save(root: Path, date: str) -> list[Path]:
     """存了 date 之後：那一天、前後有內容的日子、前一個／這個／下一個月（資料夾在才產）、這一年、綜合。"""
     root = Path(root)
     d = diary.parse_date(date)
-    before, after = neighbours(diary.all_days(root), date)
-    written = [build_day(root, date)] + [build_day(root, x) for x in (before, after) if x]
+    days = diary.all_days(root)  # 掃一次，傳給每一頁（不然每一頁各掃一次整個資料夾）
+    before, after = neighbours(days, date)
+    written = [build_day(root, x, days=days) for x in (date, before, after) if x]
     for step in (-1, 0, 1):
         y, m = _shift(d.year, d.month, step)
         if (root / f"{y:04d}" / f"{m:02d}").is_dir():
             written.append(build_month(root, f"{y:04d}-{m:02d}"))
-    written += [build_year(root, f"{d.year:04d}"), build_index(root)]
+    written += [build_year(root, f"{d.year:04d}"), build_index(root, days=days)]
     return written
 
 
@@ -270,10 +275,10 @@ def rebuild_all(root: Path) -> list[Path]:
     """所有有內容的日子、它們的月與年，加綜合；一天都沒有時只寫綜合。"""
     root = Path(root)
     days = diary.all_days(root)
-    written = [build_day(root, date) for date in days]
+    written = [build_day(root, date, days=days) for date in days]
     written += [build_month(root, ym) for ym in sorted({date[:7] for date in days})]
     written += [build_year(root, y) for y in sorted({date[:4] for date in days})]
-    written.append(build_index(root))
+    written.append(build_index(root, days=days))
     return written
 
 
@@ -320,9 +325,9 @@ def publish(root: Path, *, run=subprocess.run, platform: str = sys.platform, pro
     days = diary.all_days(root, public_only=True)
     wanted, skip = _publish_images(root, out, days, run, platform, problems)
     frozen = frozenset(skip)
-    wanted |= {build_day(root, date, public=True, skip=frozen) for date in days}
+    wanted |= {build_day(root, date, public=True, skip=frozen, days=days) for date in days}
     wanted |= {build_month(root, ym, public=True) for ym in {date[:7] for date in days}}
     wanted |= {build_year(root, y, public=True) for y in {date[:4] for date in days}}
-    wanted.add(build_index(root, public=True, skip=frozen))
+    wanted.add(build_index(root, public=True, skip=frozen, days=days))
     _prune(out, wanted)
     return out
