@@ -123,7 +123,8 @@ function setView(v) {
 }
 
 async function go(v, date) {
-  await saveDay();
+  if (!(await saveDay())) return;  // 存不進去：留在這一天，字還在輸入框裡
+  if (view === "day" && v !== "day") day = null;
   if (date) cur = date;
   setView(v);
   if (v === "month") return showMonth();
@@ -196,17 +197,19 @@ function touched() {
   timer = setTimeout(saveDay, SAVE_AFTER);
 }
 
+// 存這一天；沒有要存的或存好了回 true，存不進去回 false（dirty 留著，下一次再試）
 async function saveDay() {
   clearTimeout(timer);
-  if (!day || !dirty) return;
+  if (!day || !dirty) return true;
   const fields = {};
   if (!day.unreadable["心情"]) { fields.mood = day.mood; fields.note = $("note").value; }
   for (const [key] of FIELDS) if (!day.unreadable[key]) fields[key] = $("f-" + key).value;
   dirty = false;
   const r = await call("save", day.date, fields);
-  if (r.error) { dirty = true; return; }  // 字留在輸入框裡，下一次再試
+  if (r.error) { dirty = true; return false; }  // 字留在輸入框裡，下一次再試
   for (const sentence of r.unreadable || []) say(sentence, true);
   if (!(r.unreadable || []).length) say("已存");
+  return true;
 }
 
 function photoRow(images) {
@@ -327,7 +330,7 @@ async function loadModules() {
 }
 
 async function publish() {
-  await saveDay();
+  if (!(await saveDay())) return;
   const s = await call("settings");
   if (s.error) return;
   if (!s.public_days) return call("publish");  // 會回「還沒有打開「公開」的日子」
@@ -374,7 +377,7 @@ function wire() {
   $("gear").addEventListener("click", openSettings);
   $("settingsClose").addEventListener("click", () => { $("settings").hidden = true; });
   $("change").addEventListener("click", async () => {
-    await saveDay();
+    if (!(await saveDay())) return;
     const s = await call("change_folder");
     if (s.error) return;
     $("folder").textContent = s.folder;

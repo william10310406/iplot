@@ -1300,3 +1300,9 @@ def test_rebuild_all_and_publish_scan_the_folder_a_fixed_number_of_times(load, t
     calls.clear()
     pg.rebuild_after_save(tmp_path, "2026-09-10")
     assert (rebuild, publish, len(calls)) == (1, 1, 1)    # 日子一多，每一頁各掃一次整個資料夾會變成平方
+
+
+def test_page_html_stays_on_the_day_when_saving_fails():                     # 審查 I1
+    """存不進去時，換檢視、換一天、發佈、換資料夾都先停下來（字留在輸入框裡）；離開日檢視之後 day 清掉，不會再去讀不存在的輸入框。"""
+    html_text = page_html()
+    assert html_text.count("if (!(await saveDay())) return") >= 3 and "day = null" in html_text
