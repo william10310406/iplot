@@ -1412,3 +1412,23 @@ def test_quitting_the_app_while_a_page_is_open_is_not_refused_by_the_hidden_popu
     assert w.events.closing.handlers[0]() is not False
     popup.wv.windows[1].fire("closed")
     t.join(3)
+
+
+def test_choose_folder_keeps_the_busy_popup_up_after_a_slow_dialog(popup):   # 審查 I5
+    """沒有頁面的一般模組：對話框開著的期間跑超過 busy_after，「執行中／停止」出來了；選完不能把它藏回去。"""
+    p = popup.p
+
+    def job():
+        w = popup.wv.windows[0]
+        w.dialog_result = ["/d"]
+        original = w.create_file_dialog
+
+        def slow(*a, **k):
+            until(lambda: w.calls("busy"))
+            return original(*a, **k)
+
+        w.create_file_dialog = slow
+        p.choose_folder()
+        return 0 if w.shown else 1
+
+    assert p.run(job) == 0

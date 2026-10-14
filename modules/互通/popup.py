@@ -79,6 +79,7 @@ class Popup:
         self._panel = threading.Lock()  # 回去鈕一次只跑一個：連按兩下不會開兩次
         self._back: str | None = None  # 回去鈕跑的模組名稱；done 時由 run.py 給
         self._paging = False  # app.page 的視窗開著：小視窗不因「跑太久」出來，關它也只是藏起來
+        self._said = 0  # 小視窗說過幾次話（訊息、錯誤、執行中、問問題、跑完）；選檔案時用來判斷能不能藏回去
         self._ids = itertools.count(1)
         self._waiting: dict[int, tuple[threading.Event, list]] = {}
         self._worker: threading.Thread | None = None
@@ -221,6 +222,8 @@ class Popup:
 
     def _js(self, name: str, *args: Any) -> None:
         """呼叫頁面的 iplot.<name>(…)，參數寫成 JSON；視窗關了就不做。"""
+        if name != "init":
+            self._said += 1
         if not self._closed:
             with contextlib.suppress(Exception):  # 頁面壞了、視窗正在關：說不出來也不往外丟
                 self.window.evaluate_js(f"iplot.{name}({', '.join(json.dumps(a) for a in args)})")
@@ -289,23 +292,23 @@ class Popup:
             self._paging = False
 
     def choose_files(self) -> list[Path]:
-        """先叫出小視窗，再開原生的檔案選擇視窗；按取消回空清單。小視窗原本藏著的話，選完就藏回去。"""
-        hidden = not self._shown
+        """先叫出小視窗，再開原生的檔案選擇視窗；按取消回空清單。小視窗原本藏著、選的期間又沒說話，選完就藏回去。"""
+        hidden, said = not self._shown, self._said
         self._reveal()
         try:
             found = self.window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True)
         finally:
-            if hidden:
+            if hidden and self._said == said:  # 對話框開著的期間有話要說（例如「執行中」）就留著
                 self._hide()
         return [Path(p) for p in found or ()]
 
     def choose_folder(self) -> Path | None:
-        """先叫出小視窗，再開原生的資料夾選擇視窗；按取消回 None。小視窗原本藏著的話，選完就藏回去。"""
-        hidden = not self._shown
+        """先叫出小視窗，再開原生的資料夾選擇視窗；按取消回 None。小視窗原本藏著、選的期間又沒說話，選完就藏回去。"""
+        hidden, said = not self._shown, self._said
         self._reveal()
         try:
             found = self.window.create_file_dialog(self.webview.FileDialog.FOLDER)
         finally:
-            if hidden:
+            if hidden and self._said == said:  # 對話框開著的期間有話要說（例如「執行中」）就留著
                 self._hide()
         return Path(found[0]) if found else None
