@@ -6,12 +6,15 @@ import dataclasses
 import datetime
 import importlib
 import os
+import re
 import shutil
 import struct
 import sys
 import threading
 import types
+import urllib.parse
 import zlib
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -453,3 +456,194 @@ def test_thumbnail_without_sips_uses_small_originals_only(load, tmp_path):
     assert p.thumbnail_url(tmp_path, "c.jpg", run=never, platform="linux") is None
     failing = lambda argv, **kw: types.SimpleNamespace(returncode=1)  # noqa: E731
     assert p.thumbnail_url(tmp_path, "b.heic", run=failing, platform="darwin") is None
+
+
+# ── pages：本機網頁（日、月、年、綜合）；存一天連鄰居一起重產（D91、設計第 15 節第 3、5 條） ──
+
+class Links(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.links = []
+
+    def handle_starttag(self, tag, attrs):
+        self.links += [v for k, v in attrs if k in ("href", "src") and v is not None]
+
+
+def links_in(path):
+    parser = Links()
+    parser.feed(path.read_text(encoding="utf-8"))
+    return parser.links
+
+
+def month_cells(page):
+    """月頁的格子，依序："" 是空格，數字字串是那一天。"""
+    table = page[page.index('<table class="month">'):page.index("</table>")]
+    return [n or "" for n in re.findall(r'<td class="(?:empty"|day[^"]*")>(?:<a [^>]*>)?(?:<span class="n">(\d+)</span>)?', table)]
+
+
+def test_day_page_escapes_text_and_has_no_script_or_external_url(load, tmp_path):
+    pg = load("pages")
+    write_day(tmp_path, "2026-10-14", 行程="<b>開會</b> & 吃飯", 心情="🙂\n還好")
+    html_text = pg.render_day(tmp_path, "2026-10-14")
+    assert "&lt;b&gt;開會&lt;/b&gt; &amp; 吃飯" in html_text and "<b>開會" not in html_text
+    assert "2026 年 10 月 14 日（三）" in html_text and "🙂" in html_text and "還好" in html_text
+    assert all(w not in html_text for w in ("<script", "http://", "https://")) and 'charset="utf-8"' in html_text
+    assert "prefers-color-scheme: dark" in html_text and 'name="viewport"' in html_text and "noindex" not in html_text
+
+
+def test_every_link_is_relative_and_points_at_an_existing_file(load, tmp_path):
+    pg = load("pages")
+    for date in ("2026-09-30", "2026-10-14", "2027-01-01"):
+        (write_day(tmp_path, date, 行程=date) / "a.jpg").write_bytes(b"jpg")
+    pg.rebuild_all(tmp_path)
+    pages = sorted(tmp_path.rglob("index.html"))
+    assert len(pages) == 3 + 3 + 2 + 1
+    for page in pages:
+        for link in links_in(page):
+            assert not link.startswith(("/", "file:", "http", "data:", "#")), (page, link)
+            assert (page.parent / urllib.parse.unquote(link)).resolve().exists(), (page, link)
+
+
+def test_image_links_quote_spaces_hash_percent_and_chinese(load, tmp_path):            # Review Focus 1
+    pg = load("pages")
+    name = "螢幕擷取畫面 2026-10-14 上午9.30 #1 100%.png"
+    (write_day(tmp_path, "2026-10-14", 行程="x") / name).write_bytes(b"png")
+    page = pg.render_day(tmp_path, "2026-10-14")
+    img = page.split("<img", 1)[1].split(">", 1)[0]
+    assert re.search(r'src="([^"]+)"', img).group(1) == urllib.parse.quote(name) and 'loading="lazy"' in img
+    assert 'alt=""' in img and f'href="{urllib.parse.quote(name)}"' in page and name not in img
+    index = pg.render_index(tmp_path)
+    assert f'src="2026/10/14/{urllib.parse.quote(name)}"' in index
+
+
+def test_month_grid_starts_on_sunday_and_has_the_right_days(load, tmp_path):
+    pg = load("pages")
+    page = pg.render_month(tmp_path, "2026-10")
+    assert "".join(re.findall(r"<th>(.)</th>", page)) == "日一二三四五六"
+    cells = month_cells(page)
+    assert cells[:5] == ["", "", "", "", "1"] and [c for c in cells if c] == [str(n) for n in range(1, 32)]
+    for ym, days in (("2026-02", 28), ("2024-02", 29), ("2026-04", 30)):
+        assert len([c for c in month_cells(pg.render_month(tmp_path, ym)) if c]) == days, ym
+    assert "2026 年 10 月" in page
+
+
+def test_month_cell_shows_mood_first_line_cut_to_20_and_camera(load, tmp_path):
+    pg = load("pages")
+    folder = write_day(tmp_path, "2026-10-14", 心情="😄\n", 行程="一二三四五六七八九十一二三四五六七八九十多出來的五")
+    (folder / "a.jpg").write_bytes(b"jpg")
+    write_day(tmp_path, "2026-10-15", 行程="")
+    page = pg.render_month(tmp_path, "2026-10")
+    cell = page.split('href="14/index.html"', 1)[1].split("</td>", 1)[0]
+    assert "😄" in cell and "一二三四五六七八九十一二三四五六七八九十…" in cell and "多出來" not in cell and "🖼" in cell
+    assert 'href="15/index.html"' not in page
+
+
+def test_month_prev_next_links_only_when_there_is_content(load, tmp_path):
+    pg = load("pages")
+    write_day(tmp_path, "2026-09-03", 行程="九月")
+    write_day(tmp_path, "2026-10-14", 行程="十月")
+    write_day(tmp_path, "2025-12-31", 行程="去年")
+    page = pg.render_month(tmp_path, "2026-10")
+    assert 'href="../09/index.html"' in page and "../11/index.html" not in page and "下一個月" in page
+    assert 'href="../../2025/12/index.html"' in pg.render_month(tmp_path, "2026-01")
+
+
+def test_year_page_has_twelve_months_and_marks_days(load, tmp_path):
+    pg = load("pages")
+    write_day(tmp_path, "2026-10-14", 心情="🙂\n", 行程="x")
+    write_day(tmp_path, "2026-03-02", 做了="y")
+    page = pg.render_year(tmp_path, "2026")
+    assert page.count('<table class="mini">') == 12 and "2026 年" in page
+    assert '<a href="10/14/index.html">🙂</a>' in page and '<a href="03/02/index.html">·</a>' in page
+    assert 'href="10/index.html"' in page and 'href="05/index.html"' not in page
+
+
+def test_index_lists_thirty_recent_days_newest_first_and_year_month_entries(load, tmp_path):
+    pg = load("pages")
+    start = datetime.date(2026, 9, 1)
+    for i in range(35):
+        date = (start + datetime.timedelta(days=i)).isoformat()
+        folder = write_day(tmp_path, date, 行程=f"第{i}天", 看到="看到", 做了="做了")
+    for n in range(5):
+        (folder / f"{n}.jpg").write_bytes(b"jpg")
+    page = pg.render_index(tmp_path)
+    days = re.findall(r'<article><h2><a href="(\d{4}/\d{2}/\d{2})/index.html"', page)
+    assert len(days) == 30 and days[0] == "2026/10/05" and days[-1] == "2026/09/06"
+    newest = page.split("<article>", 2)[1]
+    assert newest.count("<img") == 4 and "第34天" in newest and "看到" in newest and "做了" in newest
+    assert 'href="2026/index.html"' in page and "10 月（5 天）" in page and "9 月（30 天）" in page
+
+
+def test_saving_a_day_relinks_both_neighbours(load, tmp_path):                        # 第 5 條
+    pg = load("pages")
+    write_day(tmp_path, "2026-10-10", 行程="a")
+    write_day(tmp_path, "2026-10-20", 行程="c")
+    pg.rebuild_all(tmp_path)
+    write_day(tmp_path, "2026-10-14", 行程="b")
+    written = pg.rebuild_after_save(tmp_path, "2026-10-14")
+    assert "../../../2026/10/14/index.html" in (tmp_path / "2026/10/10/index.html").read_text(encoding="utf-8")
+    assert "../../../2026/10/14/index.html" in (tmp_path / "2026/10/20/index.html").read_text(encoding="utf-8")
+    assert {p.relative_to(tmp_path).as_posix() for p in written} >= {
+        "2026/10/10/index.html", "2026/10/14/index.html", "2026/10/20/index.html", "2026/10/index.html",
+        "2026/index.html", "index.html"}
+
+
+def test_clearing_a_day_relinks_its_neighbours_back(load, tmp_path):
+    pg = load("pages")
+    for date, text in (("2026-10-10", "a"), ("2026-10-14", "b"), ("2026-10-20", "c")):
+        write_day(tmp_path, date, 行程=text)
+    pg.rebuild_all(tmp_path)
+    (tmp_path / "2026/10/14/行程.txt").unlink()
+    pg.rebuild_after_save(tmp_path, "2026-10-14")
+    page = (tmp_path / "2026/10/10/index.html").read_text(encoding="utf-8")
+    assert "../../../2026/10/20/index.html" in page and "2026/10/14" not in page
+    assert "這一天沒有內容" in (tmp_path / "2026/10/14/index.html").read_text(encoding="utf-8")
+
+
+def test_neighbours_cross_month_and_year(load, tmp_path):
+    pg = load("pages")
+    write_day(tmp_path, "2026-09-30", 行程="a")
+    write_day(tmp_path, "2026-10-01", 行程="b")
+    write_day(tmp_path, "2026-12-31", 行程="c")
+    pg.rebuild_all(tmp_path)
+    assert "../../../2026/10/01/index.html" in (tmp_path / "2026/09/30/index.html").read_text(encoding="utf-8")
+    write_day(tmp_path, "2027-01-01", 行程="d")
+    written = pg.rebuild_after_save(tmp_path, "2027-01-01")
+    assert tmp_path / "2026/12/31/index.html" in written
+    assert "../../../2027/01/01/index.html" in (tmp_path / "2026/12/31/index.html").read_text(encoding="utf-8")
+    assert pg.neighbours(["2026-09-30", "2026-10-01", "2026-12-31"], "2026-10-15") == ("2026-10-01", "2026-12-31")
+    assert pg.neighbours(["2026-10-01"], "2026-10-01") == (None, None)
+
+
+def test_next_month_link_appears_after_the_first_entry_of_the_next_year(load, tmp_path):
+    pg = load("pages")
+    write_day(tmp_path, "2026-12-05", 行程="x")
+    pg.rebuild_all(tmp_path)
+    assert "2027/01" not in (tmp_path / "2026/12/index.html").read_text(encoding="utf-8")
+    write_day(tmp_path, "2027-01-01", 行程="y")
+    pg.rebuild_after_save(tmp_path, "2027-01-01")
+    assert 'href="../../2027/01/index.html"' in (tmp_path / "2026/12/index.html").read_text(encoding="utf-8")
+
+
+def test_rebuild_after_save_does_not_create_pages_for_months_that_never_existed(load, tmp_path):
+    pg = load("pages")
+    write_day(tmp_path, "2026-10-14", 行程="x")
+    pg.rebuild_after_save(tmp_path, "2026-10-14")
+    assert not (tmp_path / "2026/09").exists() and not (tmp_path / "2026/11").exists()
+    assert (tmp_path / "2026/10/index.html").exists() and (tmp_path / "2026/index.html").exists()
+
+
+def test_rebuild_all_with_no_days_writes_only_the_index(load, tmp_path):
+    pg = load("pages")
+    root = tmp_path / "空"
+    assert pg.rebuild_all(root) == [root / "index.html"]
+    assert (root / "index.html").exists() and [p.name for p in root.iterdir()] == ["index.html"]
+
+
+def test_rebuild_all_survives_a_non_utf8_file_and_marks_the_field(load, tmp_path):   # Review Focus 4
+    pg = load("pages")
+    write_day(tmp_path, "2026-10-14", 行程="ok")
+    (tmp_path / "2026/10/14/做了.txt").write_bytes(b"\xff\xfe\x00")
+    pg.rebuild_all(tmp_path)
+    page = (tmp_path / "2026/10/14/index.html").read_text(encoding="utf-8")
+    assert "讀不到" in page and "ok" in page and (tmp_path / "2026/10/14/做了.txt").read_bytes() == b"\xff\xfe\x00"
