@@ -1240,3 +1240,12 @@ def test_page_html_debounces_typing_and_rescans_modules_only_on_focus():       #
     html_text = page_html()
     assert "1000" in html_text and "pagehide" in html_text
     assert html_text.count('call("modules"') == 1 and 'addEventListener("focus"' in html_text
+
+
+def test_remove_image_leaves_an_unrelated_heic_with_the_same_stem(load, tmp_path):   # 審查 I3
+    a = api(load, tmp_path)
+    folder = write_day(tmp_path / "資料", "2026-10-14", 行程="x")
+    for name in ("a.heic", "a.png"):
+        (folder / name).write_bytes(b"x")
+    a.remove_image("2026-10-14", "a.png")
+    assert [p.name for p in a._app.trashed] == ["a.png"] and (folder / "a.heic").exists()

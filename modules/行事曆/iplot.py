@@ -284,8 +284,9 @@ class Api:
         folder = diary.day_folder(root, date)
         if name in diary.read_day(root, date)["images"]:
             stem = pathlib.Path(name).stem
+            pairs = pathlib.Path(name).suffix.lower() in (".jpg", ".jpeg")  # 只有 JPG 是 HEIC 轉出來的那一張
             for path in sorted(folder.iterdir()):
-                same = path.name == name or (path.stem == stem and path.suffix.lower() in photos.HEIC)
+                same = path.name == name or (pairs and path.stem == stem and path.suffix.lower() in photos.HEIC)
                 if same and path.is_file():
                     self._app.trash(path)
                     (folder / photos.THUMBS / f"{path.name}.jpg").unlink(missing_ok=True)
