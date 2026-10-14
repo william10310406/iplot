@@ -17,7 +17,8 @@ from core.errors import describe
 from core.types import ErrorInfo, Scope
 
 PAGE = Path(__file__).with_name("popup.html")
-PANEL = "主控面板"  # 跑完之後底下那一列的「主控面板」按鈕跑的模組（D88）
+PANEL = "主控面板"  # 跑完之後底下那一列的回去鈕：最上層剛好一個「行事曆」就回行事曆（D93），否則回主控面板（D88）
+CALENDAR = "行事曆"
 
 
 def mac_dock(regular: bool) -> None:
@@ -59,7 +60,7 @@ class Bridge:
         self._popup.window.destroy()
 
     def panel(self) -> None:
-        """「主控面板」：跑最上層的「主控面板」模組；沒出錯就關掉小視窗（D88）。"""
+        """回去鈕：跑最上層那個模組（「行事曆」或「主控面板」）；沒出錯就關掉小視窗（D93、D88）。"""
         self._popup.open_panel()
 
 
@@ -75,7 +76,8 @@ class Popup:
         self.errors: list[ErrorInfo] = []
         self._lock = threading.Lock()
         self._running = threading.Lock()  # 模組在跑的期間拿著；「打開檔案」等它跑完才做（runner 一次只跑一個）
-        self._panel = threading.Lock()  # 「主控面板」一次只跑一個：連按兩下不會開兩次
+        self._panel = threading.Lock()  # 回去鈕一次只跑一個：連按兩下不會開兩次
+        self._back: str | None = None  # 回去鈕跑的模組名稱；done 時由 run.py 給
         self._ids = itertools.count(1)
         self._waiting: dict[int, tuple[threading.Event, list]] = {}
         self._worker: threading.Thread | None = None
@@ -90,7 +92,7 @@ class Popup:
         """開藏著的小視窗，進入 pywebview 的事件迴圈（佔住主執行緒）；頁面載入後在工作執行緒上跑 job。
         視窗關掉、事件迴圈結束之後等 job 做完，回它的結果。"""
         self._shown = self._closed = self._finished = self._job_done = False
-        self._worker, self._result = None, [1]
+        self._worker, self._result, self._back = None, [1], None
         self.window = self.webview.create_window(
             self.title, url=PAGE.as_uri(), js_api=Bridge(self), width=460, height=320, min_size=(360, 220),
             hidden=True)
@@ -151,27 +153,32 @@ class Popup:
                 event.set()
             self._waiting.clear()
 
-    def done(self, outcome: str, seconds: float, panel: bool = False) -> None:
+    def done(self, outcome: str, seconds: float, back: str | None = None) -> None:
         """模組跑完了：outcome 是 "ok"、"cancelled" 或 "error"。小視窗沒出現過、又沒出錯，就直接關；
         否則交給頁面：成功是「完成（x 秒），3 秒後關閉」的倒數，出錯是「出錯了」與「關閉」。
-        panel 為真時，底下那一列多一個「主控面板」按鈕（D88；要不要給由 run.py 決定）。"""
-        self._finished = True
+        back 是回去鈕上的名字、按下去跑的模組（D93：「行事曆」或「主控面板」；給不給、給哪個由 run.py 決定）。"""
+        self._finished, self._back = True, back
         if not self._shown and outcome != "error":
             self.window.destroy()
             return
         self._reveal()
-        self._js("done", outcome, round(seconds, 1), bool(panel))
+        self._js("done", outcome, round(seconds, 1), back)
 
     def open_panel(self) -> None:
-        """「主控面板」按鈕：在另一條執行緒上、等模組與同步跑完（跟「打開檔案」一樣），用這個 Core 跑最上層的
-        「主控面板」。沒出錯就關掉小視窗；出錯照一般的錯誤顯示，小視窗留著。程序的結束碼不變（還是原本那個模組的）。"""
+        """回去鈕：在另一條執行緒上、等模組與同步跑完（跟「打開檔案」一樣），用這個 Core 跑最上層的 back 那個模組
+        （「行事曆」或「主控面板」）。沒出錯就關掉小視窗；出錯照一般的錯誤顯示，小視窗留著。沒有 back 就不做事。
+        程序的結束碼不變（還是原本那個模組的）。"""
+        back = self._back
+        if back is None:
+            return
+
         def go() -> None:
             if not self._panel.acquire(blocking=False):
                 return
             try:
                 with self._running:
                     try:
-                        result = self.core.run_by_name(PANEL)
+                        result = self.core.run_by_name(back)
                     except LookupError as exc:  # 跑完之後才被刪掉、或有兩個
                         self.log(str(exc))
                         return
