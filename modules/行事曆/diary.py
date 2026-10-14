@@ -22,6 +22,7 @@ YM = re.compile(r"(\d{4})-(\d{2})", re.ASCII)
 YEAR = re.compile(r"\d{4}", re.ASCII)
 SNAPSHOT = re.compile(r"(?P<field>.+)-(?P<stamp>\d{8}-\d{6})(?:-(?P<n>\d+))?\.txt", re.ASCII)
 FIRST_LINE_FROM = ("行程", "做了", "看到")
+SNAPSHOT_EVERY = datetime.timedelta(minutes=10)  # 同一個欄位的上一份快照不到這麼久，就不存新的（檔案照樣覆寫）
 
 
 def _now() -> datetime.datetime:
@@ -72,20 +73,34 @@ def _order(p: Path) -> tuple[str, int]:
     return m.group("stamp"), int(m.group("n") or 0)
 
 
+def _mine(folder: Path, field: str) -> list[Path]:
+    """.history/ 裡這個欄位自己的快照，新的在前；檔名不是我們的格式的不算。"""
+    try:
+        found = [p for p in folder.iterdir() if (m := SNAPSHOT.fullmatch(p.name)) and m.group("field") == field]
+    except OSError:
+        return []
+    return sorted(found, key=_order, reverse=True)
+
+
 def snapshot(path: Path, keep: int) -> None:
-    """path 在就把它複製進 .history/（同一秒的加 -2、-3），同一個欄位只留最新的 keep 份；別的檔不碰。"""
+    """path 在就把它複製進 .history/（同一秒的加 -2、-3），同一個欄位只留最新的 keep 份；別的檔不碰。
+    同一個欄位的上一份快照不到 10 分鐘就不存：打字停 1 秒就存一次，一段長的編輯只留「開始之前」那一份。"""
     if not path.exists():
         return
-    folder = path.parent / HISTORY
+    folder, now = path.parent / HISTORY, _now()
+    mine = _mine(folder, path.stem)
+    if mine:
+        last = datetime.datetime.strptime(_order(mine[0])[0], "%Y%m%d-%H%M%S")
+        if datetime.timedelta(0) <= now - last < SNAPSHOT_EVERY:
+            return
     folder.mkdir(exist_ok=True)
-    stamp = _now().strftime("%Y%m%d-%H%M%S")
+    stamp = now.strftime("%Y%m%d-%H%M%S")
     new, n = folder / f"{path.stem}-{stamp}.txt", 1
     while new.exists():
         n += 1
         new = folder / f"{path.stem}-{stamp}-{n}.txt"
     shutil.copyfile(path, new)
-    mine = [p for p in folder.iterdir() if (m := SNAPSHOT.fullmatch(p.name)) and m.group("field") == path.stem]
-    for old in sorted(mine, key=_order, reverse=True)[max(keep, 0):]:
+    for old in _mine(folder, path.stem)[max(keep, 0):]:
         old.unlink()
 
 

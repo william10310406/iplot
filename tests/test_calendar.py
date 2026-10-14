@@ -216,18 +216,45 @@ def test_mood_three_ways(load, tmp_path):
     assert (day["mood"], day["note"]) == ("", "隨便改的\n好")
 
 
+def ticking(start, step):
+    """假時鐘：每叫一次往前走 step（給 diary._now 用）。"""
+    now = [start - step]
+
+    def tick():
+        now[0] += step
+        return now[0]
+    return tick
+
+
 def test_history_keeps_n_versions_per_field(load, tmp_path, monkeypatch):
     d = load("diary")
-    monkeypatch.setattr(d, "_now", lambda: datetime.datetime(2026, 10, 14, 9, 30, 0))
+    monkeypatch.setattr(d, "_now", ticking(datetime.datetime(2026, 10, 14, 9, 40, 0), datetime.timedelta(minutes=10)))
     folder = tmp_path / "2026" / "10" / "14"
     (folder / ".history").mkdir(parents=True)
     (folder / ".history" / "其他.txt").write_text("別人的", encoding="utf-8")
     for text in ("v1", "v2", "v3", "v4"):
         d.save_day(tmp_path, "2026-10-14", {"行程": text}, 2)
     kept = sorted((folder / ".history").glob("行程-*.txt"))
-    assert [p.name for p in kept] == ["行程-20261014-093000-2.txt", "行程-20261014-093000-3.txt"]
+    assert [p.name for p in kept] == ["行程-20261014-095000.txt", "行程-20261014-100000.txt"]
     assert [p.read_text(encoding="utf-8") for p in kept] == ["v2", "v3"]
     assert (folder / ".history" / "其他.txt").read_text(encoding="utf-8") == "別人的"
+
+
+def test_history_takes_one_snapshot_per_field_per_ten_minutes(load, tmp_path, monkeypatch):
+    """打字停 1 秒就存：一次長一點的編輯不能把「開始編輯之前」那一版擠出 .history。"""
+    d, clock = load("diary"), [datetime.datetime(2026, 10, 14, 9, 0, 0)]
+    monkeypatch.setattr(d, "_now", lambda: clock[0])
+    folder = write_day(tmp_path, "2026-10-14", 行程="開始編輯之前", 看到="雲")
+    for i in range(30):                                       # 30 次、每次隔 10 秒：都在 10 分鐘內
+        d.save_day(tmp_path, "2026-10-14", {"行程": f"v{i}"}, 20)
+        clock[0] += datetime.timedelta(seconds=10)
+    snaps = lambda field: [p.read_text(encoding="utf-8") for p in sorted((folder / ".history").glob(f"{field}-*.txt"))]  # noqa: E731
+    assert snaps("行程") == ["開始編輯之前"] and (folder / "行程.txt").read_text(encoding="utf-8") == "v29"
+    d.save_day(tmp_path, "2026-10-14", {"看到": "雨"}, 20)       # 別的欄位各算各的
+    assert snaps("看到") == ["雲"]
+    clock[0] = datetime.datetime(2026, 10, 14, 9, 10, 0)          # 上一份快照之後滿 10 分鐘
+    d.save_day(tmp_path, "2026-10-14", {"行程": "十分鐘後"}, 20)
+    assert snaps("行程") == ["開始編輯之前", "v29"] and (folder / "行程.txt").read_text(encoding="utf-8") == "十分鐘後"
 
 
 def test_write_goes_through_a_temp_file_and_replace(load, tmp_path, monkeypatch):
@@ -1027,8 +1054,9 @@ def test_save_into_a_missing_or_read_only_folder_is_one_sentence_and_keeps_the_t
     assert list(root.iterdir()) == [] and a._app.logs == []
 
 
-def test_save_keeps_history_keep_versions_from_app_config(load, tmp_path):
+def test_save_keeps_history_keep_versions_from_app_config(load, tmp_path, monkeypatch):
     a = api(load, tmp_path, history_keep=2)
+    monkeypatch.setattr(load("diary"), "_now", ticking(datetime.datetime(2026, 10, 14, 9, 0), datetime.timedelta(minutes=11)))
     for text in ("v1", "v2", "v3", "v4"):
         a.save("2026-10-14", {"行程": text})
     assert len(list((tmp_path / "資料/2026/10/14/.history").glob("行程-*.txt"))) == 2
