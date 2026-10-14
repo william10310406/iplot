@@ -647,3 +647,115 @@ def test_rebuild_all_survives_a_non_utf8_file_and_marks_the_field(load, tmp_path
     pg.rebuild_all(tmp_path)
     page = (tmp_path / "2026/10/14/index.html").read_text(encoding="utf-8")
     assert "讀不到" in page and "ok" in page and (tmp_path / "2026/10/14/做了.txt").read_bytes() == b"\xff\xfe\x00"
+
+
+# ── 公開版：發佈/ 只放打開「公開」的日子（D91、D92；每次重寫所有網頁，設計第 15 節第 5 條） ──
+
+def three_days(tmp_path, public=("2026-10-10", "2026-10-20")):
+    d = load_diary()
+    for date in ("2026-10-10", "2026-10-14", "2026-10-20"):
+        (write_day(tmp_path, date, 行程=f"寫在 {date}") / "a.jpg").write_bytes(gps_jpeg())
+    for date in public:
+        d.set_public(tmp_path, date, True)
+
+
+def load_diary():
+    return sys.modules["diary"]
+
+
+def test_publish_contains_only_public_days_and_returns_the_folder(load, tmp_path):
+    pg = load("pages")
+    three_days(tmp_path)
+    out = pg.publish(tmp_path, run=fake_sips_ok, platform="darwin")
+    assert out == tmp_path / "發佈" and (out / "2026/10/10/index.html").exists() and not (out / "2026/10/14").exists()
+    month = (out / "2026/10/index.html").read_text(encoding="utf-8")
+    assert "14/index.html" not in month and 'href="10/index.html"' in month
+    index = (out / "index.html").read_text(encoding="utf-8")
+    assert "寫在 2026-10-14" not in index and "寫在 2026-10-20" in index
+    assert "../../../2026/10/20/index.html" in (out / "2026/10/10/index.html").read_text(encoding="utf-8")
+
+
+def test_every_public_page_has_noindex(load, tmp_path):
+    pg = load("pages")
+    three_days(tmp_path)
+    pages = list(pg.publish(tmp_path, run=fake_sips_ok, platform="darwin").rglob("*.html"))
+    assert len(pages) == 2 + 1 + 1 + 1
+    assert all('<meta name="robots" content="noindex">' in p.read_text(encoding="utf-8") for p in pages)
+
+
+def test_publish_never_copies_private_files(load, tmp_path):
+    pg = load("pages")
+    three_days(tmp_path)
+    folder = tmp_path / "2026/10/10"
+    (folder / "b.heic").write_bytes(b"heic")
+    (folder / "b.jpg").write_bytes(gps_jpeg())
+    (folder / "c.png").write_bytes(png_with_text())
+    (folder / ".縮圖").mkdir()
+    (folder / ".縮圖" / "a.jpg.jpg").write_bytes(b"thumb")
+    (folder / ".history").mkdir()
+    (folder / ".history" / "行程-20261014-093000.txt").write_text("舊的", encoding="utf-8")
+    write_day(tmp_path, "2026-10-10", 心情="😢\n很私人")
+    out = pg.publish(tmp_path, run=fake_sips_ok, platform="darwin")
+    files = [p for p in out.rglob("*") if p.is_file()]
+    assert {p.suffix for p in files} <= {".html", ".jpg", ".png", ".gif"}
+    assert not any(p.name in ("公開",) or p.suffix in (".txt", ".heic", ".heif") or ".history" in p.parts
+                   or ".縮圖" in p.parts for p in out.rglob("*"))
+    assert sorted(p.name for p in (out / "2026/10/10").iterdir()) == ["a.jpg", "b.jpg", "c.png", "index.html"]
+    assert b"secret" not in (out / "2026/10/10/c.png").read_bytes() and b"Exif" not in (out / "2026/10/10/b.jpg").read_bytes()
+
+
+def test_unpublishing_removes_the_day_and_relinks_the_public_neighbours(load, tmp_path):   # 第 5 條（公開版）
+    pg = load("pages")
+    three_days(tmp_path, public=("2026-10-10", "2026-10-14", "2026-10-20"))
+    out = pg.publish(tmp_path, run=fake_sips_ok, platform="darwin")
+    assert (out / "2026/10/14/index.html").exists()
+    load_diary().set_public(tmp_path, "2026-10-14", False)
+    pg.publish(tmp_path, run=fake_sips_ok, platform="darwin")
+    assert not (out / "2026/10/14").exists()
+    page = (out / "2026/10/10/index.html").read_text(encoding="utf-8")
+    assert "../../../2026/10/20/index.html" in page and "2026-10-14" not in page
+    assert "寫在 2026-10-14" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_public_images_are_stripped_and_only_redone_when_newer(load, tmp_path):
+    pg, calls = load("pages"), []
+    three_days(tmp_path, public=("2026-10-10",))
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return fake_sips_ok(argv, **kw)
+
+    out = pg.publish(tmp_path, run=run, platform="darwin")
+    published = out / "2026/10/10/a.jpg"
+    assert [c[:3] for c in calls] == [["sips", "-Z", "1600"]] and b"\xff\xe1" not in published.read_bytes()
+    before = published.stat().st_mtime
+    pg.publish(tmp_path, run=run, platform="darwin")
+    assert len(calls) == 1 and published.stat().st_mtime == before
+    src = tmp_path / "2026/10/10/a.jpg"
+    os.utime(src, (before + 10, before + 10))
+    pg.publish(tmp_path, run=run, platform="darwin")
+    assert len(calls) == 2
+
+
+def test_image_that_cannot_be_published_is_one_line_in_problems(load, tmp_path):
+    pg = load("pages")
+    folder = write_day(tmp_path, "2026-10-10", 行程="x")
+    (folder / "x.gif").write_bytes(b"BM not a gif")
+    (folder / "y.heic").write_bytes(b"heic")
+    (folder / "z.heic").write_bytes(b"heic")
+    (folder / "z.jpg").write_bytes(gps_jpeg())
+    load_diary().set_public(tmp_path, "2026-10-10", True)
+    problems = []
+    out = pg.publish(tmp_path, run=fake_sips_ok, platform="darwin", problems=problems)
+    assert problems == ["2026-10-10 x.gif：沒放上網路：不是 JPEG、PNG、GIF",
+                        "2026-10-10 y.heic：沒放上網路：HEIC 不放上網路，轉成 JPG 才會"]
+    page = (out / "2026/10/10/index.html").read_text(encoding="utf-8")
+    assert "x.gif" not in page and "y.heic" not in page and 'src="z.jpg"' in page
+    assert sorted(p.name for p in (out / "2026/10/10").iterdir()) == ["index.html", "z.jpg"]
+
+
+def test_publish_with_no_public_days_leaves_an_empty_site(load, tmp_path):
+    pg = load("pages")
+    three_days(tmp_path, public=())
+    out = pg.publish(tmp_path, run=fake_sips_ok, platform="darwin")
+    assert [p.name for p in out.iterdir()] == ["index.html"]

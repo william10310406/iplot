@@ -9,6 +9,8 @@
 import bisect
 import calendar
 import html
+import subprocess
+import sys
 import urllib.parse
 from pathlib import Path
 
@@ -25,6 +27,8 @@ LABELS = (("行程", "行程"), ("看到", "看到了什麼"), ("做了", "做�
 UNREADABLE = "讀不到這個檔（不是 UTF-8），沒有覆寫它"
 NO_HEIC = "這張是 HEIC，Chrome 看不到（Safari 看得到）"
 EMPTY_DAY = "這一天沒有內容"
+NOT_PUBLISHED = "{date} {name}：沒放上網路：{why}"
+HEIC_NOT_PUBLISHED = "HEIC 不放上網路，轉成 JPG 才會"
 STYLE = """
 :root { color-scheme: light dark; --bg: #fbfbfd; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --accent: #d93a2b;
   --cell: #ffffff; }
@@ -69,9 +73,12 @@ def _long_date(date: str) -> str:
     return f"{d.year} 年 {d.month} 月 {d.day} 日（{WEEKDAY_OF[d.weekday()]}）"
 
 
-def _images(day: dict, public: bool) -> list[str]:
+def _images(day: dict, public: bool, skip: frozenset = frozenset()) -> list[str]:
+    """公開版只放 JPEG、PNG、GIF，而且不放 skip 裡的（(日期, 檔名)：發佈時處理不了的那幾張）。"""
     names = day["images"]
-    return [n for n in names if Path(n).suffix.lower() in photos.PUBLISHABLE] if public else names
+    if not public:
+        return names
+    return [n for n in names if Path(n).suffix.lower() in photos.PUBLISHABLE and (day["date"], n) not in skip]
 
 
 def _day_path(date: str) -> str:
@@ -89,9 +96,10 @@ def _fields(day: dict, public: bool) -> str:
     return "\n".join(parts)
 
 
-def _photo_list(day: dict, public: bool, prefix: str = "", limit: int | None = None) -> str:
+def _photo_list(day: dict, public: bool, prefix: str = "", limit: int | None = None,
+                skip: frozenset = frozenset()) -> str:
     items = []
-    for name in _images(day, public)[:limit]:
+    for name in _images(day, public, skip)[:limit]:
         src = prefix + urllib.parse.quote(name)
         note = f'<span class="muted">{NO_HEIC}</span>' if Path(name).suffix.lower() in photos.HEIC else ""
         items.append(f'<a href="{src}"><img src="{src}" alt="" loading="lazy"></a>{note}')
@@ -110,12 +118,12 @@ def neighbours(days: list[str], date: str) -> tuple[str | None, str | None]:
     return (days[i - 1] if i > 0 else None), (days[j] if j < len(days) else None)
 
 
-def render_day(root: Path, date: str, *, public: bool = False) -> str:
+def render_day(root: Path, date: str, *, public: bool = False, skip: frozenset = frozenset()) -> str:
     d = diary.parse_date(date)
     day = diary.read_day(root, date)
     body = [f'<nav class="crumbs"><a href="../../../index.html">綜合</a> › <a href="../../index.html">{d.year}</a> › '
             f'<a href="../index.html">{d.month} 月</a></nav>', f"<h1>{_long_date(date)}</h1>"]
-    content = _mood(day) + _fields(day, public) + _photo_list(day, public)
+    content = _mood(day) + _fields(day, public) + _photo_list(day, public, skip=skip)
     body.append(content or f'<p class="muted">{EMPTY_DAY}</p>')
     before, after = neighbours(diary.all_days(root, public_only=public), date)
     prev_link = f'<a href="../../../{_day_path(before)}/index.html">‹ {before}</a>' if before else "<span></span>"
@@ -191,7 +199,7 @@ def render_year(root: Path, y: str, *, public: bool = False) -> str:
     return _page(f"{year} 年", body, public)
 
 
-def render_index(root: Path, *, public: bool = False) -> str:
+def render_index(root: Path, *, public: bool = False, skip: frozenset = frozenset()) -> str:
     days = diary.all_days(root, public_only=public)
     articles = []
     for date in reversed(days[-RECENT:]):
@@ -199,7 +207,7 @@ def render_index(root: Path, *, public: bool = False) -> str:
         mood = f" {_e(day['mood'])}" if day["mood"] else ""
         note = f'<p class="mood">{_e(day["note"])}</p>' if day["note"].strip() else ""
         articles.append(f'<article><h2><a href="{_day_path(date)}/index.html">{_long_date(date)}</a>{mood}</h2>{note}'
-                        f"{_fields(day, public)}{_photo_list(day, public, _day_path(date) + '/', RECENT_IMAGES)}</article>")
+                        f"{_fields(day, public)}{_photo_list(day, public, _day_path(date) + '/', RECENT_IMAGES, skip)}</article>")
     years: dict[str, dict[str, int]] = {}
     for date in days:
         months = years.setdefault(date[:4], {})
@@ -218,9 +226,10 @@ def _out(root: Path, public: bool, out: Path | None) -> Path:
     return Path(out) if out is not None else (Path(root) / PUBLISH if public else Path(root))
 
 
-def build_day(root: Path, date: str, *, public: bool = False, out: Path | None = None) -> Path:
+def build_day(root: Path, date: str, *, public: bool = False, out: Path | None = None,
+              skip: frozenset = frozenset()) -> Path:
     path = _out(root, public, out) / _day_path(date) / "index.html"
-    diary.write_text(path, render_day(root, date, public=public))
+    diary.write_text(path, render_day(root, date, public=public, skip=skip))
     return path
 
 
@@ -237,9 +246,9 @@ def build_year(root: Path, y: str, *, public: bool = False, out: Path | None = N
     return path
 
 
-def build_index(root: Path, *, public: bool = False, out: Path | None = None) -> Path:
+def build_index(root: Path, *, public: bool = False, out: Path | None = None, skip: frozenset = frozenset()) -> Path:
     path = _out(root, public, out) / "index.html"
-    diary.write_text(path, render_index(root, public=public))
+    diary.write_text(path, render_index(root, public=public, skip=skip))
     return path
 
 
@@ -267,3 +276,53 @@ def rebuild_all(root: Path) -> list[Path]:
     written.append(build_index(root))
     return written
 
+
+
+def _publish_images(root: Path, out: Path, days: list[str], run, platform: str, problems: list[str]) -> tuple[set, set]:
+    """每一天可以公開的圖：原圖比發佈/ 裡的新（或還沒有）才重做。回 (應有的檔, 處理不了的 (日期, 檔名))。"""
+    wanted, skip = set(), set()
+    for date in days:
+        folder, target = diary.day_folder(root, date), out / _day_path(date)
+        for name in diary.read_day(root, date)["images"]:
+            suffix = Path(name).suffix.lower()
+            if suffix in photos.HEIC:
+                problems.append(NOT_PUBLISHED.format(date=date, name=name, why=HEIC_NOT_PUBLISHED))
+                skip.add((date, name))
+                continue
+            src, dst = folder / name, target / name
+            try:
+                if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
+                    photos.public_copy(src, dst, run=run, platform=platform)
+            except (ValueError, OSError) as exc:
+                problems.append(NOT_PUBLISHED.format(date=date, name=name, why=exc))
+                skip.add((date, name))
+                continue
+            wanted.add(dst)
+    return wanted, skip
+
+
+def _prune(out: Path, wanted: set) -> None:
+    """發佈/ 裡不在應有清單上的檔刪掉（取消公開的那一天會消失），空了的資料夾也刪掉。"""
+    for path in sorted(out.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_symlink() or path.is_file():
+            if path not in wanted:
+                path.unlink()
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+
+
+def publish(root: Path, *, run=subprocess.run, platform: str = sys.platform, problems: list[str] | None = None) -> Path:
+    """產生公開版 <資料夾>/發佈/（D92 的接口：回它的路徑；上傳之後接在這後面）。只有打開「公開」的日子；
+    每次重寫所有網頁；圖片縮小、拿掉中繼資料，原圖比較新才重做；處理不了的圖每張一句進 problems，那張不出現在網頁上。"""
+    root = Path(root)
+    out = root / PUBLISH
+    problems = [] if problems is None else problems
+    days = diary.all_days(root, public_only=True)
+    wanted, skip = _publish_images(root, out, days, run, platform, problems)
+    frozen = frozenset(skip)
+    wanted |= {build_day(root, date, public=True, skip=frozen) for date in days}
+    wanted |= {build_month(root, ym, public=True) for ym in {date[:7] for date in days}}
+    wanted |= {build_year(root, y, public=True) for y in {date[:4] for date in days}}
+    wanted.add(build_index(root, public=True, skip=frozen))
+    _prune(out, wanted)
+    return out
