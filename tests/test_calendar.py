@@ -1211,3 +1211,32 @@ def test_api_never_logs_while_the_page_is_open(load, home, tmp_path):
     a.month("2026-10")
     a.day("2026-10-14")
     assert a._app.logs == []
+
+
+# ── page.html：行事曆的畫面（靜態檢查；瀏覽器試走在 spikes/m5/page_harness.py） ──
+
+def test_page_html_is_self_contained_and_never_uses_inner_html():
+    html_text = page_html()
+    assert not any(w in html_text for w in ("http://", "https://", "innerHTML", "outerHTML", "style.css",
+                                            "insertAdjacentHTML", "document.write", "eval("))
+    assert "prefers-color-scheme: dark" in html_text and "pywebviewready" in html_text and 'charset="utf-8"' in html_text
+
+
+def test_page_html_calls_exactly_the_api_methods():
+    html_text = page_html()
+    assert set(re.findall(r'call\("(\w+)"', html_text)) == FIFTEEN
+    assert "pywebview.api." not in html_text.replace("window.pywebview.api[name]", "")   # 只經 call()：保證順序
+
+
+def test_page_html_has_the_five_moods_the_three_fields_and_the_sentences():
+    html_text = page_html()
+    assert all(m in html_text for m in ("😄", "🙂", "😐", "😟", "😢", "行程", "看到了什麼", "做了什麼", "公開", "看網頁",
+                                        "發佈", "重建全部網頁", "換資料夾", "打開資料夾", "打開綜合網頁", "圖示面板"))
+    assert "要放上網路的有 " in html_text and "產生發佈用的資料夾？" in html_text and "已存" in html_text
+    assert "🌐" in html_text and "🖼" in html_text and "today" in html_text and "讀不到這個檔（不是 UTF-8），沒有覆寫它：" in html_text
+
+
+def test_page_html_debounces_typing_and_rescans_modules_only_on_focus():       # 設計第 15 節第 8、7 條
+    html_text = page_html()
+    assert "1000" in html_text and "pagehide" in html_text
+    assert html_text.count('call("modules"') == 1 and 'addEventListener("focus"' in html_text
