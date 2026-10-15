@@ -2,6 +2,13 @@
 
 「行事曆」這個模組的版本紀錄，格式跟 iPLoT 的 CHANGELOG.md 一樣（[Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)）。`tools/publish.py` 取最上面那一節的版本號當工作坊裡的版本，取那一節的第一段當清單頁上的「這一版」。
 
+## [0.1.1] - 2026-10-15
+
+修正「發佈」：取消最後一個公開的日子之後再按「發佈」，上一次產生的 發佈/ 會整個拿掉，狀態列說「沒有公開的日子了，已經拿掉 發佈/」；之前只說「還沒有打開「公開」的日子」，發佈/ 裡還留著剛取消公開的那幾天，照著再上傳就會把它們留在網路上。
+
+### 修正
+- 公開的日子是 0 天、而 `發佈/` 存在時，「發佈」把 `發佈/` 整個拿掉（`pages.unpublish`）；`發佈/` 本來就不在時跟以前一樣，只說「還沒有打開「公開」的日子」、不產生任何東西（`tests/test_calendar.py::test_publish_after_the_last_public_day_is_unpublished_removes_the_publish_folder`、`::test_publish_with_no_public_day_and_no_publish_folder_creates_nothing`）。
+
 ## [0.1.0] - 2026-10-14
 
 第一版：打開就是這個月的月曆，每天寫行程、心情、看到了什麼、做了什麼，放照片；全部存成一天一個資料夾（預設 ~/Documents/行事曆），並產生成網頁（綜合、年、月、日）；打開「公開」的日子，按「發佈」另外產生一份可以放上網路的 發佈/（照片縮小、拿掉拍攝地點，不會幫忙上傳）。上方的模組列叫得到任何模組，任何模組寫 app.run("行事曆") 就叫得到它。需要「互通」；只在 macOS 驗過。

@@ -63,6 +63,7 @@ UNREADABLE = "讀不到這個檔（不是 UTF-8），沒有覆寫它：{path}"
 NOT_FOUND = "找不到「{name}」（可能被改名或刪掉了）"
 CANNOT_LAUNCH = "打不開「{name}」：{why}"
 NO_PUBLIC = "還沒有打開「公開」的日子"
+UNPUBLISHED = "沒有公開的日子了，已經拿掉 發佈/"
 UPLOAD_NOTE = "上傳方式還沒設定：把『發佈』裡的東西放到網頁空間"
 PANEL = "主控面板"
 # macOS 14 起，自己不在最前面的 App 叫別人到最前面會被拒絕；不是 App 的一般 python 程序叫就可以（跟「主控面板」同一段）。
@@ -317,8 +318,8 @@ class Api:
     def publish(self):
         root = self._root()
         days = len(diary.all_days(root, public_only=True))
-        if not days:
-            return {"error": NO_PUBLIC}
+        if not days:  # 取消了最後一個公開的日子：上一次產生的 發佈/ 不能留著（照著再上傳，那幾天就還在網路上）
+            return {"note": UNPUBLISHED} if pages.unpublish(root) else {"error": NO_PUBLIC}
         problems = []
         folder = pages.publish(root, run=self._run, platform=self._platform, problems=problems)
         self._app.open(folder)
