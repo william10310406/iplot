@@ -9,6 +9,7 @@
 import bisect
 import calendar
 import html
+import shutil
 import subprocess
 import sys
 import urllib.parse
@@ -314,6 +315,19 @@ def _prune(out: Path, wanted: set) -> None:
                 path.unlink()
         elif path.is_dir() and not any(path.iterdir()):
             path.rmdir()
+
+
+def unpublish(root: Path) -> bool:
+    """公開的日子是 0 天時拿掉整個 發佈/（裡面全是「發佈」自己產生的；別的檔 _prune 本來就會刪）。
+    發佈/ 本來就不在回 False；是符號連結就只拿掉連結，不跟過去。"""
+    out = Path(root) / PUBLISH
+    if out.is_symlink():
+        out.unlink()
+        return True
+    if not out.exists():
+        return False
+    shutil.rmtree(out)
+    return True
 
 
 def publish(root: Path, *, run=subprocess.run, platform: str = sys.platform, problems: list[str] | None = None) -> Path:

@@ -346,7 +346,11 @@ async function publish() {
   if (!(await saveDay())) return;
   const s = await call("settings");
   if (s.error) return;
-  if (!s.public_days) return call("publish");  // 會回「還沒有打開「公開」的日子」
+  if (!s.public_days) {  // 沒有公開的日子：回「還沒有打開「公開」的日子」，或拿掉了上一次的 發佈/ 並說一句
+    const r = await call("publish");
+    if (r.note) say(r.note);
+    return;
+  }
   $("askText").textContent = "要放上網路的有 " + s.public_days + " 天（只有打開『公開』的日子）。產生發佈用的資料夾？";
   $("ask").hidden = false;
 }

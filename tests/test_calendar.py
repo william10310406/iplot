@@ -1364,3 +1364,41 @@ def test_page_html_refreshes_today_when_the_window_gets_focus():
     assert "loadModules()" in on_focus and "refreshToday()" in on_focus
     refresh = html_text[html_text.index("function refreshToday()"):][:300]
     assert "new Date()" in refresh and "todayText" in refresh
+
+
+# ── 行事曆 0.1.1：取消最後一個公開的日子之後按「發佈」，發佈/ 要拿掉 ──
+
+def test_publish_after_the_last_public_day_is_unpublished_removes_the_publish_folder(load, tmp_path):
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    a.save("2026-10-14", {"行程": "很私人的一天"})
+    a.set_public("2026-10-14", True)
+    assert a.publish()["days"] == 1 and (root / "發佈/2026/10/14/index.html").exists()
+    a.set_public("2026-10-14", False)
+    opened = list(a._app.opened)
+    assert a.publish() == {"note": "沒有公開的日子了，已經拿掉 發佈/"}
+    assert not (root / "發佈").exists() and a._app.opened == opened and a._app.logs == []
+    assert a.publish() == {"error": "還沒有打開「公開」的日子"}     # 再按一次：發佈/ 已經不在，跟從來沒公開過一樣
+
+
+def test_publish_with_no_public_day_and_no_publish_folder_creates_nothing(load, tmp_path):
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    a.save("2026-10-14", {"行程": "x"})
+    assert a.publish() == {"error": "還沒有打開「公開」的日子"}
+    assert not (root / "發佈").exists() and a._app.opened == []
+
+
+def test_unpublish_only_removes_the_publish_folder_itself(load, tmp_path):
+    pg = load("pages")
+    (tmp_path / "發佈" / "2026").mkdir(parents=True)
+    (tmp_path / "發佈" / "index.html").write_text("x", encoding="utf-8")
+    write_day(tmp_path, "2026-10-14", 行程="留著")
+    assert pg.unpublish(tmp_path) is True and not (tmp_path / "發佈").exists()
+    assert (tmp_path / "2026/10/14/行程.txt").read_text(encoding="utf-8") == "留著"
+    assert pg.unpublish(tmp_path) is False                     # 已經不在：什麼都不做
+
+
+def test_page_html_shows_the_note_when_publishing_with_nothing_public():
+    """公開的日子是 0 天時頁面照樣叫 publish：拿掉了舊的 發佈/ 就把那一句顯示在狀態列（不是錯誤的紅字）。"""
+    html_text = page_html()
+    branch = html_text[html_text.index("if (!s.public_days)"):][:300]
+    assert 'call("publish")' in branch and "say(r.note)" in branch
