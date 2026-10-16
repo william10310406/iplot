@@ -931,3 +931,142 @@ def test_collect_refuses_paths_outside_hk_folder(tmp_path, load, monkeypatch):
     assert not (tmp_path / "逃出去").exists() and not (folder.parent / "逃出去").exists()
     assert said.startswith("收了 0 份進 HK5")
 
+
+# ── Task 6：批次模式（沒有 iPLoT 也能收、名單視窗）──
+
+
+def test_hk_in_name(load):
+    hk = load("hk_tk")
+    assert hk.hk_in_name("HK5") == "HK5"
+    assert hk.hk_in_name("2026科學計算_hk12_全班") == "HK12"
+    assert hk.hk_in_name("作業") is None
+
+
+def test_batch_collects_next_to_the_zip_with_kit_space(tmp_path, load):
+    hk = load("hk_tk")
+    zipped = make_zip(tmp_path / "下載" / "HK5.zip", {"B1/HK5.txt": GOOD})
+    kit = teacher_kit(tmp_path)
+    said = []
+    out = hk.batch(zipped, kit=kit, say=said.append)
+    assert out == tmp_path / "下載" / "HK5_收件"
+    assert (out / "B1" / "t2026fscSpace" / "HK5.txt").read_bytes() == GOOD.encode("utf-8")
+    assert (out / "B1" / "t2026fscSpace" / "HK5Space" / "a.pdf").read_bytes() == b"%PDF"
+    assert (out / "B1" / "iplot.py").exists()
+    assert said[-1].startswith("收了 1 份進 HK5（新 1、覆蓋 0）")
+    assert said[-1].endswith("；.venv 還沒建，套件沒掃")  # HK_NO_INSTALL：不建 venv，只報
+    assert any("HK_NO_INSTALL" in line for line in said)
+
+
+def test_batch_needs_hk_in_name_or_flag(tmp_path, load):
+    hk = load("hk_tk")
+    zipped = make_zip(tmp_path / "作業.zip", {"B1/HK5.txt": GOOD})
+    with pytest.raises(RuntimeError, match="用 --hk HK5 指定"):
+        hk.batch(zipped, say=[].append)
+    out = hk.batch(zipped, hk="HK5", out=tmp_path / "收", say=[].append)
+    assert (out / "B1" / "t2026fscSpace" / "HK5.txt").exists()
+
+
+def test_batch_uses_the_venv_flag(tmp_path, load):
+    hk = load("hk_tk")
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/HK5.txt": GOOD})
+    venv = tmp_path / "我的-venv"
+    exe = hk.python_in(venv)
+    exe.parent.mkdir(parents=True)
+    exe.write_text("", encoding="utf-8")
+    popen = FakePopen(output=lambda argv: ['["scikit-learn"]'])
+    said = []
+    hk.batch(zipped, kit=teacher_kit(tmp_path), venv=venv, say=said.append, popen=popen)
+    assert popen.argvs[0][0] == str(exe)  # 用 --venv 那一個問裝了什麼
+    assert said[-1] == "收了 1 份進 HK5（新 1、覆蓋 0）"
+
+
+def test_batch_default_venv_sits_next_to_the_zip(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    zipped = make_zip(tmp_path / "下載" / "HK5.zip", {"B1/HK5.txt": "x = 1\n"})
+    popen = FakePopen(output=lambda argv: ['[]'])
+    hk.batch(zipped, say=[].append, popen=popen)
+    assert popen.argvs[0][1:] == ["-m", "venv", str(tmp_path / "下載" / "科學計算-venv")]
+
+
+def test_cli_app_confirm_with_yes_and_with_typing(load, capsys):
+    hk = load("hk_tk")
+    said = []
+    assert hk.CliApp(said.append, yes=True).confirm("裝嗎？") is True
+    assert hk.CliApp(said.append, ask=lambda prompt: "y").confirm("裝嗎？") is True
+    assert hk.CliApp(said.append, ask=lambda prompt: "").confirm("裝嗎？") is False
+
+    def eof(prompt):
+        raise EOFError
+
+    assert hk.CliApp(said.append, ask=eof).confirm("裝嗎？") is False
+
+
+def roster_out(tmp_path):
+    """HK5_收件/：B1 好的、B2 語法錯、B3 交成 HK3。"""
+    out = tmp_path / "HK5_收件"
+    old_hk(out / "B1")
+    old_hk(out / "B2", src="def HK5(:\n")
+    old_hk(out / "B3", src=OLD_HK.replace("{hk}", "HK3"))  # 檔名是 HK5.txt，內容是 HK3
+    (out / "t2026fscSpace" / "HK5Space").mkdir(parents=True)  # 老師的 Space：不是學生
+    return out
+
+
+def test_roster_marks(tmp_path, load):
+    hk = load("hk_tk")
+    out = roster_out(tmp_path)
+    assert hk.roster(out) == [("B1", ""), ("B2", "語法錯誤"), ("B3", "不是作業檔")]
+
+
+def test_roster_marks_missing_packages(tmp_path, load):
+    hk = load("hk_tk")
+    out = roster_out(tmp_path)
+    assert hk.roster(out, have={"numpy"})[0] == ("B1", "缺 scikit-learn")
+    assert hk.roster(out, have={"scikit-learn"})[0] == ("B1", "")
+
+
+def test_roster_window_opens_student_with_venv_python(tmp_path, load, tk_root):
+    hk = load("hk_tk")
+    out = roster_out(tmp_path)
+    popen = FakePopen()
+    win = hk.Roster(out, Path("/venv/bin/python"), tk_root, popen=popen)
+    assert win.listbox.get(0, "end") == ("B1", "B2    語法錯誤", "B3    不是作業檔")
+    assert tk_root.title() == "HK5_收件 — 3 份"
+    win.listbox.selection_set(0)
+    win.open_button.invoke()
+    assert popen.argvs == [["/venv/bin/python", str(COURSE / "hk_tk.py"), str(out / "B1"), "HK5"]]
+    assert popen.calls[0][1] == {"cwd": str(out / "B1")}
+    win.listbox.selection_clear(0, "end")
+    win.open_button.invoke()  # 沒選：不開
+    assert len(popen.calls) == 1
+    assert "<Double-Button-1>" in win.listbox.bind()  # 雙擊一樣開（Tk 不准用 event_generate 造雙擊）
+    win.listbox.selection_set(2)
+    win.open_selected()
+    assert popen.argvs[-1][2] == str(out / "B3")
+
+
+def test_main_batch_parses_flags(load, monkeypatch, tmp_path):
+    hk = load("hk_tk")
+    got = {}
+
+    def fake_batch(source, **kw):
+        got.update(kw, source=source)
+        return tmp_path / "o"
+
+    shown = []
+    monkeypatch.setattr(hk, "batch", fake_batch)
+    monkeypatch.setattr(hk, "show_roster", lambda out, python: shown.append((out, python)) or 0)
+    argv = ["--batch", "x.zip", "--kit", "k", "--out", "o", "--venv", "v", "--hk", "HK5", "--yes"]
+    assert hk.main(argv) == 0
+    assert got["source"] == Path("x.zip")
+    assert (got["kit"], got["out"], got["venv"], got["hk"], got["yes"]) == (Path("k"), Path("o"), Path("v"), "HK5", True)
+    assert shown == [(tmp_path / "o", hk.python_in(Path("v")))]
+
+
+def test_main_batch_error_is_one_sentence(load, monkeypatch, capsys, tmp_path):
+    hk = load("hk_tk")
+    zipped = make_zip(tmp_path / "作業.zip", {"B1/HK5.txt": GOOD})
+    monkeypatch.setattr(hk, "show_roster", lambda out, python: 0)
+    assert hk.main(["--batch", str(zipped)]) == 1
+    assert "檔名裡看不出是哪一份作業" in capsys.readouterr().err
+

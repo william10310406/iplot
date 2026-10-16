@@ -33,7 +33,8 @@ HK_RE = re.compile(r"^(HK\d+)\.txt$")
 NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # pip 名只接這些字元（設計第 6 節），不經 shell
 NO_INSTALL = "HK_NO_INSTALL"  # 設了就不建 venv、不跑 pip，缺了只報（測試用）
 GLOBALS = ("LF", "LF_subWIN", "t2026fscHOMEDIR", "os", "sys", "tkinter")  # 老師的啟動器給 HKn.txt 的全域
-USAGE = "用法：python hk_tk.py <資料夾> <HKn>    （跑 <資料夾>/t2026fscSpace/HKn.txt）"
+USAGE = ("用法：python hk_tk.py <資料夾> <HKn>    （跑 <資料夾>/t2026fscSpace/HKn.txt）\n"
+         "　　　python hk_tk.py --batch <zip> [--kit 老師的t2026fscSpace] [--out 資料夾] [--venv 資料夾] [--hk HKn] [--yes]")
 
 
 def hk_of(folder: Path) -> str | None:
@@ -572,6 +573,120 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         shutil.rmtree(work, ignore_errors=True)
 
 
+# ── 批次模式：沒有 iPLoT 也能收、能看（設計第 8 節、D98）──
+
+
+def hk_in_name(name: str) -> str | None:
+    """名字裡的 HK<n>（大小寫都認）；沒有回 None。zip 的檔名靠這個知道是哪一份作業。"""
+    m = re.search(r"HK(\d+)", name, re.IGNORECASE)
+    return f"HK{m.group(1)}" if m else None
+
+
+class CliApp:
+    """批次模式給 collect 的 app：訊息印出來、確認用打字（--yes 一律是）、沒有面板可以重掃。"""
+
+    def __init__(self, say, yes: bool = False, ask=input):
+        self.log, self._yes, self._ask = say, yes, ask
+
+    def confirm(self, prompt: str) -> bool:
+        if self._yes:
+            self.log(f"{prompt} → 是（--yes）")
+            return True
+        try:
+            return self._ask(f"{prompt} [y/N] ").strip().lower() in ("y", "yes", "是")
+        except EOFError:
+            return False
+
+    def rescan(self) -> None:
+        pass
+
+
+def batch(source: Path, kit: Path | None = None, out: Path | None = None, venv: Path | None = None, say=print,
+          popen=subprocess.Popen, hk: str | None = None, yes: bool = False, ask=input) -> Path:
+    """python hk_tk.py --batch HK5.zip：跟面板同一個 collect，收進 zip 旁邊的 HK5_收件/；
+    --kit 給老師的 t2026fscSpace（HK5Space/ 從那裡拿），套件裝進 zip 旁邊的 科學計算-venv/（幾個 HK 共用）。回收件資料夾。"""
+    source = Path(source)
+    hk = hk or hk_in_name(source.stem)
+    if hk is None:
+        raise RuntimeError("檔名裡看不出是哪一份作業：用 --hk HK5 指定")
+    out = Path(out) if out else source.with_name(f"{source.stem}_收件")
+    out.mkdir(parents=True, exist_ok=True)
+    if kit is not None and (Path(kit) / f"{hk}Space").is_dir():
+        _copytree(Path(kit) / f"{hk}Space", out / KIT / f"{hk}Space")
+    try:
+        python = ensure_venv(Path(venv) if venv else source.parent / "科學計算-venv", say, popen=popen)
+    except RuntimeError as exc:  # 建不了（或 HK_NO_INSTALL）：照收，只是套件不裝
+        say(str(exc))
+        python = None
+    collect(CliApp(say, yes, ask), [source], out, python=python, popen=popen, hk=hk)
+    return out
+
+
+def _students(out: Path) -> list[Path]:
+    return sorted((p for p in Path(out).iterdir() if p.is_dir() and p.name != KIT and (p / KIT).is_dir()),
+                  key=lambda p: _nfc(p.name))
+
+
+def roster(out: Path, have: set[str] | None = None) -> list[tuple[str, str]]:
+    """名單：[(學生, 標記)]，標記是「語法錯誤」「不是 UTF-8」「不是作業檔」或「缺 x、y」（have＝venv 裝了的，正規化過）。"""
+    rows = []
+    for student in _students(out):
+        hk = hk_of(student)
+        file = student / KIT / f"{hk}.txt"
+        kind, found = classify(file) if hk else ("none", None)
+        mark = {"broken": "語法錯誤", "not-utf8": "不是 UTF-8"}.get(kind, "")
+        if not mark and found != hk:
+            mark = "不是作業檔"
+        if not mark and have is not None:
+            need = sorted({pip_name(n) for n in third_party(scan_imports(file), student)} - _have(have), key=str.lower)
+            mark = f"缺 {'、'.join(need)}" if need else ""
+        rows.append((_nfc(student.name), mark))
+    return rows
+
+
+def _have(names: set[str]) -> set[str]:
+    return {_normal(n) for n in names} | set(names)
+
+
+class Roster:
+    """全班名單的 Tk 視窗：一列一個學生，雙擊或按「開」→ 另開一個執行器視窗跑他的那份。"""
+
+    def __init__(self, out: Path, python: Path, root, popen=subprocess.Popen, have: set[str] | None = None):
+        import tkinter
+
+        self.out, self.python, self.popen = Path(out), Path(python), popen
+        self.rows = roster(self.out, have)
+        root.title(f"{self.out.name} — {len(self.rows)} 份")
+        root.geometry("420x600")
+        self.listbox = tkinter.Listbox(root, font=("TkDefaultFont", 14))
+        for name, mark in self.rows:
+            self.listbox.insert("end", f"{name}    {mark}" if mark else name)
+        self.listbox.pack(fill="both", expand=True)
+        self.listbox.bind("<Double-Button-1>", lambda event: self.open_selected())
+        self.open_button = tkinter.Button(root, text="開", command=self.open_selected)
+        self.open_button.pack(fill="x")
+
+    def open_selected(self) -> None:
+        picked = self.listbox.curselection()
+        if not picked:
+            return
+        folder = self.out / self.rows[picked[0]][0]
+        hk = hk_of(folder)
+        if hk is not None:
+            self.popen([str(self.python), str(Path(__file__).resolve()), str(folder), hk], cwd=str(folder))
+
+
+def show_roster(out: Path, python: Path) -> int:
+    """開名單視窗，關掉才回來。"""
+    import tkinter
+
+    root = tkinter.Tk()
+    have = installed(python) if python.is_file() else None
+    Roster(out, python if python.is_file() else Path(sys.executable), root, have=have)
+    root.mainloop()
+    return 0
+
+
 def build(folder: Path, hk: str, root) -> dict:
     """在 root（tkinter.Tk）上擺好老師啟動器的樣子，exec folder/t2026fscSpace/<hk>.txt 再叫 <hk>()；回 exec 用的 dict。
     工作目錄換到 folder；例外不接，呼叫的人接。"""
@@ -658,7 +773,29 @@ def run_homework(folder: Path, hk: str) -> int:
     return 0
 
 
+def _batch_args(argv: list[str]):
+    import argparse
+
+    p = argparse.ArgumentParser(prog="hk_tk.py", description="批次模式：收一份作業的 zip，開全班名單")
+    p.add_argument("--batch", required=True, type=Path, help="TronClass 下載的 zip")
+    p.add_argument("--kit", type=Path, help="老師的 t2026fscSpace 資料夾（HKnSpace/ 從這裡拿）")
+    p.add_argument("--out", type=Path, help="收進哪裡（預設：zip 旁邊的 <zip 名>_收件）")
+    p.add_argument("--venv", type=Path, help="套件裝進哪個 venv（預設：zip 旁邊的 科學計算-venv）")
+    p.add_argument("--hk", help="哪一份作業（zip 檔名裡看不出來時用，例如 HK5）")
+    p.add_argument("--yes", action="store_true", help="要裝套件時不問")
+    return p.parse_args(argv)
+
+
 def main(argv: list[str]) -> int:
+    if argv and argv[0] == "--batch":
+        args = _batch_args(argv)
+        try:
+            out = batch(args.batch, kit=args.kit, out=args.out, venv=args.venv, hk=args.hk, yes=args.yes)
+        except RuntimeError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        venv = args.venv or args.batch.parent / "科學計算-venv"
+        return show_roster(out, python_in(venv))
     if len(argv) == 2 and not argv[0].startswith("-"):
         return run_homework(Path(argv[0]), argv[1])
     print(USAGE, file=sys.stderr)
