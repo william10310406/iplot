@@ -10,6 +10,7 @@ import io
 import os
 import sys
 import types
+import unicodedata
 import zipfile
 from pathlib import Path
 
@@ -307,7 +308,7 @@ def test_main_runs_the_homework(load, monkeypatch, tmp_path):
 def course_copy(tmp_path):
     """tmp_path/科學計算：放一份真的 hk_tk.py（墊片往上找的就是它），回課程資料夾。"""
     course = tmp_path / "科學計算"
-    course.mkdir()
+    course.mkdir(parents=True)
     (course / "hk_tk.py").write_bytes((COURSE / "hk_tk.py").read_bytes())
     return course
 
@@ -694,4 +695,239 @@ def test_summary_of_install_empty(load):
     hk = load("hk_tk")
     assert hk.summary_of_install([], []) == ""
     assert hk.summary_of_install(["a", "b"], []) == "已裝 a、b"
+
+
+# ── Task 5：收作業（舊格式）──
+
+
+def course_with_hk(tmp_path, hk_name="HK5", space=True, venv=False):
+    """課程資料夾＋已經匯入的 HK5/（墊片、老師的 HK5.txt、HK5Space/a.pdf）；venv=True 再放一個假的 .venv Python。
+    回（課程, HK5 資料夾）。"""
+    course = course_copy(tmp_path)
+    folder = course / hk_name
+    old_hk(folder, hk_name)
+    if space:
+        (folder / "t2026fscSpace" / f"{hk_name}Space").mkdir()
+        (folder / "t2026fscSpace" / f"{hk_name}Space" / "a.pdf").write_bytes(b"%PDF")
+    (folder / "iplot.py").write_text("# 墊片\n", encoding="utf-8")
+    if venv:
+        exe = course / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        exe.parent.mkdir(parents=True)
+        exe.write_text("", encoding="utf-8")
+    return course, folder
+
+
+def handed_in(tmp_path, files):
+    """學生交的檔：{相對路徑: 內容}，寫在 tmp_path/交/ 底下；回（那個資料夾, [每個檔]）。"""
+    base = tmp_path / "交"
+    out = []
+    for rel, text in files.items():
+        f = base / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text, encoding="utf-8")
+        out.append(f)
+    return base, out
+
+
+GOOD = OLD_HK.replace("{hk}", "HK5")
+
+
+def test_student_name_rules(tmp_path, load):
+    hk = load("hk_tk")
+    root, taken = tmp_path / "原件" / "HK5", set()
+    assert hk.student_name(root, root / "B11234567_王小明.txt", taken) == "B11234567_王小明"
+    assert hk.student_name(root, root / "李大華" / "作業" / "HK5.txt", taken) == "李大華"
+    decomposed = unicodedata.normalize("NFD", "café")
+    assert hk.student_name(root, root / decomposed / "x.txt", taken) == unicodedata.normalize("NFC", "café")
+    assert hk.student_name(root, root / 'a:b*c?"d<e>f|g.txt', taken) == "abcdefg"
+    assert hk.student_name(root, root / "..." / "x.txt", taken) == "未命名"
+    assert hk.student_name(root, root / ".hidden.txt", taken) == "hidden"
+    assert hk.student_name(root, root / "B11234567_王小明.py", taken) == "B11234567_王小明-2"
+    assert hk.student_name(root, root / "B11234567_王小明.py", taken) == "B11234567_王小明-3"
+
+
+def test_classify_old_broken_none_and_not_utf8(tmp_path, load):
+    hk = load("hk_tk")
+    files = {"old.txt": GOOD, "broken.txt": "def HK5(:\n", "none.txt": "print('hi')\n",
+             "nolf.txt": "def HK5():\n    pass\n"}
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    (tmp_path / "big5.txt").write_bytes("def HK5():\n    LF_subWIN\n    print('中文')\n".encode("cp950"))
+    assert hk.classify(tmp_path / "old.txt") == ("old", "HK5")
+    assert hk.classify(tmp_path / "broken.txt") == ("broken", None)
+    assert hk.classify(tmp_path / "none.txt") == ("none", None)
+    assert hk.classify(tmp_path / "nolf.txt") == ("none", None)  # 有 def HK5( 但沒用到 LF_subWIN
+    assert hk.classify(tmp_path / "big5.txt") == ("not-utf8", None)
+
+
+def test_kit_space_finds_the_teachers_space(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    assert hk.kit_space(folder, "HK5") == folder / "t2026fscSpace" / "HK5Space"
+    _, bare = course_with_hk(tmp_path / "b", space=False)
+    assert hk.kit_space(bare, "HK5") is None
+
+
+def test_collect_places_old_format_with_stub_and_space(tmp_path, load):
+    hk = load("hk_tk")
+    course, folder = course_with_hk(tmp_path, venv=True)
+    _, [b1] = handed_in(tmp_path, {"B1.txt": GOOD})
+    app = HwApp(tmp_path, folder)
+    popen = FakePopen(output=lambda argv: ['["scikit-learn"]'])
+    said = hk.collect(app, [b1], folder, popen=popen)
+    dest = folder / "B1"
+    assert (dest / "t2026fscSpace" / "HK5.txt").read_bytes() == b1.read_bytes()
+    assert (dest / "t2026fscSpace" / "HK5Space" / "a.pdf").read_bytes() == b"%PDF"
+    assert (dest / "iplot.py").read_text(encoding="utf-8") == hk.STUB
+    assert said == "收了 1 份進 HK5（新 1、覆蓋 0）"
+    assert app.logs[-1] == said and app.rescans == 1 and app.confirms == []
+
+
+def test_collect_names_by_student_folder_and_decodes_cp950(tmp_path, load):
+    hk = load("hk_tk")
+    course, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "下載" / "HK5.zip", {Cp950Name("王小明/HK5.txt"): GOOD,
+                                                      Cp950Name("李大華/HK5.txt"): GOOD})
+    said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    students = sorted(p.name for p in folder.iterdir() if (p / "iplot.py").exists())
+    assert students == ["李大華", "王小明"]
+    assert said.startswith("收了 2 份進 HK5（新 2、覆蓋 0）")
+
+
+def test_collect_names_through_a_single_top_folder(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "下載" / "全班.zip", {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD})
+    hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    assert (folder / "B1" / "iplot.py").exists() and (folder / "B2" / "iplot.py").exists()
+
+
+def test_collect_keeps_and_lists_broken_files(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    _, files = handed_in(tmp_path, {"好.txt": GOOD, "壞.txt": "def HK5(:\n    LF_subWIN\n"})
+    said = hk.collect(HwApp(tmp_path, folder), files, folder)
+    assert (folder / "壞" / "t2026fscSpace" / "HK5.txt").exists()
+    assert (folder / "壞" / "iplot.py").exists()
+    assert "收了 2 份進 HK5（新 2、覆蓋 0）" in said
+    assert "；1 份有語法錯誤（壞）" in said
+    assert "不是 HK5 的作業檔" not in said  # 語法錯的不重複列
+
+
+def test_collect_lists_wrong_hk_and_not_utf8(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    base, files = handed_in(tmp_path, {"交錯.txt": OLD_HK.replace("{hk}", "HK3"), "空的.py": "x = 1\n"})
+    big5 = base / "big5.txt"
+    big5.write_bytes("def HK5():\n    LF_subWIN\n    print('中文')\n".encode("cp950"))
+    said = hk.collect(HwApp(tmp_path, folder), [*files, big5], folder)
+    assert "；2 份不是 HK5 的作業檔（交錯、空的）" in said
+    assert "；1 份不是 UTF-8（big5）" in said
+    assert (folder / "交錯" / "t2026fscSpace" / "HK5.txt").exists()  # 照放
+
+
+def test_collect_counts_files_it_skips(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/HK5.txt": GOOD, "B1/報告.pdf": b"%PDF", "B2/圖.png": b"png",
+                                             "__MACOSX/B1/._HK5.txt": "x", "../逃.txt": "x"})
+    said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    assert said.startswith("收了 1 份進 HK5（新 1、覆蓋 0）")
+    assert "；略過 2 個不是 .py/.txt 的檔" in said
+    assert "；擋掉 1 個路徑不安全" in said
+
+
+def test_collect_says_when_the_teachers_space_is_missing(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, space=False)
+    _, [b1] = handed_in(tmp_path, {"B1.txt": GOOD})
+    said = hk.collect(HwApp(tmp_path, folder), [b1], folder)
+    assert (folder / "B1" / "t2026fscSpace" / "HK5Space").is_dir()  # 空的也要在（HK11 會 chdir 進去）
+    assert "；老師的 HK5Space 還沒匯入，要用資料檔的 case 會缺檔" in said
+
+
+def test_collect_confirms_once_and_installs_once(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    course, folder = course_with_hk(tmp_path, venv=True)
+    a = GOOD + "def extra():\n    import pandas\n"
+    _, files = handed_in(tmp_path, {"B1.txt": a, "B2.txt": a})
+    popen = FakePopen(output=lambda argv: ['["numpy"]'] if "-c" in argv else ["Successfully installed\n"])
+    app = HwApp(tmp_path, folder)
+    said = hk.collect(app, files, folder, popen=popen)
+    [question] = app.confirms
+    assert question == "這批用到還沒裝的套件：pandas、scikit-learn。現在裝進 科學計算/.venv？"
+    pip_calls = [argv for argv in popen.argvs if "pip" in argv]
+    assert [argv[-1] for argv in pip_calls] == ["pandas", "scikit-learn"]
+    assert pip_calls[0][0] == str(hk.python_in(course / ".venv"))
+    assert said.endswith("；已裝 pandas、scikit-learn")
+
+
+def test_collect_cancel_installs_nothing(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, venv=True)
+    _, files = handed_in(tmp_path, {"B1.txt": GOOD})
+    popen = FakePopen(output=lambda argv: ['[]'])
+    app = HwApp(tmp_path, folder)
+    app.answers = [False]
+    said = hk.collect(app, files, folder, popen=popen)
+    assert [argv for argv in popen.argvs if "pip" in argv] == []
+    assert "；沒裝：scikit-learn" in said
+
+
+def test_collect_without_venv_skips_packages(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    _, files = handed_in(tmp_path, {"B1.txt": GOOD})
+    popen = FakePopen()
+    app = HwApp(tmp_path, folder)
+    said = hk.collect(app, files, folder, popen=popen)
+    assert app.confirms == [] and popen.calls == []
+    assert said.endswith("；.venv 還沒建，套件沒掃")
+
+
+def test_recollect_overwrites_and_counts_separately(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD})
+    app = HwApp(tmp_path, folder)
+    hk.collect(app, [zipped], folder)
+    again = make_zip(tmp_path / "HK5-重交.zip", {"B1/HK5.txt": GOOD + "# 改過\n"})
+    said = hk.collect(app, [again], folder)
+    assert said.startswith("收了 1 份進 HK5（新 0、覆蓋 1）")
+    assert (folder / "B1" / "t2026fscSpace" / "HK5.txt").read_text(encoding="utf-8").endswith("# 改過\n")
+    assert not (folder / "B1-2").exists()
+    assert app.rescans == 2
+
+
+def test_collect_on_student_folder_redirects(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    (folder / "B1").mkdir()
+    _, files = handed_in(tmp_path, {"B9.txt": GOOD})
+    app = HwApp(tmp_path, folder / "B1")
+    said = hk.collect(app, files, folder / "B1")
+    assert said == "這是學生的資料夾；作業要收進 HK5（按「科學計算」底下的「收作業」）"
+    assert app.logs == [said] and app.rescans == 0
+    assert not (folder / "B1" / "B9").exists()
+
+
+def test_collect_with_nothing_useful_says_so(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/報告.pdf": b"%PDF"})
+    app = HwApp(tmp_path, folder)
+    said = hk.collect(app, [zipped], folder)
+    assert said == "收到的東西裡沒有 .py 或 .txt"
+    assert app.rescans == 0
+
+
+def test_collect_refuses_paths_outside_hk_folder(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    _, files = handed_in(tmp_path, {"B1.txt": GOOD})
+    monkeypatch.setattr(hk, "student_name", lambda root, file, taken: "../../逃出去")
+    said = hk.collect(HwApp(tmp_path, folder), files, folder)
+    assert not (tmp_path / "逃出去").exists() and not (folder.parent / "逃出去").exists()
+    assert said.startswith("收了 0 份進 HK5")
 

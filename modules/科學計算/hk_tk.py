@@ -417,6 +417,161 @@ def import_kit(app, paths: list[Path], course: Path) -> str:
         shutil.rmtree(work, ignore_errors=True)
 
 
+# ── 收作業（設計第 7 節後半、D97）──
+
+BAD_CHARS = re.compile(r'[/\\:*?"<>|]')
+NOTHING = "收到的東西裡沒有 .py 或 .txt"
+
+
+def student_name(root: Path, file: Path, taken: set[str]) -> str:
+    """學生資料夾的名字：檔案在 root 那一層就用檔名（去副檔名），在子資料夾裡就用第一層子資料夾的名字；
+    NFC、去掉 / \\ : * ? " < > | 與開頭的 .；空了叫「未命名」；taken 裡有了就加 -2、-3…，再放進 taken。"""
+    rel = Path(file).relative_to(root)
+    raw = Path(file).stem if len(rel.parts) == 1 else rel.parts[0]
+    name = BAD_CHARS.sub("", _nfc(raw)).lstrip(".").strip() or "未命名"
+    final, n = name, 2
+    while final in taken:
+        final, n = f"{name}-{n}", n + 1
+    taken.add(final)
+    return final
+
+
+def _visible(folder: Path) -> list[Path]:
+    return [p for p in folder.iterdir() if not (p.name.startswith(".") or p.name == "__MACOSX")]
+
+
+def _naming_root(file: Path, root: Path) -> Path:
+    """算學生名字時的「根」：收進來的每一樣東西各自算（不然 HK5.zip 裡的 50 個人都會叫 HK5）；
+    zip 裡只包了一層資料夾（例如 HK5/<學生>/…）就往下走到學生那一層的上面。"""
+    rel = file.relative_to(root)
+    if len(rel.parts) == 1:
+        return root
+    top = root / rel.parts[0]
+    while True:
+        kids = _visible(top)
+        if len(kids) == 1 and kids[0].is_dir() and file.is_relative_to(kids[0]) \
+                and all(k.is_dir() for k in _visible(kids[0])):
+            top = kids[0]
+        else:
+            return top
+
+
+def kit_space(hk_folder: Path, hk: str) -> Path | None:
+    """老師那份的 HKnSpace/（舊格式放在 t2026fscSpace/ 底下）；還沒匯入回 None。"""
+    space = Path(hk_folder) / KIT / f"{hk}Space"
+    return space if space.is_dir() else None
+
+
+def classify(file: Path) -> tuple[str, str | None]:
+    """不執行、只用 ast 看是哪一種（D99）：("old", "HK5")、("broken", None)、("not-utf8", None)、("none", None)。"""
+    try:
+        source = Path(file).read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        return "not-utf8", None
+    except OSError:
+        return "none", None
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return "broken", None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and re.fullmatch(r"HK\d+", node.name) and "LF_subWIN" in source:
+            return "old", node.name
+    return "none", None
+
+
+def _packages(app, python: Path | None, pkgs: list[str], popen) -> str:
+    """這批用到、還沒裝的套件：問一次，一個一個裝；回總結那句後面要接的話。"""
+    if python is None:
+        return ".venv 還沒建，套件沒掃"
+    need = missing(python, pkgs, popen=popen) if pkgs else []
+    if not need:
+        return ""
+    venv = Path(python).parents[1]
+    if not app.confirm(f"這批用到還沒裝的套件：{'、'.join(need)}。現在裝進 {venv.parent.name}/{venv.name}？"):
+        return f"沒裝：{'、'.join(need)}"
+    return summary_of_install(*install(python, need, app.log, popen=popen))
+
+
+def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None, popen=subprocess.Popen,
+            hk: str | None = None) -> str:
+    """收作業：拖進來（或選進來）的 zip、資料夾、檔，每份放成 hk_folder/<學生>/（迷你作業包，D95），
+    再收同一個人＝覆蓋。用到的套件問一次、裝進 python 那個 venv（沒給就用課程的 .venv）。回訊息區那一句。
+    hk 沒給就是 hk_folder 的名字（批次模式的 hk_folder 是 HK5_收件，另外給 hk）。"""
+    hk_folder = Path(hk_folder)
+    hk = hk or hk_folder.name
+    course = course_root(hk_folder)
+    if course is not None and hk_folder.resolve().parent != course:
+        said = f"這是學生的資料夾；作業要收進 {hk_folder.parent.name}（按「科學計算」底下的「收作業」）"
+        app.log(said)
+        return said
+    if python is None:
+        python = venv_python(course)
+    work = Path(tempfile.mkdtemp(prefix="hk-collect-"))
+    try:
+        got = gather([Path(p) for p in paths], work)
+        files, others = [], 0
+        for f in sorted(got.root.rglob("*")):
+            if f.is_file() and not _hidden(f, got.root):
+                if f.suffix.lower() in (".py", ".txt"):
+                    files.append(f)
+                else:
+                    others += 1
+        if not files:
+            app.log(NOTHING)
+            return NOTHING
+        space = kit_space(hk_folder, hk)
+        taken = {KIT, f"{hk}Space", "iplot.py", LOG, ".history"}  # 不能拿來當學生名字的
+        lists: dict[str, list[str]] = {"broken": [], "not-utf8": [], "wrong": []}
+        new = over = 0
+        unsafe = got.skipped
+        imports: set[str] = set()
+        for file in files:
+            name = student_name(_naming_root(file, got.root), file, taken)
+            dest = hk_folder / name
+            if not _inside(dest, hk_folder) or dest.resolve() == hk_folder.resolve():
+                unsafe += 1
+                continue
+            kind, found = classify(file)
+            if kind in ("broken", "not-utf8"):
+                lists[kind].append(name)
+            elif found != hk:
+                lists["wrong"].append(name)
+            if dest.exists():
+                over += 1
+            else:
+                new += 1
+            kit = dest / KIT
+            kit.mkdir(parents=True, exist_ok=True)
+            (kit / f"{hk}.txt").write_bytes(file.read_bytes())
+            if space is not None:
+                _copytree(space, kit / space.name)
+            else:
+                (kit / f"{hk}Space").mkdir(exist_ok=True)
+            write_stub(dest)
+            imports |= third_party(scan_imports(file), dest)
+        notes = []
+        for key, what in (("broken", "有語法錯誤"), ("not-utf8", "不是 UTF-8"), ("wrong", f"不是 {hk} 的作業檔")):
+            if lists[key]:
+                notes.append(f"{len(lists[key])} 份{what}（{'、'.join(lists[key])}）")
+        if others:
+            notes.append(f"略過 {others} 個不是 .py/.txt 的檔")
+        if unsafe:
+            notes.append(_skipped_note(unsafe)[1:])
+        if space is None:
+            notes.append(f"老師的 {hk}Space 還沒匯入，要用資料檔的 case 會缺檔")
+        pkgs = sorted({pip_name(n) for n in imports}, key=str.lower)
+        package_note = _packages(app, python, pkgs, popen)
+        if package_note:
+            notes.append(package_note)
+        said = f"收了 {new + over} 份進 {hk}（新 {new}、覆蓋 {over}）" + "".join(f"；{n}" for n in notes)
+        app.log(said)
+        app.rescan()
+        return said
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def build(folder: Path, hk: str, root) -> dict:
     """在 root（tkinter.Tk）上擺好老師啟動器的樣子，exec folder/t2026fscSpace/<hk>.txt 再叫 <hk>()；回 exec 用的 dict。
     工作目錄換到 folder；例外不接，呼叫的人接。"""
