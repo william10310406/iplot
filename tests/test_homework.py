@@ -6,8 +6,10 @@ Tk 的部分用藏起來的真 Tk（tests/test_tk_smoke.py 的做法：destroy �
 
 import ast
 import importlib
+import importlib.util
 import io
 import os
+import shutil
 import sys
 import types
 import unicodedata
@@ -1479,3 +1481,40 @@ def test_roster_window_uses_absolute_paths(tmp_path, load, tk_root, monkeypatch)
     win.open_selected()
     [(argv, kw)] = popen.calls
     assert Path(argv[0]).is_absolute() and Path(argv[1]) == out / "B1" / "iplot.py" and Path(kw["cwd"]).is_absolute()
+
+
+# ── 最終審查延後的四件小事（回報第 3 節）──
+
+
+def lone_hk_tk(tmp_path):
+    """批次模式只複製了 hk_tk.py 的那個資料夾：從那裡載入一份，它的 SHELL 指到旁邊不存在的 hk_page.py。"""
+    folder = tmp_path / "只有hk_tk"
+    folder.mkdir()
+    (folder / "hk_tk.py").write_bytes((COURSE / "hk_tk.py").read_bytes())
+    spec = importlib.util.spec_from_file_location("_hk_tk_alone", folder / "hk_tk.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_batch_without_the_shell_places_new_format_files_without_it(tmp_path, load):
+    hk = lone_hk_tk(tmp_path)
+    assert not hk.SHELL.exists()
+    zipped = make_zip(tmp_path / "下載" / "HK5.zip", {"B1/HK5.py": NEW_HK, "B2/HK5.py": NEW_HK, "B3/HK5.txt": GOOD})
+    said = []
+    out = hk.batch(zipped, kit=teacher_kit(tmp_path), say=said.append)
+    for name in ("B1", "B2"):
+        assert (out / name / "iplot.py").read_text(encoding="utf-8") == NEW_HK  # 照放
+        assert (out / name / "HK5Space" / "a.pdf").read_bytes() == b"%PDF"
+        assert not (out / name / "hk_page.py").exists()
+    assert (out / "B3" / "t2026fscSpace" / "HK5.txt").exists()  # 舊格式不受影響
+    assert said[-1].startswith("收了 3 份進 HK5（舊格式 1、新格式 2；新 3、覆蓋 0）")
+    assert "；hk_page.py 不在 hk_tk.py 旁邊，新格式的 2 份沒放殼（B1、B2）" in said[-1]
+    assert [name for name, _ in hk.roster(out)] == ["B3"]  # 沒有殼的不是學生資料夾，名單上沒有
+    # docs/08 8.8 寫的補法：hk_page.py 放到旁邊、刪掉那幾個學生的資料夾、再跑一次
+    hk.SHELL.write_bytes((COURSE / "hk_page.py").read_bytes())
+    for name in ("B1", "B2"):
+        shutil.rmtree(out / name)
+    hk.batch(zipped, kit=teacher_kit(tmp_path), say=said.append)
+    assert (out / "B1" / "hk_page.py").read_bytes() == hk.SHELL.read_bytes()
+    assert said[-1].startswith("收了 3 份進 HK5（舊格式 1、新格式 2；新 2、覆蓋 1）") and "沒放殼" not in said[-1]

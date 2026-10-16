@@ -581,11 +581,12 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         taken = {KIT, f"{hk}Space", "iplot.py", "hk_page.py", LOG, ".history", "__pycache__"}
         with contextlib.suppress(OSError):
             taken |= {p.name for p in hk_folder.iterdir() if not _is_student(p, hk)}
-        lists: dict[str, list[str]] = {"broken": [], "not-utf8": [], "wrong": [], "check": []}
+        lists: dict[str, list[str]] = {"broken": [], "not-utf8": [], "wrong": [], "check": [], "no-shell": []}
         new = over = 0
         kinds = {"old": 0, "new": 0}
         unsafe = got.skipped
         imports: set[str] = set()
+        has_shell = SHELL.is_file()  # 批次模式只複製了 hk_tk.py：新格式照放，不放殼、不查
         for file in files:
             name = student_name(_naming_root(file, got.root), file, taken)
             dest = hk_folder / name
@@ -610,7 +611,10 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             if kind == "new":  # 新格式：學生的檔就是 iplot.py，旁邊放殼與老師的 Space，沒有墊片
                 dest.mkdir(parents=True, exist_ok=True)
                 (dest / "iplot.py").write_bytes(file.read_bytes())
-                shutil.copy2(SHELL, dest / "hk_page.py")
+                if has_shell:
+                    shutil.copy2(SHELL, dest / "hk_page.py")
+                else:
+                    lists["no-shell"].append(name)
                 target_space = dest / f"{hk}Space"
                 requires = _requires_of(file)
             else:
@@ -624,7 +628,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             else:
                 target_space.mkdir(exist_ok=True)
             if kind == "new":
-                problems = _shell_check(dest / "iplot.py")  # Space 放好了才查（DATA 指的資料夾要在）
+                problems = _shell_check(dest / "iplot.py") if has_shell else []  # Space 放好了才查（DATA 指的資料夾要在）
                 if problems:
                     lists["check"].append(f"{name}：{problems[0]}")
             else:
@@ -636,6 +640,9 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
                           ("check", "新格式檢查不過")):
             if lists[key]:
                 notes.append(f"{len(lists[key])} 份{what}（{'、'.join(lists[key])}）")
+        if lists["no-shell"]:
+            notes.append(f"hk_page.py 不在 hk_tk.py 旁邊，新格式的 {len(lists['no-shell'])} 份沒放殼"
+                         f"（{'、'.join(lists['no-shell'])}）")
         if others:
             notes.append(f"略過 {others} 個不是 .py/.txt 的檔")
         if unsafe:
