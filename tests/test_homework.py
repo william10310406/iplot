@@ -10,6 +10,7 @@ import io
 import os
 import sys
 import types
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -415,4 +416,124 @@ def test_launch_without_hk_file_only_logs(tmp_path, load):
     hk.launch(app, tmp_path / "外面", popen=popen)
     assert popen.calls == []
     assert app.logs[-1] == "找不到課程資料夾（上層沒有 hk_tk.py）"
+
+
+# ── Task 3：gather 與匯入老師的作業包 ──
+
+
+class Cp950Name(zipfile.ZipInfo):
+    """不設 UTF-8 旗標、檔名是 cp950 位元組的成員（Windows 上的中文壓縮程式常這樣做）。"""
+
+    def _encodeFilenameFlags(self):
+        return self.filename.encode("cp950"), self.flag_bits & ~0x800
+
+
+def make_zip(path, members):
+    """members：{名字: bytes 或 str}；名字是 Cp950Name 就照 cp950 寫。回 path。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data.encode("utf-8") if isinstance(data, str) else data)
+    return path
+
+
+def test_gather_unzips_nested_and_decodes_cp950(tmp_path, load):
+    hk = load("hk_tk")
+    inner = make_zip(tmp_path / "src" / "inner.zip", {"深/HK5.txt": "inner"})
+    outer = make_zip(tmp_path / "src" / "HK5.zip", {Cp950Name("王小明/HK5.txt"): "cp950 名字",
+                                                     "inner.zip": inner.read_bytes(),
+                                                     "李大華/HK5.txt": "utf-8 名字"})
+    result = hk.gather([outer], tmp_path / "work")
+    root = result.root
+    assert root == tmp_path / "work" / "原件"
+    assert (root / "HK5" / "王小明" / "HK5.txt").read_text(encoding="utf-8") == "cp950 名字"
+    assert (root / "HK5" / "李大華" / "HK5.txt").read_text(encoding="utf-8") == "utf-8 名字"
+    assert (root / "HK5" / "inner" / "深" / "HK5.txt").read_text(encoding="utf-8") == "inner"
+    assert result.skipped == 0
+
+
+def test_gather_copies_folders_and_files(tmp_path, load):
+    hk = load("hk_tk")
+    (tmp_path / "kit" / "HK1Space").mkdir(parents=True)
+    (tmp_path / "kit" / "HK1.txt").write_text("hk1", encoding="utf-8")
+    (tmp_path / "loose.py").write_text("x = 1", encoding="utf-8")
+    root = hk.gather([tmp_path / "kit", tmp_path / "loose.py"], tmp_path / "work").root
+    assert (root / "kit" / "HK1.txt").read_text(encoding="utf-8") == "hk1"
+    assert (root / "kit" / "HK1Space").is_dir()
+    assert (root / "loose.py").read_text(encoding="utf-8") == "x = 1"
+
+
+def test_gather_skips_dotdot_members(tmp_path, load):
+    hk = load("hk_tk")
+    bad = make_zip(tmp_path / "src" / "bad.zip", {"../x.txt": "out", "/abs.txt": "abs", "ok/HK5.txt": "ok"})
+    result = hk.gather([bad], tmp_path / "work" / "deep")
+    assert result.skipped == 2
+    assert not (tmp_path / "work" / "deep" / "原件" / "x.txt").exists()
+    assert not list(tmp_path.rglob("x.txt")) and not list(tmp_path.rglob("abs.txt"))
+    assert (result.root / "bad" / "ok" / "HK5.txt").exists()
+
+
+def teacher_kit(tmp_path, hks=("HK1", "HK2", "HK5"), text="v1"):
+    """老師的 t2026fscSpace/：每份 HKn.txt；HK5Space/a.pdf；HK1Space/ 是空的。"""
+    kit = tmp_path / "老師" / "t2026fscSpace"
+    kit.mkdir(parents=True, exist_ok=True)
+    for name in hks:
+        (kit / f"{name}.txt").write_text(f"# {name} {text}\n", encoding="utf-8")
+    (kit / "HK5Space").mkdir(exist_ok=True)
+    (kit / "HK5Space" / "a.pdf").write_bytes(b"%PDF")
+    (kit / "HK1Space").mkdir(exist_ok=True)
+    (kit / "HK1_threebody_backup.txt").write_text("不是作業", encoding="utf-8")
+    return kit
+
+
+def test_import_kit_builds_hk_folders(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    app = HwApp(tmp_path, course)
+    said = hk.import_kit(app, [teacher_kit(tmp_path)], course)
+    for name in ("HK1", "HK2", "HK5"):
+        assert (course / name / "iplot.py").read_text(encoding="utf-8") == hk.STUB
+        assert (course / name / "t2026fscSpace" / f"{name}.txt").read_text(encoding="utf-8") == f"# {name} v1\n"
+        assert (course / name / "t2026fscSpace" / f"{name}Space").is_dir()
+    assert (course / "HK5" / "t2026fscSpace" / "HK5Space" / "a.pdf").read_bytes() == b"%PDF"
+    assert not (course / "HK1_threebody_backup").exists()
+    assert said == "匯入了 HK1、HK2、HK5（新 3、更新 0）"
+    assert app.logs == [said] and app.rescans == 1
+
+
+def test_import_kit_names_a_run_as_a_range(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    zipped = make_zip(tmp_path / "t2026fscSpace.zip",
+                      {f"t2026fscSpace/HK{n}.txt": f"# {n}" for n in range(1, 13)})
+    said = hk.import_kit(HwApp(tmp_path, course), [zipped], course)
+    assert said == "匯入了 HK1–HK12（新 12、更新 0）"
+    assert sorted(p.name for p in course.iterdir() if p.is_dir()) == sorted(f"HK{n}" for n in range(1, 13))
+
+
+def test_import_kit_twice_updates_text_keeps_stub(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    app = HwApp(tmp_path, course)
+    hk.import_kit(app, [teacher_kit(tmp_path)], course)
+    stub = course / "HK5" / "iplot.py"
+    os.utime(stub, (1_000_000, 1_000_000))
+    said = hk.import_kit(app, [teacher_kit(tmp_path, text="v2")], course)
+    assert (course / "HK5" / "t2026fscSpace" / "HK5.txt").read_text(encoding="utf-8") == "# HK5 v2\n"
+    assert stub.stat().st_mtime == 1_000_000
+    assert said == "匯入了 HK1、HK2、HK5（新 0、更新 3）"
+    assert app.rescans == 2
+
+
+def test_import_kit_with_nothing_says_so(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    (tmp_path / "空" / "x.txt").parent.mkdir()
+    (tmp_path / "空" / "x.txt").write_text("x", encoding="utf-8")
+    app = HwApp(tmp_path, course)
+    said = hk.import_kit(app, [tmp_path / "空"], course)
+    assert said == "收到的東西裡沒有 HK<n>.txt；要給的是老師的 t2026fscSpace 資料夾或它的 zip"
+    assert app.logs == [said] and app.rescans == 0
+    assert sorted(p.name for p in course.iterdir()) == ["hk_tk.py"]
 

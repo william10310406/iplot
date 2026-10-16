@@ -10,12 +10,17 @@ LF_subWIN 那個框、HKn.txt 要的全域；exec 之後叫 HKn()，HKn.txt 自�
 """
 
 import contextlib
+import dataclasses
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
-from pathlib import Path
+import unicodedata
+import zipfile
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 KIT = "t2026fscSpace"
 LOG = "執行紀錄.txt"
@@ -108,6 +113,162 @@ def launch(app, folder: Path, popen=None) -> None:
         app.log("課程的 .venv 還沒建：先按「科學計算」裝課程套件；這次用 iPLoT 自己的 Python 試")
     (popen or subprocess.Popen)([str(python), str(course / "hk_tk.py"), str(folder), hk], cwd=str(folder))
     app.log(f"{folder.name}：{hk} 的視窗開了（在 Dock 上找 Python）")
+
+
+def _nfc(name: str) -> str:
+    return unicodedata.normalize("NFC", name)
+
+
+def _unique(path: Path) -> Path:
+    """path 已經有東西就加 -2、-3…"""
+    n, candidate = 2, path
+    while candidate.exists():
+        candidate, n = path.with_name(f"{path.name}-{n}"), n + 1
+    return candidate
+
+
+def _inside(path: Path, base: Path) -> bool:
+    return Path(path).resolve().is_relative_to(Path(base).resolve())
+
+
+def _no_links(folder: str, names: list[str]) -> list[str]:
+    """copytree 的 ignore：符號連結不複製、不跟（設計第 10 節）。"""
+    return [n for n in names if os.path.islink(os.path.join(folder, n))]
+
+
+def _copytree(src: Path, dst: Path) -> None:
+    shutil.copytree(src, dst, ignore=_no_links, dirs_exist_ok=True)
+
+
+def _decode_member(info: zipfile.ZipInfo) -> str:
+    """zip 成員名：有 UTF-8 旗標就照用；沒有的（zipfile 當 cp437 解的）改試 UTF-8，再試 cp950，都不行照原樣。"""
+    if info.flag_bits & 0x800:
+        return info.filename
+    try:
+        raw = info.filename.encode("cp437")
+    except UnicodeEncodeError:
+        return info.filename
+    for encoding in ("utf-8", "cp950"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            pass
+    return info.filename
+
+
+def _unzip(file: Path, dest: Path) -> int:
+    """把 file 解到 dest；名字含 .. 或是絕對路徑的成員不解、計數；回擋掉幾個。"""
+    skipped = 0
+    with zipfile.ZipFile(file) as zf:
+        for info in zf.infolist():
+            name = _nfc(_decode_member(info).replace("\\", "/"))
+            parts = [p for p in name.split("/") if p not in ("", ".")]
+            if (PurePosixPath(name).is_absolute() or PureWindowsPath(name).drive or ".." in parts
+                    or not _inside(dest.joinpath(*parts or ["."]), dest)):
+                skipped += 1
+                continue
+            if not parts:
+                continue
+            target = dest.joinpath(*parts)
+            if name.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out)
+    return skipped
+
+
+@dataclasses.dataclass
+class GatherResult:
+    root: Path  # 收進來的東西都在這底下
+    skipped: int  # 擋掉的 zip 成員（.. 或絕對路徑）與解不開的 zip
+
+
+def gather(paths: list[Path], into: Path) -> GatherResult:
+    """把拖進來（或選進來）的東西都放進 into/原件/：zip 解開到 原件/<zip 名>/（裡面的 zip 再解一層），
+    資料夾整個複製進 原件/<名>/，檔案複製進 原件/。"""
+    root = Path(into) / "原件"
+    root.mkdir(parents=True, exist_ok=True)
+    skipped = 0
+    for path in map(Path, paths):
+        if path.is_file() and zipfile.is_zipfile(path):
+            dest = _unique(root / _nfc(path.stem))
+            try:
+                skipped += _unzip(path, dest)
+            except (zipfile.BadZipFile, OSError):
+                skipped += 1
+                continue
+            for inner in sorted(dest.rglob("*.zip")):  # 只解一層：這裡解出來的 zip 不再往下找
+                if inner.is_file() and zipfile.is_zipfile(inner):
+                    try:
+                        skipped += _unzip(inner, _unique(inner.with_name(inner.stem)))
+                        inner.unlink()
+                    except (zipfile.BadZipFile, OSError):
+                        skipped += 1
+        elif path.is_dir():
+            _copytree(path, _unique(root / _nfc(path.name)))
+        elif path.is_file():
+            shutil.copy2(path, _unique(root / _nfc(path.name)))
+    return GatherResult(root, skipped)
+
+
+def _hidden(file: Path, root: Path) -> bool:
+    """macOS 壓縮時帶的 __MACOSX/、. 開頭的檔與資料夾：不是作業。"""
+    return any(p == "__MACOSX" or p.startswith(".") for p in file.relative_to(root).parts)
+
+
+def _hk_list(names) -> str:
+    """HK1、HK2、HK5；連號就寫 HK1–HK12。"""
+    nums = sorted(int(n[2:]) for n in names)
+    if len(nums) > 1 and nums == list(range(nums[0], nums[-1] + 1)):
+        return f"HK{nums[0]}–HK{nums[-1]}"
+    return "、".join(f"HK{n}" for n in nums)
+
+
+def _skipped_note(skipped: int) -> str:
+    return f"；擋掉 {skipped} 個路徑不安全（.. 或絕對路徑）或解不開的東西" if skipped else ""
+
+
+NO_KIT = "收到的東西裡沒有 HK<n>.txt；要給的是老師的 t2026fscSpace 資料夾或它的 zip"
+
+
+def import_kit(app, paths: list[Path], course: Path) -> str:
+    """匯入老師的作業包：每個 HK<n>.txt 變成 course/HK<n>/（墊片＋t2026fscSpace/HK<n>.txt＋HK<n>Space/）。
+    已經有的 HK 只換 HK<n>.txt 與補 Space 的檔，墊片不動（設計第 7 節）。回訊息區那一句。"""
+    course = Path(course)
+    work = Path(tempfile.mkdtemp(prefix="hk-kit-"))
+    try:
+        got = gather([Path(p) for p in paths], work)
+        found: dict[str, Path] = {}
+        for file in sorted(got.root.rglob("*.txt")):
+            m = HK_RE.match(file.name)
+            if m and m.group(1) not in found and not _hidden(file, got.root):
+                found[m.group(1)] = file
+        if not found:
+            app.log(NO_KIT)
+            return NO_KIT
+        new = updated = 0
+        for hk, src in found.items():
+            target = course / hk / KIT / f"{hk}.txt"
+            if target.exists():
+                updated += 1
+            else:
+                new += 1
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, target)
+            space = src.parent / f"{hk}Space"
+            if space.is_dir():
+                _copytree(space, target.parent / space.name)
+            else:
+                (target.parent / f"{hk}Space").mkdir(exist_ok=True)
+            write_stub(course / hk)
+        said = f"匯入了 {_hk_list(found)}（新 {new}、更新 {updated}）{_skipped_note(got.skipped)}"
+        app.log(said)
+        app.rescan()
+        return said
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def build(folder: Path, hk: str, root) -> dict:
