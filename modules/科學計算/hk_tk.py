@@ -657,8 +657,8 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
 
 def hk_in_name(name: str) -> str | None:
     """名字裡的 HK<n>（大小寫都認）；沒有回 None。zip 的檔名靠這個知道是哪一份作業。"""
-    m = re.search(r"HK(\d+)", name, re.IGNORECASE)
-    return f"HK{m.group(1)}" if m else None
+    m = re.search(r"(?<![A-Za-z])HK0*(\d+)", name, re.IGNORECASE)  # HK05 就是 HK5；CHK5 不算
+    return f"HK{int(m.group(1))}" if m else None
 
 
 def collect_files(app, paths: list[Path], course: Path) -> None:
@@ -816,13 +816,22 @@ def build(folder: Path, hk: str, root) -> dict:
     ns = {"__name__": "__main__", "__file__": str(file), "LF": root, "LF_subWIN": sub,
           "t2026fscHOMEDIR": str(folder), "HAS_DND": False, "os": os, "sys": sys, "tkinter": tkinter}
     exec(compile(source, str(file), "exec"), ns)  # noqa: S102  跟老師的啟動器一樣 exec 作業檔（設計第 5 節）
-    ns[hk]()
+    entry = ns.get(hk)
+    if not callable(entry):  # 交錯份（def HK3）、或根本不是作業：說是哪一種，不丟 KeyError（設計第 7、9 節）
+        raise NotThisHomework(f"這份不是 {hk} 的作業檔：檔裡沒有 def {hk}()")
+    entry()
     return ns
+
+
+class NotThisHomework(LookupError):
+    """HKn.txt 裡沒有 def HKn()：交錯份或不是作業。"""
 
 
 def explain(exc: BaseException) -> str:
     """出錯時框裡的字：語法錯說第幾行、缺套件給 pip 指令、不是 UTF-8 直說；後面都接 traceback 全文。"""
     text = "".join(traceback.format_exception(exc))
+    if isinstance(exc, NotThisHomework):
+        return f"{exc}\n\n{text}"
     if isinstance(exc, SyntaxError):
         return f"語法錯誤：第 {exc.lineno} 行\n\n{text}"
     if isinstance(exc, ModuleNotFoundError) and exc.name:

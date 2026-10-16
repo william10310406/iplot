@@ -260,6 +260,15 @@ def test_run_homework_reports_missing_module_with_pip_hint(tmp_path, load, fake_
     assert f"缺 sklearn：{sys.executable} -m pip install scikit-learn" in message
 
 
+@pytest.mark.parametrize("src", ["x = 1\nprint('hi')\n", OLD_HK.replace("{hk}", "HK3")])
+def test_run_homework_says_when_it_is_not_this_homework(tmp_path, load, fake_tk, src):
+    hk = load("hk_tk")
+    old_hk(tmp_path, src=src)  # 檔名是 HK5.txt，裡面沒有 def HK5()（交錯份、或根本不是作業）
+    hk.run_homework(tmp_path, "HK5")
+    [(_, message)] = fake_tk.errors
+    assert message.startswith("這份不是 HK5 的作業檔：檔裡沒有 def HK5()")
+
+
 def test_run_homework_says_when_the_file_is_not_utf8(tmp_path, load, fake_tk):
     hk = load("hk_tk")
     old_hk(tmp_path, src="def HK5():\n    print('中文')\n", encoding="cp950")
@@ -947,6 +956,8 @@ def test_hk_in_name(load):
     assert hk.hk_in_name("HK5") == "HK5"
     assert hk.hk_in_name("2026科學計算_hk12_全班") == "HK12"
     assert hk.hk_in_name("作業") is None
+    assert hk.hk_in_name("HK05_全班") == "HK5"  # 補零的也是老師的 HK5（最終審查）
+    assert hk.hk_in_name("CHK5_x") is None  # 前面接字母的不算
 
 
 def test_batch_collects_next_to_the_zip_with_kit_space(tmp_path, load):
