@@ -16,3 +16,8 @@ modules/互通/.lock
 # 「行事曆」自己產生的：資料夾位置與開著的程序（各台電腦自己的，不進 git、不進發佈的包）
 modules/行事曆/設定.json
 modules/行事曆/.pid
+# 「科學計算」自己產生的：課程的 venv、匯入的作業與收進來的學生（各台電腦自己的，不進 git、不進發佈的包）
+modules/科學計算/.venv/
+modules/科學計算/HK*/
+# M6 的探針（開發用）
+spikes/m6/

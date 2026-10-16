@@ -1070,3 +1070,170 @@ def test_main_batch_error_is_one_sentence(load, monkeypatch, capsys, tmp_path):
     assert hk.main(["--batch", str(zipped)]) == 1
     assert "檔名裡看不出是哪一份作業" in capsys.readouterr().err
 
+
+# ── Task 7：課程模組「科學計算」與下一層的「匯入作業包」「收作業」──
+
+
+@pytest.fixture
+def course_module(load, monkeypatch, tmp_path):
+    """載入 modules/科學計算/iplot.py（它 import 的 hk_tk 就是 load 進來的那一個）；
+    hk_tk 的 ensure_venv 換成回假的路徑，missing 依 absent 回缺的，install 記下收到什麼。"""
+    import importlib.util
+
+    hk = load("hk_tk")
+    spec = importlib.util.spec_from_file_location("course_iplot", COURSE / "iplot.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rec = types.SimpleNamespace(hk=hk, mod=mod, absent=set(), installs=[])
+    monkeypatch.setattr(hk, "ensure_venv", lambda venv_dir, say, **kw: venv_dir / "bin" / "python")
+    monkeypatch.setattr(hk, "missing", lambda python, pkgs, **kw: [p for p in pkgs if p in rec.absent])
+
+    def install(python, pkgs, say, **kw):
+        rec.installs.append(list(pkgs))
+        return list(pkgs), []
+
+    monkeypatch.setattr(hk, "install", install)
+    return rec
+
+
+def test_course_run_installs_only_missing_after_confirm(tmp_path, course_module):
+    c = course_module
+    c.absent = {"torch"}
+    app = HwApp(tmp_path, COURSE)
+    c.mod.run(app)
+    [question] = app.confirms
+    assert "torch" in question and "約 1.1 GB" in question and "numpy" not in question
+    assert c.installs == [["torch"]]
+    assert app.logs[-1] == "已裝 torch"
+
+
+def test_course_run_installs_the_basic_batch_first(tmp_path, course_module):
+    c = course_module
+    c.absent = {"numpy", "torch"}
+    app = HwApp(tmp_path, COURSE)
+    c.mod.run(app)
+    [question] = app.confirms
+    assert "numpy" in question and "torch" not in question and "約 480 MB" in question
+    assert c.installs == [["numpy"]]
+    assert app.logs[-1] == "已裝 numpy；第二批（HK9–HK12 用的 torch 那些，約 1.1 GB）再按一次「科學計算」"
+
+
+def test_course_run_says_all_present(tmp_path, course_module):
+    c = course_module
+    app = HwApp(tmp_path, COURSE)
+    c.mod.run(app)
+    assert app.confirms == [] and c.installs == []
+    assert app.logs[-1] == "課程套件都在"
+
+
+def test_course_run_cancel_touches_nothing(tmp_path, course_module):
+    c = course_module
+    c.absent = {"numpy"}
+    app = HwApp(tmp_path, COURSE)
+    app.answers = [False]
+    c.mod.run(app)
+    assert c.installs == []
+    assert app.logs[-1] == "沒裝"
+
+
+def test_course_run_says_why_when_the_venv_cannot_be_made(tmp_path, course_module, monkeypatch):
+    c = course_module
+
+    def refuse(venv_dir, say, **kw):
+        raise RuntimeError("HK_NO_INSTALL：不建 .venv")
+
+    monkeypatch.setattr(c.hk, "ensure_venv", refuse)
+    app = HwApp(tmp_path, COURSE)
+    c.mod.run(app)
+    assert app.logs == ["HK_NO_INSTALL：不建 .venv"] and app.confirms == []
+
+
+def test_course_on_files_imports_kit(tmp_path, course_module, monkeypatch):
+    c = course_module
+    got = []
+    monkeypatch.setattr(c.hk, "import_kit", lambda app, paths, course: got.append((app, paths, course)))
+    app = HwApp(tmp_path, COURSE)
+    c.mod.on_files(app, [str(tmp_path / "t2026fscSpace")])
+    assert got == [(app, [tmp_path / "t2026fscSpace"], COURSE)]
+
+
+def test_course_module_scans_as_module_with_icon(load):
+    from core.scan import find_children, module_info
+
+    info = module_info(COURSE, COURSE.parent, "here")
+    assert info.icon == "🎓" and info.accepts_files and info.has_run and info.error is None
+    children = {c.name: c for c in find_children(COURSE, COURSE.parent)}
+    assert {"匯入作業包", "收作業"} <= set(children)
+    assert all(children[n].has_run and children[n].error is None for n in ("匯入作業包", "收作業"))
+    assert not any(n in children for n in ("examples", ".venv"))
+
+
+def course_with_buttons(tmp_path):
+    """tmp 的課程資料夾：真的 hk_tk.py 與兩顆按鈕的 iplot.py 複本。"""
+    course = course_copy(tmp_path)
+    for name in ("匯入作業包", "收作業"):
+        (course / name).mkdir()
+        (course / name / "iplot.py").write_bytes((COURSE / name / "iplot.py").read_bytes())
+    return course
+
+
+def press(folder, app, course):
+    from core.runner import run_module
+    from core.scan import module_info
+
+    result = run_module(module_info(folder, course, "child"), app)
+    assert result.ok, result.error
+    return result
+
+
+def test_import_button_chooses_a_folder(tmp_path, load):
+    course = course_with_buttons(tmp_path)
+    app = HwApp(tmp_path, course / "匯入作業包")
+    app.chosen_folder = teacher_kit(tmp_path)
+    press(course / "匯入作業包", app, course)
+    assert app.logs[-1] == "匯入了 HK1、HK2、HK5（新 3、更新 0）"
+    assert (course / "HK5" / "t2026fscSpace" / "HK5.txt").exists()
+    assert str(course) not in sys.path
+
+
+def test_import_button_cancelled(tmp_path, load):
+    course = course_with_buttons(tmp_path)
+    app = HwApp(tmp_path, course / "匯入作業包")
+    press(course / "匯入作業包", app, course)
+    assert app.logs == ["沒選資料夾，沒有匯入"]
+
+
+def test_collect_button_finds_hk_in_the_zip_name(tmp_path, load):
+    course = course_with_buttons(tmp_path)
+    old_hk(course / "HK5")
+    app = HwApp(tmp_path, course / "收作業")
+    app.chosen_files = [make_zip(tmp_path / "科學計算_hk5_全班.zip", {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD})]
+    press(course / "收作業", app, course)
+    assert (course / "HK5" / "B1" / "iplot.py").exists() and (course / "HK5" / "B2" / "iplot.py").exists()
+    assert any(line.startswith("收了 2 份進 HK5（新 2、覆蓋 0）") for line in app.logs)
+    assert app.asks == []
+
+
+def test_collect_button_asks_when_the_name_says_nothing(tmp_path, load):
+    course = course_with_buttons(tmp_path)
+    app = HwApp(tmp_path, course / "收作業")
+    app.chosen_files = [make_zip(tmp_path / "全班.zip", {"B1/HK5.txt": GOOD})]
+    app.answers_ask = ["hk5"]
+    press(course / "收作業", app, course)
+    [(question, _)] = app.asks
+    assert "全班.zip" in question
+    assert (course / "HK5" / "iplot.py").exists()  # 還沒匯入的 HK：先放墊片，學生才看得到
+    assert (course / "HK5" / "B1" / "t2026fscSpace" / "HK5.txt").exists()
+
+
+def test_collect_button_cancelled_or_no_answer(tmp_path, load):
+    course = course_with_buttons(tmp_path)
+    app = HwApp(tmp_path, course / "收作業")
+    press(course / "收作業", app, course)
+    assert app.logs == ["沒選檔，沒有收"]
+    app.chosen_files = [make_zip(tmp_path / "全班.zip", {"B1/HK5.txt": GOOD})]
+    app.answers_ask = [None]
+    press(course / "收作業", app, course)
+    assert app.logs[-1] == "沒說是哪一份，這幾個沒收：全班.zip"
+    assert sorted(p.name for p in course.iterdir()) == ["hk_tk.py", "匯入作業包", "收作業"]
+

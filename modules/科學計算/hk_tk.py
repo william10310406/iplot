@@ -128,6 +128,7 @@ def launch(app, folder: Path, popen=None) -> None:
 BASIC_PACKAGES = ("numpy", "matplotlib", "scipy", "Pillow", "opencv-python", "pandas", "scikit-learn", "PyWavelets")
 HEAVY_PACKAGES = ("torch", "pykan", "PyYAML", "tqdm", "torchdiffeq")
 COURSE_PACKAGES = BASIC_PACKAGES + HEAVY_PACKAGES
+BATCH_SIZES = ("約 480 MB", "約 1.1 GB")  # 兩批裝好的大小（Task 0 在 Apple Silicon 的 Mac 上量的，第二批含 mlx-lm）
 APPLE_SILICON_ONLY = ("mlx-lm",)  # HK9；只有 Apple Silicon 的 Mac 有
 NO_APPLE_SILICON = "這台機器裝不了，HK9 要在 Apple Silicon 的 Mac 上看"
 PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
@@ -573,13 +574,33 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         shutil.rmtree(work, ignore_errors=True)
 
 
-# ── 批次模式：沒有 iPLoT 也能收、能看（設計第 8 節、D98）──
-
-
 def hk_in_name(name: str) -> str | None:
     """名字裡的 HK<n>（大小寫都認）；沒有回 None。zip 的檔名靠這個知道是哪一份作業。"""
     m = re.search(r"HK(\d+)", name, re.IGNORECASE)
     return f"HK{m.group(1)}" if m else None
+
+
+def collect_files(app, paths: list[Path], course: Path) -> None:
+    """「收作業」那顆按鈕：選好的檔照檔名裡的 HKn 分好，各收進 course/HKn/；看不出來的問一次。
+    （0.5.1 的面板沒有拖放，收作業靠這顆按鈕；HKn 的 on_files 留著，從「互通」的命令列叫得到。）"""
+    groups: dict[str, list[Path]] = {}
+    unknown = []
+    for path in map(Path, paths):
+        hk = hk_in_name(path.stem)
+        (groups.setdefault(hk, []) if hk else unknown).append(path)
+    if unknown:
+        names = "、".join(p.name for p in unknown)
+        hk = hk_in_name(app.ask(f"{names} 的名字裡看不出是哪一份作業：收進哪一份？（例如 HK5）") or "")
+        if hk is None:
+            app.log(f"沒說是哪一份，這幾個沒收：{names}")
+        else:
+            groups.setdefault(hk, []).extend(unknown)
+    for hk, files in sorted(groups.items(), key=lambda item: int(item[0][2:])):
+        write_stub(Path(course) / hk)  # 還沒匯入的 HK 先放墊片，收進來的學生才看得到
+        collect(app, files, Path(course) / hk)
+
+
+# ── 批次模式：沒有 iPLoT 也能收、能看（設計第 8 節、D98）──
 
 
 class CliApp:
