@@ -6,6 +6,7 @@
 """
 
 import ast
+import contextlib
 import importlib
 import importlib.metadata
 import os
@@ -14,10 +15,13 @@ import re
 import site
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 NO_INSTALL = "HK_NO_INSTALL"  # 設了就不跑 pip，缺了只報（測試用）
-NO_AUTOFILL = "HK_NO_AUTOFILL"  # 設了就不自動補 REQUIRES：iPLoT、批次名單另開的子程序都帶著，學生交的檔絕不被改
+# iPLoT（面板、批次名單）另開的子程序都帶著：不自動補 REQUIRES（收進來的檔絕不被改），
+# 不在 venv 裡就不裝（不裝進 iPLoT 自己的、系統的 Python），也不問 case（--all，沒有終端機可答）
+FROM_IPLOT = "HK_FROM_IPLOT"
 NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # pip 名只接這些字元，不經 shell
 PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
              "pywt": "PyWavelets", "yaml": "PyYAML", "bs4": "beautifulsoup4", "skimage": "scikit-image",
@@ -180,7 +184,7 @@ def _hand_off(file: Path, need: list[str], popen) -> None:
         print(f"iPLoT 的 Python 沒有 {'、'.join(need)}，課程的 .venv 也還沒建：先按「科學計算」裝課程套件")
     else:
         print(f"iPLoT 的 Python 沒有 {'、'.join(need)}；改用課程的 .venv 另開視窗跑")
-        popen([str(python), str(file)], cwd=str(file.parent), env={**os.environ, NO_AUTOFILL: "1"})
+        popen([str(python), str(file), "--all"], cwd=str(file.parent), env={**os.environ, FROM_IPLOT: "1"})
     sys.exit(0)
 
 
@@ -196,7 +200,7 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
         return
     extra = []
     own = Path(file).resolve() == Path((argv if argv is not None else sys.argv)[0]).resolve()
-    if own and not os.environ.get(NO_AUTOFILL) and _course(Path(file)) is None:  # 課程資料夾裡的是收進來的或老師的
+    if own and not os.environ.get(FROM_IPLOT) and _course(Path(file)) is None:  # 課程資料夾裡的是收進來的或老師的
         extra = _forgotten(Path(file), requires)
         if extra and fill_requires(Path(file), extra):
             print(f"已把 {'、'.join(extra)} 加進 REQUIRES")
@@ -213,6 +217,8 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
     if only and not arm_mac:
         raise RuntimeError(f"{'、'.join(only)} 只有 Apple Silicon 的 Mac 裝得了：這份作業要在 Apple Silicon 的 Mac 上跑")
     in_venv = sys.prefix != sys.base_prefix
+    if os.environ.get(FROM_IPLOT) and not in_venv:
+        raise RuntimeError(f"缺 {'、'.join(need)}：先按「科學計算」裝課程套件（不裝進 iPLoT 自己的 Python）")
     print(f"在裝 {'、'.join(need)}（第一次要幾分鐘）…")
     argv_pip = [sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check",
                 *([] if in_venv else ["--user"]), *need]
@@ -221,6 +227,101 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
     if not in_venv:  # 剛建好的 user site 不在 sys.path 上（Python 啟動時它還不在）
         site.addsitedir(site.getusersitepackages())
     importlib.invalidate_caches()
+
+
+# ── 跑：單獨跑是終端機選 case＋matplotlib 的視窗；在 iPLoT 裡是另開一個程序跑同一個檔（規範第 5 節）──
+
+
+def _choose(cases: list[str], hw: dict, argv: list[str], ask, out) -> list[str] | None:
+    """要跑哪幾個 case：--case <名> 直接指定、--all 全部；不然列出來問，0 是全部。選不了印一句、回 None。"""
+    if "--all" in argv:
+        return cases
+    if "--case" in argv:
+        i = argv.index("--case")
+        name = argv[i + 1] if i + 1 < len(argv) else ""
+        if name in cases:
+            return [name]
+        print(f"沒有 {name}：有 {'、'.join(cases)}", file=out)
+        return None
+    for n, name in enumerate(cases, 1):
+        print(f"{n}) {name}  {hw['cases'][name].get('label', '')}", file=out)
+    print("0) 全部", file=out)
+    try:
+        answer = ask("選：").strip()
+    except EOFError:
+        answer = ""
+    number = int(answer) if answer.isdecimal() else -1  # ①、² 這種 isdigit 但 int() 不收的，當作沒選
+    if number == 0:
+        return cases
+    if 1 <= number <= len(cases):
+        return [cases[number - 1]]
+    print(f"要選 0 到 {len(cases)} 之間的數字", file=out)
+    return None
+
+
+def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=None) -> int:
+    """單獨跑（python3 HKn.py）：選 case；每個 case 先 compute，印 text 與 stats，有 draw 就開一個 matplotlib
+    視窗（關掉才下一個）。一個 case 出錯印 traceback 全文、接著跑下一個。回結束碼。"""
+    out = out or sys.stdout
+    with contextlib.suppress(AttributeError, ValueError):
+        out.reconfigure(encoding="utf-8")
+    cases = list(hw["cases"])
+    chosen = _choose(cases, hw, list(sys.argv[1:] if argv is None else argv), ask, out)
+    if chosen is None:
+        return 2
+    for case in chosen:
+        print(f"── {case} ──", file=out)
+        try:
+            run = hw["compute"](case)
+            if run.get("text"):
+                print(run["text"], file=out)
+            for key, value in (hw.get("stats") or (lambda r: []))(run):
+                print(f"{key}：{value}", file=out)
+            if hw.get("draw"):
+                import matplotlib.pyplot as plt  # 只有要畫圖時才 import（頂層只 import 標準庫）
+
+                fig = plt.figure(figsize=(7, 6))
+                try:
+                    with contextlib.suppress(AttributeError):
+                        fig.canvas.manager.set_window_title(f"{hw['name']} — {case}")
+                    ani = hw["draw"](fig, run)  # 動畫要抓著，不然一回來就被回收、畫面不動
+                    (show_fn or plt.show)()
+                    del ani
+                finally:
+                    plt.close(fig)  # draw 畫到一半壞了也關掉，不然下一個 case 的視窗會一起跳出來
+        except Exception:  # noqa: BLE001  學生的 compute／draw 怎麼壞都印出來，接著跑下一個 case
+            traceback.print_exc(file=out)
+    return 0
+
+
+def show(app, hw: dict, popen=subprocess.Popen) -> None:
+    """在 iPLoT 裡按下去：用課程 .venv 的 Python 另開一個程序跑這個檔（走它自己的 main，--all 一個 case 一個視窗，
+    不問：iPLoT 另開的程序沒有終端機可答），立刻回來。"""
+    file = Path(hw["file"]).resolve()
+    course = _course(file)
+    python = _venv_python(course)
+    if python is None:
+        python = Path(sys.executable)
+        if course is not None:
+            app.log("課程的 .venv 還沒建：先按「科學計算」裝課程套件；這次用 iPLoT 自己的 Python 試")
+    popen([str(python), str(file), "--all"], cwd=str(file.parent), env={**os.environ, FROM_IPLOT: "1"})
+    app.log(f"{file.parent.name}：{hw['name']} 的視窗開了（在 Dock 上找 Python）")
+
+
+def collect(app, paths) -> None:
+    """把 TronClass 的 zip 收進這份作業（收作業只有一份程式：轉給課程資料夾的 hk_tk.collect）。"""
+    folder = Path(app.module.folder)
+    course = _course(folder / "iplot.py")
+    if course is None:
+        app.log("找不到課程資料夾（上層沒有 hk_tk.py），沒有收")
+        return
+    sys.modules.pop("hk_tk", None)  # 讀課程資料夾裡現在那一份
+    sys.path.insert(0, str(course))
+    try:
+        import hk_tk
+    finally:
+        sys.path.remove(str(course))
+    hk_tk.collect(app, [Path(p) for p in paths], folder)
 
 
 # ── 發作業前的靜態檢查（規範第 7 節）──
@@ -315,7 +416,7 @@ def check(file: Path) -> list[str]:
 
 def cli(argv: list[str]) -> int:
     """python hk_page.py --check <檔>：印每條問題，有問題回 1；全過印「通過」回 0。"""
-    with __import__("contextlib").suppress(AttributeError, ValueError):
+    with contextlib.suppress(AttributeError, ValueError):
         sys.stdout.reconfigure(encoding="utf-8")
     if len(argv) != 2 or argv[0] != "--check":
         print("用法：python hk_page.py --check <作業檔>", file=sys.stderr)
