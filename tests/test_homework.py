@@ -7,6 +7,7 @@ Tk 的部分用藏起來的真 Tk（tests/test_tk_smoke.py 的做法：destroy �
 import ast
 import importlib
 import io
+import os
 import sys
 import types
 from pathlib import Path
@@ -297,4 +298,121 @@ def test_main_runs_the_homework(load, monkeypatch, tmp_path):
     monkeypatch.setattr(hk, "run_homework", lambda folder, name: calls.append((folder, name)) or 0)
     assert hk.main([str(tmp_path), "HK5"]) == 0
     assert calls == [(tmp_path, "HK5")]
+
+
+# ── Task 2：墊片與 launch、venv_python、course_root ──
+
+
+def course_copy(tmp_path):
+    """tmp_path/科學計算：放一份真的 hk_tk.py（墊片往上找的就是它），回課程資料夾。"""
+    course = tmp_path / "科學計算"
+    course.mkdir()
+    (course / "hk_tk.py").write_bytes((COURSE / "hk_tk.py").read_bytes())
+    return course
+
+
+def test_course_root_walks_up_two_levels(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    (course / "HK5" / "B1").mkdir(parents=True)
+    assert hk.course_root(course / "HK5" / "B1") == course
+    assert hk.course_root(course / "HK5") == course
+    assert hk.course_root(course) == course
+    assert hk.course_root(tmp_path) is None
+
+
+def test_venv_python_platform_path(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert hk.python_in(tmp_path / ".venv") == tmp_path / ".venv" / "bin" / "python"
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert hk.python_in(tmp_path / ".venv") == tmp_path / ".venv" / "Scripts" / "python.exe"
+    assert hk.venv_python(tmp_path) is None  # 不存在
+    assert hk.venv_python(None) is None
+    exe = tmp_path / ".venv" / "Scripts" / "python.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("", encoding="utf-8")
+    assert hk.venv_python(tmp_path) == exe
+
+
+def test_write_stub_is_idempotent(tmp_path, load):
+    hk = load("hk_tk")
+    stub = hk.write_stub(tmp_path)
+    assert stub == tmp_path / "iplot.py" and stub.read_text(encoding="utf-8") == hk.STUB
+    os.utime(stub, (1_000_000, 1_000_000))
+    assert hk.write_stub(tmp_path) == stub
+    assert stub.stat().st_mtime == 1_000_000  # 內容一樣就不碰
+    assert hk.STUB.startswith('"""按下去用課程的 Python 另開視窗跑這個資料夾的 t2026fscSpace/HKn.txt（舊格式）')
+
+
+def test_write_stub_leaves_a_real_module_alone(tmp_path, load):
+    hk = load("hk_tk")
+    mine = 'HOMEWORK = dict(name="HK13")\n'  # 新格式的作業本身，不是墊片
+    (tmp_path / "iplot.py").write_text(mine, encoding="utf-8")
+    hk.write_stub(tmp_path)
+    assert (tmp_path / "iplot.py").read_text(encoding="utf-8") == mine
+    (tmp_path / "iplot.py").write_text(hk.STUB.replace("（舊格式）", "（舊的墊片）"), encoding="utf-8")
+    hk.write_stub(tmp_path)  # 舊版本的墊片：換成這一版
+    assert (tmp_path / "iplot.py").read_text(encoding="utf-8") == hk.STUB
+
+
+@pytest.mark.parametrize("level", [("HK5",), ("HK5", "B1")])
+def test_stub_runs_through_the_real_runner(tmp_path, load, monkeypatch, level):
+    from core.runner import run_module
+    from core.scan import module_info
+
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    folder = course.joinpath(*level)
+    old_hk(folder)
+    hk.write_stub(folder)
+    popen = FakePopen()
+    monkeypatch.setattr("subprocess.Popen", popen)
+    app = HwApp(tmp_path, folder)
+    result = run_module(module_info(folder, course, "here"), app)
+    assert result.ok, result.error
+    assert popen.argvs == [[sys.executable, str(course / "hk_tk.py"), str(folder), "HK5"]]
+    assert popen.calls[0][1]["cwd"] == str(folder)
+    assert str(course) not in sys.path  # 墊片 import 完就把課程資料夾從 sys.path 拿掉
+
+
+def test_launch_argv_uses_venv_python(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    vpy = hk.python_in(course / ".venv")
+    vpy.parent.mkdir(parents=True)
+    vpy.write_text("", encoding="utf-8")
+    folder = course / "HK5" / "B1"
+    old_hk(folder)
+    app, popen = HwApp(tmp_path, folder), FakePopen()
+    hk.launch(app, folder, popen=popen)
+    assert popen.argvs == [[str(vpy), str(course / "hk_tk.py"), str(folder), "HK5"]]
+    assert popen.calls[0][1] == {"cwd": str(folder)}
+    assert app.logs == ["B1：HK5 的視窗開了（在 Dock 上找 Python）"]
+
+
+def test_launch_without_venv_falls_back_and_says_so(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    folder = course / "HK5"
+    old_hk(folder)
+    app, popen = HwApp(tmp_path, folder), FakePopen()
+    hk.launch(app, folder, popen=popen)
+    assert popen.argvs[0][0] == sys.executable
+    assert any("先按「科學計算」裝課程套件" in line for line in app.logs)
+    assert app.logs[-1] == "HK5：HK5 的視窗開了（在 Dock 上找 Python）"
+
+
+def test_launch_without_hk_file_only_logs(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    (course / "HK5").mkdir()
+    app, popen = HwApp(tmp_path, course / "HK5"), FakePopen()
+    hk.launch(app, course / "HK5", popen=popen)
+    assert popen.calls == []
+    assert app.logs == ["HK5：這個資料夾裡沒有 t2026fscSpace/HK*.txt"]
+    old_hk(tmp_path / "外面")
+    hk.launch(app, tmp_path / "外面", popen=popen)
+    assert popen.calls == []
+    assert app.logs[-1] == "找不到課程資料夾（上層沒有 hk_tk.py）"
 

@@ -12,6 +12,7 @@ LF_subWIN 那個框、HKn.txt 要的全域；exec 之後叫 HKn()，HKn.txt 自�
 import contextlib
 import os
 import re
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -32,6 +33,81 @@ def hk_of(folder: Path) -> str | None:
     except OSError:
         return None
     return found[0] if len(found) == 1 else None
+
+
+def course_root(start: Path) -> Path | None:
+    """從 start 自己開始往上找，第一個有 hk_tk.py 的資料夾（課程資料夾）；找不到回 None。"""
+    start = Path(start).resolve()
+    return next((p for p in (start, *start.parents) if (p / "hk_tk.py").is_file()), None)
+
+
+def python_in(venv_dir: Path) -> Path:
+    """venv 裡 Python 的位置（不查在不在）。"""
+    return Path(venv_dir) / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+
+
+def venv_python(course: Path | None) -> Path | None:
+    """課程 .venv 的 Python；還沒建（或 course 是 None）回 None。"""
+    if course is None:
+        return None
+    python = python_in(Path(course) / ".venv")
+    return python if python.is_file() else None
+
+
+# 每份作業與每個學生資料夾裡的 iplot.py（匯入、收作業時產生；HK 那一層與學生那一層同一份，設計第 5 節）
+STUB = '''"""按下去用課程的 Python 另開視窗跑這個資料夾的 t2026fscSpace/HKn.txt（舊格式）。收作業按「科學計算」底下的「收作業」。"""
+import pathlib
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+COURSE = next(p for p in HERE.parents if (p / "hk_tk.py").is_file())
+sys.modules.pop("hk_tk", None)  # 每次都讀課程資料夾裡現在那一份
+sys.path.insert(0, str(COURSE))
+try:
+    import hk_tk
+finally:
+    sys.path.remove(str(COURSE))
+
+
+def run(app):
+    hk_tk.launch(app, HERE)  # 用課程 .venv 的 Python 另開視窗；沒有 .venv 就用 iPLoT 的 Python 並說一句
+
+
+def on_files(app, paths):
+    hk_tk.collect(app, paths, HERE)  # 收作業（只有 HKn 那一層有意義）
+'''
+STUB_MARK = "hk_tk.launch(app, HERE)"  # 有這一行的 iplot.py 是墊片（舊版本的也算），可以換成這一版
+
+
+def write_stub(folder: Path) -> Path:
+    """寫 folder/iplot.py 墊片。已經是這一版就不碰；是舊版本的墊片就換；是別的檔（新格式的作業本身）不碰。"""
+    file = Path(folder) / "iplot.py"
+    if file.exists():
+        old = file.read_text(encoding="utf-8", errors="replace")
+        if old == STUB or STUB_MARK not in old:
+            return file
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(STUB, encoding="utf-8")
+    return file
+
+
+def launch(app, folder: Path, popen=None) -> None:
+    """墊片的 run：用課程 .venv 的 Python 另開一個程序跑 hk_tk.py <folder> <HKn>，不等它，立刻回來。"""
+    folder = Path(folder)
+    hk = hk_of(folder)
+    if hk is None:
+        app.log(f"{folder.name}：這個資料夾裡沒有 {KIT}/HK*.txt")
+        return
+    course = course_root(folder)
+    if course is None:
+        app.log("找不到課程資料夾（上層沒有 hk_tk.py）")
+        return
+    python = venv_python(course)
+    if python is None:
+        python = Path(sys.executable)
+        app.log("課程的 .venv 還沒建：先按「科學計算」裝課程套件；這次用 iPLoT 自己的 Python 試")
+    (popen or subprocess.Popen)([str(python), str(course / "hk_tk.py"), str(folder), hk], cwd=str(folder))
+    app.log(f"{folder.name}：{hk} 的視窗開了（在 Dock 上找 Python）")
 
 
 def build(folder: Path, hk: str, root) -> dict:
