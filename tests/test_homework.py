@@ -33,9 +33,9 @@ def keep_cwd(monkeypatch):
     monkeypatch.chdir(Path.cwd())
 
 
-@pytest.fixture
-def load(monkeypatch):
-    """load("hk_tk")：把 modules/科學計算/hk_tk.py 當一般模組 import（不寫 .pyc），結束時從 sys.modules 拿掉。"""
+def loader(monkeypatch):
+    """load 的本體（test_hk_page 也用）：課程資料夾放到 sys.path 最前面、不寫 .pyc，給出 import_module；
+    結束時把 hk_tk、hk_page 從 sys.modules 拿掉。"""
     monkeypatch.syspath_prepend(str(COURSE))
     monkeypatch.setattr(sys, "dont_write_bytecode", True)
     for n in NAMES:
@@ -43,6 +43,12 @@ def load(monkeypatch):
     yield importlib.import_module
     for n in NAMES:
         sys.modules.pop(n, None)
+
+
+@pytest.fixture
+def load(monkeypatch):
+    """load("hk_tk")：把 modules/科學計算/hk_tk.py 當一般模組 import（不寫 .pyc），結束時從 sys.modules 拿掉。"""
+    yield from loader(monkeypatch)
 
 
 class HwApp(FakeApp):
@@ -183,7 +189,7 @@ def fake_tk(monkeypatch):
 # ── 頂層只 import 標準庫，而且不 import tkinter（課程模組與墊片在面板的程序裡 import hk_tk，面板擋 tkinter）──
 
 
-@pytest.mark.parametrize("name", ["hk_tk"])
+@pytest.mark.parametrize("name", ["hk_tk", "hk_page"])
 def test_top_level_imports_only_stdlib_and_no_tkinter(name):
     tree = ast.parse((COURSE / f"{name}.py").read_text(encoding="utf-8"))
     top = set()

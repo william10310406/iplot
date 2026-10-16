@@ -133,7 +133,7 @@ APPLE_SILICON_ONLY = ("mlx-lm",)  # HK9；只有 Apple Silicon 的 Mac 有
 NO_APPLE_SILICON = "這台機器裝不了，HK9 要在 Apple Silicon 的 Mac 上看"
 PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
              "pywt": "PyWavelets", "yaml": "PyYAML", "bs4": "beautifulsoup4", "skimage": "scikit-image",
-             "dateutil": "python-dateutil"}
+             "dateutil": "python-dateutil", "mpl_toolkits": "matplotlib", "pylab": "matplotlib"}
 # 子程序裡列出這個 Python 裝了哪些套件（不 import 它們）
 LIST_INSTALLED = ("import importlib.metadata, json; "
                   "print(json.dumps([d.metadata['Name'] for d in importlib.metadata.distributions()]))")
