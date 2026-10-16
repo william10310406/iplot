@@ -200,7 +200,8 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
         return
     extra = []
     own = Path(file).resolve() == Path((argv if argv is not None else sys.argv)[0]).resolve()
-    if own and not os.environ.get(FROM_IPLOT) and _course(Path(file)) is None:  # 課程資料夾裡的是收進來的或老師的
+    collected = Path(file).name == "iplot.py"  # 學生的叫 HKn.py；叫 iplot.py 的是收進來的或老師的
+    if own and not collected and not os.environ.get(FROM_IPLOT) and _course(Path(file)) is None:  # 課程資料夾裡的是收進來的或老師的
         extra = _forgotten(Path(file), requires)
         if extra and fill_requires(Path(file), extra):
             print(f"已把 {'、'.join(extra)} 加進 REQUIRES")
@@ -209,7 +210,7 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
         return
     if os.environ.get(NO_INSTALL):
         raise RuntimeError(f"缺 {'、'.join(need)}；HK_NO_INSTALL 設著，不裝")
-    bad = [n for n in need if not re.match(NAME_RE, n)]
+    bad = [n for n in need if not re.fullmatch(NAME_RE, n)]  # fullmatch：$ 會放過結尾的換行
     if bad:
         raise RuntimeError(f"套件名字不合法：{'、'.join(bad)}")
     arm_mac = sys.platform == "darwin" and platform.machine() == "arm64"

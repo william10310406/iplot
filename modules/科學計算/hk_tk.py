@@ -32,6 +32,7 @@ LOG = "執行紀錄.txt"
 HK_RE = re.compile(r"^(HK\d+)\.txt$")
 NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # pip 名只接這些字元（設計第 6 節），不經 shell
 NO_INSTALL = "HK_NO_INSTALL"  # 設了就不建 venv、不跑 pip，缺了只報（測試用）
+FROM_IPLOT = "HK_FROM_IPLOT"  # 交給新格式子程序的記號（hk_page 那邊同名）：不問 case、不改檔、不裝進系統的 Python
 GLOBALS = ("LF", "LF_subWIN", "t2026fscHOMEDIR", "os", "sys", "tkinter")  # 老師的啟動器給 HKn.txt 的全域
 USAGE = ("用法：python hk_tk.py <資料夾> <HKn>    （跑 <資料夾>/t2026fscSpace/HKn.txt）\n"
          "　　　python hk_tk.py --batch <zip> [--kit 老師的t2026fscSpace] [--out 資料夾] [--venv 資料夾] [--hk HKn] [--yes]")
@@ -184,7 +185,7 @@ def third_party(names: set[str], folder: Path) -> set[str]:
         siblings = {p.stem if p.suffix == ".py" else p.name for p in Path(folder).iterdir()}
     except OSError:
         siblings = set()
-    return set(names) - set(sys.stdlib_module_names) - {"__future__"} - siblings
+    return set(names) - set(sys.stdlib_module_names) - {"__future__", "hk_page", "hk_tk"} - siblings
 
 
 def ensure_venv(venv_dir: Path, say, popen=subprocess.Popen, python: str = sys.executable) -> Path:
@@ -226,7 +227,7 @@ def install(python: Path, pkgs: list[str], say, popen=subprocess.Popen, clock=ti
     pip 的輸出一行一行讀，每 5 秒 say 一次最後一行。回（裝好的, [(裝不了的, 原因)]）。"""
     ok, failed = [], []
     for pkg in pkgs:
-        if not re.match(NAME_RE, pkg):
+        if not re.fullmatch(NAME_RE, pkg):  # fullmatch：$ 會放過結尾的換行
             failed.append((pkg, "名字不合法"))
         elif os.environ.get(NO_INSTALL):
             failed.append((pkg, "HK_NO_INSTALL"))
@@ -267,11 +268,12 @@ def _nfc(name: str) -> str:
     return unicodedata.normalize("NFC", name)
 
 
-def _unique(path: Path) -> Path:
-    """path 已經有東西就加 -2、-3…"""
+def _unique(path: Path, keep_suffix: bool = False) -> Path:
+    """path 已經有東西就加 -2、-3…；keep_suffix 時加在副檔名前面（HK5.py → HK5-2.py）。"""
     n, candidate = 2, path
     while candidate.exists():
-        candidate, n = path.with_name(f"{path.name}-{n}"), n + 1
+        name = f"{path.stem}-{n}{path.suffix}" if keep_suffix else f"{path.name}-{n}"
+        candidate, n = path.with_name(name), n + 1
     return candidate
 
 
@@ -322,6 +324,8 @@ def _unzip(file: Path, dest: Path) -> int:
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():  # 只差大小寫的兩個成員（B1/HK5.txt、b1/HK5.txt）在 macOS 是同一個檔：兩份都留
+                target = _unique(target, keep_suffix=True)
             with zf.open(info) as src, open(target, "wb") as out:
                 shutil.copyfileobj(src, out)
     return skipped
@@ -357,7 +361,7 @@ def gather(paths: list[Path], into: Path) -> GatherResult:
         elif path.is_dir():
             _copytree(path, _unique(root / _nfc(path.name)))
         elif path.is_file():
-            shutil.copy2(path, _unique(root / _nfc(path.name)))
+            shutil.copy2(path, _unique(root / _nfc(path.name), keep_suffix=True))
     return GatherResult(root, skipped)
 
 
@@ -431,8 +435,9 @@ def student_name(root: Path, file: Path, taken: set[str]) -> str:
     rel = Path(file).relative_to(root)
     raw = Path(file).stem if len(rel.parts) == 1 else rel.parts[0]
     name = BAD_CHARS.sub("", _nfc(raw)).lstrip(".").strip() or "未命名"
+    folded = {t.casefold() for t in taken}  # macOS、Windows 的檔名不分大小寫：B1 和 b1 是同一個資料夾
     final, n = name, 2
-    while final in taken:
+    while final.casefold() in folded:
         final, n = f"{name}-{n}", n + 1
     taken.add(final)
     return final
@@ -459,13 +464,16 @@ def _naming_root(file: Path, root: Path) -> Path:
 
 
 def kit_space(hk_folder: Path, hk: str) -> Path | None:
-    """老師那份的 HKnSpace/（舊格式放在 t2026fscSpace/ 底下）；還沒匯入回 None。"""
-    space = Path(hk_folder) / KIT / f"{hk}Space"
-    return space if space.is_dir() else None
+    """老師那份的 HKnSpace/：舊格式在 t2026fscSpace/ 底下，新格式就在 HKn/ 底下；還沒匯入回 None。"""
+    for space in (Path(hk_folder) / KIT / f"{hk}Space", Path(hk_folder) / f"{hk}Space"):
+        if space.is_dir():
+            return space
+    return None
 
 
 def classify(file: Path) -> tuple[str, str | None]:
-    """不執行、只用 ast 看是哪一種（D99）：("old", "HK5")、("broken", None)、("not-utf8", None)、("none", None)。"""
+    """不執行、只用 ast 看是哪一種（D99）：頂層有 HOMEWORK = dict(…) 是 ("new", None)（兩種都有也算新）；
+    有 def HKn( 而且用到 LF_subWIN 是 ("old", "HKn")；其他是 ("broken", None)、("not-utf8", None)、("none", None)。"""
     try:
         source = Path(file).read_text(encoding="utf-8-sig")
     except UnicodeDecodeError:
@@ -477,9 +485,53 @@ def classify(file: Path) -> tuple[str, str | None]:
     except (SyntaxError, ValueError):
         return "broken", None
     for node in tree.body:
+        if (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "HOMEWORK" for t in node.targets)
+                and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "dict"):
+            return "new", None
+    for node in tree.body:
         if isinstance(node, ast.FunctionDef) and re.fullmatch(r"HK\d+", node.name) and "LF_subWIN" in source:
             return "old", node.name
     return "none", None
+
+
+SHELL = Path(__file__).resolve().parent / "hk_page.py"  # 新格式的殼：正本跟這個檔放在一起（課程資料夾）
+
+
+def _requires_of(file: Path) -> set[str]:
+    """新格式檔的 REQUIRES（pip 名）；讀不懂回空集合。"""
+    try:
+        tree = ast.parse(Path(file).read_text(encoding="utf-8-sig"))
+    except (SyntaxError, ValueError, OSError):
+        return set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "REQUIRES" for t in node.targets):
+            with contextlib.suppress(ValueError, TypeError, SyntaxError):
+                value = ast.literal_eval(node.value)
+                if isinstance(value, (list, tuple)):
+                    return {v for v in value if isinstance(v, str)}
+    return set()
+
+
+def _shell_check(file: Path) -> list[str]:
+    """新格式的檔跑一次 hk_page 的 --check（從課程資料夾的正本載入，不動 sys.path、不碰 sys.modules 裡的 hk_page）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_hk_page_for_check", SHELL)
+    shell = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shell)
+    return shell.check(Path(file))
+
+
+def _is_new_folder(folder: Path) -> bool:
+    """學生資料夾放的是新格式（iplot.py 是作業本身、旁邊有殼），不是舊格式的迷你作業包。"""
+    return (folder / "hk_page.py").is_file() and (folder / "iplot.py").is_file() and not (folder / KIT).is_dir()
+
+
+def _is_student(folder: Path, hk: str) -> bool:
+    """收作業放出來的學生資料夾（舊格式的迷你作業包，或新格式）；不是的話不能覆蓋、更不能砍。"""
+    return (folder.is_dir() and not folder.is_symlink()
+            and ((folder / KIT / f"{hk}.txt").is_file() or _is_new_folder(folder)))
 
 
 def _packages(app, python: Path | None, pkgs: list[str], popen) -> str:
@@ -515,6 +567,8 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         files, others = [], 0
         for f in sorted(got.root.rglob("*")):
             if f.is_file() and not _hidden(f, got.root):
+                if f.name.casefold() == "hk_page.py":  # 學生自己那份殼：用課程的正本，不當作業
+                    continue
                 if f.suffix.lower() in (".py", ".txt"):
                     files.append(f)
                 else:
@@ -523,37 +577,63 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             app.log(NOTHING)
             return NOTHING
         space = kit_space(hk_folder, hk)
-        taken = {KIT, f"{hk}Space", "iplot.py", LOG, ".history"}  # 不能拿來當學生名字的
-        lists: dict[str, list[str]] = {"broken": [], "not-utf8": [], "wrong": []}
+        # 不能拿來當學生名字的：老師的東西與 HKn/ 裡其他不是學生資料夾的（不分大小寫比；學生資料夾可以覆蓋）
+        taken = {KIT, f"{hk}Space", "iplot.py", "hk_page.py", LOG, ".history", "__pycache__"}
+        with contextlib.suppress(OSError):
+            taken |= {p.name for p in hk_folder.iterdir() if not _is_student(p, hk)}
+        lists: dict[str, list[str]] = {"broken": [], "not-utf8": [], "wrong": [], "check": []}
         new = over = 0
+        kinds = {"old": 0, "new": 0}
         unsafe = got.skipped
         imports: set[str] = set()
         for file in files:
             name = student_name(_naming_root(file, got.root), file, taken)
             dest = hk_folder / name
-            if not _inside(dest, hk_folder) or dest.resolve() == hk_folder.resolve():
+            if (not _inside(dest, hk_folder) or dest.resolve() == hk_folder.resolve()
+                    or (dest.exists() and not _is_student(dest, hk))):
                 unsafe += 1
                 continue
             kind, found = classify(file)
             if kind in ("broken", "not-utf8"):
                 lists[kind].append(name)
-            elif found != hk:
+            elif kind != "new" and found != hk:
                 lists["wrong"].append(name)
+            if kind in kinds:
+                kinds[kind] += 1
             if dest.exists():
                 over += 1
+                # 格式換了（上次舊這次新，或反過來）：整個學生資料夾重建（_is_student 已經確定它是學生資料夾、不是連結）
+                if (kind == "new") != _is_new_folder(dest):
+                    shutil.rmtree(dest)
             else:
                 new += 1
-            kit = dest / KIT
-            kit.mkdir(parents=True, exist_ok=True)
-            (kit / f"{hk}.txt").write_bytes(file.read_bytes())
-            if space is not None:
-                _copytree(space, kit / space.name)
+            if kind == "new":  # 新格式：學生的檔就是 iplot.py，旁邊放殼與老師的 Space，沒有墊片
+                dest.mkdir(parents=True, exist_ok=True)
+                (dest / "iplot.py").write_bytes(file.read_bytes())
+                shutil.copy2(SHELL, dest / "hk_page.py")
+                target_space = dest / f"{hk}Space"
+                requires = _requires_of(file)
             else:
-                (kit / f"{hk}Space").mkdir(exist_ok=True)
-            write_stub(dest)
+                kit = dest / KIT
+                kit.mkdir(parents=True, exist_ok=True)
+                (kit / f"{hk}.txt").write_bytes(file.read_bytes())
+                target_space = kit / f"{hk}Space"
+                requires = set()
+            if space is not None:
+                _copytree(space, target_space)
+            else:
+                target_space.mkdir(exist_ok=True)
+            if kind == "new":
+                problems = _shell_check(dest / "iplot.py")  # Space 放好了才查（DATA 指的資料夾要在）
+                if problems:
+                    lists["check"].append(f"{name}：{problems[0]}")
+            else:
+                write_stub(dest)
             imports |= third_party(scan_imports(file), dest)
+            imports |= requires
         notes = []
-        for key, what in (("broken", "有語法錯誤"), ("not-utf8", "不是 UTF-8"), ("wrong", f"不是 {hk} 的作業檔")):
+        for key, what in (("broken", "有語法錯誤"), ("not-utf8", "不是 UTF-8"), ("wrong", f"不是 {hk} 的作業檔"),
+                          ("check", "新格式檢查不過")):
             if lists[key]:
                 notes.append(f"{len(lists[key])} 份{what}（{'、'.join(lists[key])}）")
         if others:
@@ -566,7 +646,8 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         package_note = _packages(app, python, pkgs, popen)
         if package_note:
             notes.append(package_note)
-        said = f"收了 {new + over} 份進 {hk}（新 {new}、覆蓋 {over}）" + "".join(f"；{n}" for n in notes)
+        formats = f"舊格式 {kinds['old']}、新格式 {kinds['new']}；" if kinds["new"] else ""  # 這學期全是舊的：不多說
+        said = f"收了 {new + over} 份進 {hk}（{formats}新 {new}、覆蓋 {over}）" + "".join(f"；{n}" for n in notes)
         app.log(said)
         app.rescan()
         return said
@@ -644,7 +725,8 @@ def batch(source: Path, kit: Path | None = None, out: Path | None = None, venv: 
 
 
 def _students(out: Path) -> list[Path]:
-    return sorted((p for p in Path(out).iterdir() if p.is_dir() and p.name != KIT and (p / KIT).is_dir()),
+    return sorted((p for p in Path(out).iterdir()
+                   if p.is_dir() and p.name != KIT and ((p / KIT).is_dir() or _is_new_folder(p))),
                   key=lambda p: _nfc(p.name))
 
 
@@ -652,14 +734,18 @@ def roster(out: Path, have: set[str] | None = None) -> list[tuple[str, str]]:
     """名單：[(學生, 標記)]，標記是「語法錯誤」「不是 UTF-8」「不是作業檔」或「缺 x、y」（have＝venv 裝了的，正規化過）。"""
     rows = []
     for student in _students(out):
-        hk = hk_of(student)
-        file = student / KIT / f"{hk}.txt"
-        kind, found = classify(file) if hk else ("none", None)
+        new_format = _is_new_folder(student)
+        hk = None if new_format else hk_of(student)
+        file = student / "iplot.py" if new_format else student / KIT / f"{hk}.txt"
+        kind, found = classify(file) if new_format or hk else ("none", None)
         mark = {"broken": "語法錯誤", "not-utf8": "不是 UTF-8"}.get(kind, "")
-        if not mark and found != hk:
+        if not mark and (kind != "new" if new_format else found != hk):
             mark = "不是作業檔"
+        if not mark and new_format and _shell_check(file):
+            mark = "檢查不過"
         if not mark and have is not None:
-            need = sorted({pip_name(n) for n in third_party(scan_imports(file), student)} - _have(have), key=str.lower)
+            names = {pip_name(n) for n in third_party(scan_imports(file), student)} | _requires_of(file)
+            need = sorted((n for n in names if _normal(n) not in _have(have)), key=str.lower)
             mark = f"缺 {'、'.join(need)}" if need else ""
         rows.append((_nfc(student.name), mark))
     return rows
@@ -675,7 +761,8 @@ class Roster:
     def __init__(self, out: Path, python: Path, root, popen=subprocess.Popen, have: set[str] | None = None):
         import tkinter
 
-        self.out, self.python, self.popen = Path(out), Path(python), popen
+        # 絕對路徑（--out、--venv 可能是相對的，子程序的 cwd 是學生資料夾）；不 resolve：venv 的 python 是連結
+        self.out, self.python, self.popen = Path(out).absolute(), Path(python).absolute(), popen
         self.rows = roster(self.out, have)
         root.title(f"{self.out.name} — {len(self.rows)} 份")
         root.geometry("420x600")
@@ -692,6 +779,10 @@ class Roster:
         if not picked:
             return
         folder = self.out / self.rows[picked[0]][0]
+        if _is_new_folder(folder):  # 新格式：跑學生的 iplot.py（走 hk_page.main，一個 case 一個視窗、不問）
+            self.popen([str(self.python), str(folder / "iplot.py"), "--all"], cwd=str(folder),
+                       env={**os.environ, FROM_IPLOT: "1"})
+            return
         hk = hk_of(folder)
         if hk is not None:
             self.popen([str(self.python), str(Path(__file__).resolve()), str(folder), hk], cwd=str(folder))

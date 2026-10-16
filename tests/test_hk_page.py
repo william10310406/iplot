@@ -660,3 +660,18 @@ def test_check_flags_names_the_homework_line_needs(tmp_path, load):
     (tmp_path / "HK0Space").mkdir()
     problems = hp.check(homework(tmp_path, src))
     assert problems == ["HOMEWORK = dict(…) 用到的 stats 沒有定義（不需要就寫 stats = None）"]
+
+
+
+def test_ensure_never_autofills_a_file_named_iplot(tmp_path, load, standalone):
+    hp = load("hk_page")
+    file = homework(tmp_path / "HK5_收件" / "B1", AUTOFILL, name="iplot.py")  # 收進來的一律叫 iplot.py；學生的叫 HKn.py
+    hp.ensure(["numpy"], str(file), popen=FakePopen(), argv=[str(file)])
+    assert file.read_text(encoding="utf-8") == AUTOFILL
+
+
+def test_ensure_rejects_a_name_with_a_trailing_newline(tmp_path, load, standalone, monkeypatch):
+    hp = load("hk_page")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    with pytest.raises(RuntimeError, match="名字不合法"):
+        hp.ensure(["numpy\n"], str(homework(tmp_path)), popen=FakePopen(), argv=["x"])

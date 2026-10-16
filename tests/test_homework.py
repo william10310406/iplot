@@ -312,10 +312,11 @@ def test_main_runs_the_homework(load, monkeypatch, tmp_path):
 
 
 def course_copy(tmp_path):
-    """tmp_path/科學計算：放一份真的 hk_tk.py（墊片往上找的就是它），回課程資料夾。"""
+    """tmp_path/科學計算：放一份真的 hk_tk.py（墊片往上找的就是它）與 hk_page.py（新格式要複製的殼），回課程資料夾。"""
     course = tmp_path / "科學計算"
     course.mkdir(parents=True)
-    (course / "hk_tk.py").write_bytes((COURSE / "hk_tk.py").read_bytes())
+    for name in ("hk_tk.py", "hk_page.py"):
+        (course / name).write_bytes((COURSE / name).read_bytes())
     return course
 
 
@@ -542,7 +543,7 @@ def test_import_kit_with_nothing_says_so(tmp_path, load):
     said = hk.import_kit(app, [tmp_path / "空"], course)
     assert said == "收到的東西裡沒有 HK<n>.txt；要給的是老師的 t2026fscSpace 資料夾或它的 zip"
     assert app.logs == [said] and app.rescans == 0
-    assert sorted(p.name for p in course.iterdir()) == ["hk_tk.py"]
+    assert sorted(p.name for p in course.iterdir()) == ["hk_page.py", "hk_tk.py"]
 
 
 # ── Task 4：課程 .venv、import 掃描、pip 名對照、一個一個裝 ──
@@ -1241,5 +1242,229 @@ def test_collect_button_cancelled_or_no_answer(tmp_path, load):
     app.answers_ask = [None]
     press(course / "收作業", app, course)
     assert app.logs[-1] == "沒說是哪一份，這幾個沒收：全班.zip"
-    assert sorted(p.name for p in course.iterdir()) == ["hk_tk.py", "匯入作業包", "收作業"]
+    assert sorted(p.name for p in course.iterdir()) == ["hk_page.py", "hk_tk.py", "匯入作業包", "收作業"]
 
+
+
+# ── Task 11：收作業兩種格式都收（D99）──
+
+NEW_HK = """REQUIRES = ["numpy"]
+import hk_page; hk_page.ensure(REQUIRES, __file__)
+import numpy as np
+
+NAME = "HK5 新格式"
+DOCS = []
+NOTE = ""
+CASES = {"case-1": dict(label="一")}
+
+
+def compute(case):
+    return {"text": str(np.arange(3))}
+
+
+draw = None
+stats = None
+
+# ── 以下不用改 ──
+import sys
+HOMEWORK = dict(name=NAME, docs=DOCS, note=NOTE, cases=CASES, compute=compute, draw=draw, stats=stats, file=__file__)
+def run(app): hk_page.show(app, HOMEWORK)
+def on_files(app, paths): hk_page.collect(app, paths)
+if __name__ == "__main__" and "core.runner" not in sys.modules:
+    hk_page.main(HOMEWORK)
+"""
+
+
+def test_classify_three_kinds(tmp_path, load):
+    hk = load("hk_tk")
+    files = {"old.txt": GOOD, "new.py": NEW_HK, "none.py": "x = 1\n", "broken.py": "def (\n",
+             "both.py": GOOD + "\nHOMEWORK = dict(name='x')\n"}
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    assert hk.classify(tmp_path / "old.txt") == ("old", "HK5")
+    assert hk.classify(tmp_path / "new.py") == ("new", None)
+    assert hk.classify(tmp_path / "none.py") == ("none", None)
+    assert hk.classify(tmp_path / "broken.py") == ("broken", None)
+    assert hk.classify(tmp_path / "both.py") == ("new", None)
+
+
+def test_kit_space_also_looks_next_to_a_new_format_homework(tmp_path, load):
+    hk = load("hk_tk")
+    (tmp_path / "HK13" / "HK13Space").mkdir(parents=True)
+    assert hk.kit_space(tmp_path / "HK13", "HK13") == tmp_path / "HK13" / "HK13Space"
+
+
+def test_collect_mixed_batch(tmp_path, load):
+    hk = load("hk_tk")
+    course, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/HK5.txt": GOOD, "B2/HK5.py": NEW_HK, "B3/HK5.py": "x = 1\n"})
+    said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    assert (folder / "B1" / "t2026fscSpace" / "HK5.txt").exists() and (folder / "B1" / "iplot.py").read_text(
+        encoding="utf-8") == hk.STUB
+    b2 = folder / "B2"
+    assert (b2 / "iplot.py").read_text(encoding="utf-8") == NEW_HK  # 學生的檔改名，照原 bytes
+    assert (b2 / "hk_page.py").read_bytes() == (course / "hk_page.py").read_bytes()
+    assert (b2 / "HK5Space" / "a.pdf").read_bytes() == b"%PDF"
+    assert not (b2 / "t2026fscSpace").exists()
+    assert (folder / "B3" / "t2026fscSpace" / "HK5.txt").exists()  # 都不是：照舊格式放
+    assert said.startswith("收了 3 份進 HK5（舊格式 1、新格式 1；新 3、覆蓋 0）")
+    assert "；1 份不是 HK5 的作業檔（B3）" in said
+
+
+def test_collect_old_only_keeps_the_short_sentence(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    _, files = handed_in(tmp_path, {"B1.txt": GOOD})
+    assert hk.collect(HwApp(tmp_path, folder), files, folder).startswith("收了 1 份進 HK5（新 1、覆蓋 0）")
+
+
+def test_collect_rebuilds_when_format_changes(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    app = HwApp(tmp_path, folder)
+    hk.collect(app, [make_zip(tmp_path / "a" / "HK5.zip", {"B1/HK5.txt": GOOD})], folder)
+    said = hk.collect(app, [make_zip(tmp_path / "b" / "HK5.zip", {"B1/HK5.py": NEW_HK})], folder)
+    b1 = folder / "B1"
+    assert not (b1 / "t2026fscSpace").exists() and (b1 / "hk_page.py").exists()
+    assert (b1 / "iplot.py").read_text(encoding="utf-8") == NEW_HK
+    assert "覆蓋 1" in said
+    hk.collect(app, [make_zip(tmp_path / "c" / "HK5.zip", {"B1/HK5.txt": GOOD})], folder)  # 再換回舊格式
+    assert not (b1 / "hk_page.py").exists() and (b1 / "t2026fscSpace" / "HK5.txt").exists()
+    assert (b1 / "iplot.py").read_text(encoding="utf-8") == hk.STUB
+
+
+def test_collect_unions_requires_line(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, venv=True)
+    new = NEW_HK.replace('REQUIRES = ["numpy"]', 'REQUIRES = ["numpy", "scipy"]')
+    _, files = handed_in(tmp_path, {"B1/HK5.py": new})
+    app = HwApp(tmp_path, folder)
+    app.answers = [False]
+    hk.collect(app, files, folder, popen=FakePopen(output=lambda argv: ['["numpy"]']))
+    [question] = app.confirms
+    assert "scipy" in question  # 只寫在 REQUIRES、沒有 import 的也算
+
+
+def test_collect_lists_check_failures(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    bad = NEW_HK.replace("import numpy as np", "import numpy as np\nimport tkinter")
+    base, _ = handed_in(tmp_path, {"B1/HK5.py": bad, "B2/HK5.py": NEW_HK})
+    said = hk.collect(HwApp(tmp_path, folder), [base], folder)
+    assert "；1 份新格式檢查不過（B1：不能 import tkinter：畫面是殼的事）" in said
+    assert (folder / "B1" / "iplot.py").read_text(encoding="utf-8") == bad  # 照放
+
+
+def test_roster_marks_and_opens_new_format(tmp_path, load, tk_root):
+    hk = load("hk_tk")
+    out = tmp_path / "HK5_收件"
+    old_hk(out / "B1")
+    for name, src in (("B2", NEW_HK), ("B3", NEW_HK.replace("import numpy as np", "import numpy as np\nimport turtle"))):
+        (out / name).mkdir(parents=True)
+        (out / name / "iplot.py").write_text(src, encoding="utf-8")
+        (out / name / "hk_page.py").write_bytes((COURSE / "hk_page.py").read_bytes())
+    assert hk.roster(out) == [("B1", ""), ("B2", ""), ("B3", "檢查不過")]
+    popen = FakePopen()
+    win = hk.Roster(out, Path("/venv/bin/python"), tk_root, popen=popen)
+    win.listbox.selection_set(1)
+    win.open_selected()
+    [(argv, kw)] = popen.calls
+    assert argv == ["/venv/bin/python", str(out / "B2" / "iplot.py"), "--all"]
+    assert kw["cwd"] == str(out / "B2") and kw["env"]["HK_FROM_IPLOT"] == "1"
+
+
+def test_gather_keeps_both_loose_files_with_the_same_name(tmp_path, load):
+    hk = load("hk_tk")
+    for who in ("a", "b"):
+        (tmp_path / who).mkdir()
+        (tmp_path / who / "HK5.py").write_text(who, encoding="utf-8")
+    root = hk.gather([tmp_path / "a" / "HK5.py", tmp_path / "b" / "HK5.py"], tmp_path / "work").root
+    assert sorted(p.name for p in root.iterdir()) == ["HK5-2.py", "HK5.py"]  # 副檔名留著，才收得到
+
+
+
+def tree_of(folder):
+    return sorted(str(p.relative_to(folder)) for p in Path(folder).rglob("*"))
+
+
+def test_collect_never_deletes_teacher_entries_named_in_another_case(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)  # 舊格式：HK5/iplot.py、t2026fscSpace/HK5.txt、HK5Space/a.pdf
+    teacher = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+    zipped = make_zip(tmp_path / "HK5.zip", {"T2026FSCSPACE/HK5.py": NEW_HK, "IPLOT.PY/HK5.txt": GOOD,
+                                             "hk5space/HK5.py": NEW_HK})
+    said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    for path, data in teacher.items():  # macOS 不分大小寫：這幾個名字開到的是老師的東西，絕不能被砍、被蓋
+        assert path.read_bytes() == data, path
+    assert said.startswith("收了 3 份進 HK5")
+    assert {"T2026FSCSPACE-2", "IPLOT.PY-2", "hk5space-2"} <= {p.name for p in folder.iterdir()}
+
+
+def test_collect_into_a_new_format_homework_keeps_its_space(tmp_path, load):
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    hk13 = course / "HK13"
+    (hk13 / "HK13Space").mkdir(parents=True)
+    (hk13 / "HK13Space" / "data.csv").write_text("1,2\n", encoding="utf-8")
+    (hk13 / "iplot.py").write_text(NEW_HK, encoding="utf-8")
+    (hk13 / "hk_page.py").write_bytes((course / "hk_page.py").read_bytes())
+    zipped = make_zip(tmp_path / "HK13.zip", {"hk13space/HK13.py": NEW_HK, "B1/HK13.txt": GOOD})
+    hk.collect(HwApp(tmp_path, hk13), [zipped], hk13)
+    assert (hk13 / "HK13Space" / "data.csv").read_text(encoding="utf-8") == "1,2\n"
+    assert (hk13 / "iplot.py").read_text(encoding="utf-8") == NEW_HK and not (hk13 / "HK13Space" / "iplot.py").exists()
+    assert (hk13 / "hk13space-2" / "HK13Space" / "data.csv").exists()  # 學生拿到的是老師 Space 的複本
+
+
+def test_student_names_that_differ_only_in_case_get_their_own_folders(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    said = hk.collect(HwApp(tmp_path, folder), [make_zip(tmp_path / "HK5.zip", {"B1/HK5.txt": GOOD,
+                                                                                "b1/HK5.txt": GOOD + "#2\n"})], folder)
+    names = sorted(p.name for p in folder.iterdir() if (p / "t2026fscSpace" / "HK5.txt").exists())
+    assert len(names) == 2 and said.startswith("收了 2 份進 HK5（新 2、覆蓋 0）")
+
+
+def test_collect_skips_the_students_copy_of_the_shell(tmp_path, load):
+    hk = load("hk_tk")
+    course, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/HK5.py": NEW_HK, "B1/hk_page.py": "# 學生那份殼\n"})
+    said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    assert said.startswith("收了 1 份進 HK5") and not (folder / "B1-2").exists()
+    assert (folder / "B1" / "hk_page.py").read_bytes() == (course / "hk_page.py").read_bytes()  # 用課程的正本
+
+
+def test_third_party_never_offers_the_shell(tmp_path, load):
+    hk = load("hk_tk")
+    assert hk.third_party({"hk_page", "hk_tk", "numpy"}, tmp_path) == {"numpy"}
+
+
+def test_install_rejects_a_name_with_a_trailing_newline(load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    popen = FakePopen()
+    _, failed = hk.install(Path("/py"), ["numpy\n"], [].append, popen=popen)
+    assert failed == [("numpy\n", "名字不合法")] and popen.calls == []
+
+
+def test_roster_compares_package_names_normalized(tmp_path, load):
+    hk = load("hk_tk")
+    out = tmp_path / "HK5_收件"
+    (out / "B1").mkdir(parents=True)
+    (out / "B1" / "iplot.py").write_text(NEW_HK.replace('["numpy"]', '["numpy", "Pillow"]'), encoding="utf-8")
+    (out / "B1" / "hk_page.py").write_bytes((COURSE / "hk_page.py").read_bytes())
+    assert hk.roster(out, have={"numpy", "pillow"}) == [("B1", "")]
+
+
+def test_roster_window_uses_absolute_paths(tmp_path, load, tk_root, monkeypatch):
+    hk = load("hk_tk")
+    out = tmp_path / "HK5_收件"
+    (out / "B1").mkdir(parents=True)
+    (out / "B1" / "iplot.py").write_text(NEW_HK, encoding="utf-8")
+    (out / "B1" / "hk_page.py").write_bytes((COURSE / "hk_page.py").read_bytes())
+    monkeypatch.chdir(tmp_path)
+    popen = FakePopen()
+    win = hk.Roster(Path("HK5_收件"), Path("venv/bin/python"), tk_root, popen=popen)  # --out、--venv 給相對路徑
+    win.listbox.selection_set(0)
+    win.open_selected()
+    [(argv, kw)] = popen.calls
+    assert Path(argv[0]).is_absolute() and Path(argv[1]) == out / "B1" / "iplot.py" and Path(kw["cwd"]).is_absolute()
