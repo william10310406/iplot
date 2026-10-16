@@ -259,6 +259,26 @@ def _choose(cases: list[str], hw: dict, argv: list[str], ask, out) -> list[str] 
     return None
 
 
+TEXT_FONTS = ("PingFang TC", "Heiti TC", "Microsoft JhengHei", "Noto Sans CJK TC", "Arial Unicode MS")
+
+
+def _show_text(title: str, text: str, show_fn=None) -> None:
+    """把文字結果放進一個 matplotlib 視窗（iPLoT 另開的程序沒有終端機，印出來沒人看得到）。"""
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    fonts = [f for f in TEXT_FONTS if f in installed] + ["DejaVu Sans"]  # 只列裝了的：不然 matplotlib 一直警告
+    fig = plt.figure(figsize=(7, 6))
+    try:
+        with contextlib.suppress(AttributeError):
+            fig.canvas.manager.set_window_title(f"{title}（文字）")
+        fig.text(0.03, 0.97, text, va="top", ha="left", fontfamily=fonts, fontsize=11, wrap=True)
+        (show_fn or plt.show)()
+    finally:
+        plt.close(fig)
+
+
 def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=None) -> int:
     """單獨跑（python3 HKn.py）：選 case；每個 case 先 compute，印 text 與 stats，有 draw 就開一個 matplotlib
     視窗（關掉才下一個）。一個 case 出錯印 traceback 全文、接著跑下一個。回結束碼。"""
@@ -273,10 +293,12 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
         print(f"── {case} ──", file=out)
         try:
             run = hw["compute"](case)
-            if run.get("text"):
-                print(run["text"], file=out)
-            for key, value in (hw.get("stats") or (lambda r: []))(run):
-                print(f"{key}：{value}", file=out)
+            lines = [run["text"]] if run.get("text") else []
+            lines += [f"{key}：{value}" for key, value in (hw.get("stats") or (lambda r: []))(run)]
+            for line in lines:
+                print(line, file=out)
+            if lines and os.environ.get(FROM_IPLOT):  # iPLoT 另開的程序沒有終端機：文字與數字也開一個視窗
+                _show_text(f"{hw['name']} — {case}", "\n".join(lines), show_fn)
             if hw.get("draw"):
                 import matplotlib.pyplot as plt  # 只有要畫圖時才 import（頂層只 import 標準庫）
 
@@ -385,6 +407,11 @@ def check(file: Path) -> list[str]:
         problems += [f"HOMEWORK = dict(…) 裡少了 {k}=" for k in HOMEWORK_KEYS if k not in keys]
         if not (isinstance(keys.get("file"), ast.Name) and keys["file"].id == "__file__"):
             problems.append("HOMEWORK = dict(…) 要寫 file=__file__")
+        defined = _top_names(tree) | set(REQUIRED) | {"__file__"}  # REQUIRED 少了的上面已經說過
+        for value in keys.values():  # 固定尾段那一行用到的名字都要有，不然 import 就 NameError
+            if isinstance(value, ast.Name) and value.id not in defined:
+                empty = {"DOCS": "DOCS = []", "NOTE": 'NOTE = ""'}.get(value.id, f"{value.id} = None")
+                problems.append(f"HOMEWORK = dict(…) 用到的 {value.id} 沒有定義（不需要就寫 {empty}）")
     elif hw is not None:
         problems.append("HOMEWORK 要寫成 HOMEWORK = dict(…)，照規範第 1 節的固定尾段")
     imported = imports_of(file)

@@ -573,3 +573,90 @@ def test_ensure_from_iplot_never_installs_outside_a_venv(tmp_path, load, standal
     monkeypatch.setattr(sys, "base_prefix", "/某個/別的/prefix")  # 課程的 .venv：照裝，不加 --user
     hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
     assert popen.argvs[0][-1] == "no-such-pkg-m6" and "--user" not in popen.argvs[0]
+
+
+# ── Task 10：examples/ 的 HK2、HK6、HK8（舊格式搬成新格式；規範的對照物）──
+
+EXAMPLES = COURSE / "examples"
+
+
+def load_example(name):
+    """跟學生 import 一樣載入 examples/<name>.py（hk_page 從課程資料夾拿：load fixture 已經放進 sys.path）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"example_{name}", EXAMPLES / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("name", ["HK2", "HK6", "HK8"])
+def test_example_imports_and_computes_every_case(name, load, standalone, agg):
+    load("hk_page")
+    mod = load_example(name)
+    assert list(mod.CASES) == ["case-1", "case-2"]
+    for case in mod.CASES:
+        assert isinstance(mod.compute(case), dict)
+
+
+def test_example_draw_kinds(load, standalone, agg):
+    from matplotlib.animation import FuncAnimation
+
+    load("hk_page")
+    hk2, hk6, hk8 = (load_example(n) for n in ("HK2", "HK6", "HK8"))
+    for case in hk2.CASES:  # 靜態圖：回 None，fig 上有東西
+        fig = agg.figure(figsize=(7, 6))
+        assert hk2.draw(fig, hk2.compute(case)) is None and fig.axes
+        fig.canvas.draw()
+    for case in hk6.CASES:  # 動畫：回 FuncAnimation
+        fig = agg.figure(figsize=(7, 6))
+        ani = hk6.draw(fig, hk6.compute(case))
+        assert isinstance(ani, FuncAnimation)
+        fig.canvas.draw()
+    assert hk8.draw is None and hk8.HOMEWORK["draw"] is None  # 純文字：沒有圖，只有 text
+    for case in hk8.CASES:
+        assert hk8.compute(case)["text"].strip()
+
+
+@pytest.mark.parametrize("name", ["HK2", "HK6", "HK8"])
+def test_example_passes_check(name, load):
+    hp = load("hk_page")
+    assert hp.check(EXAMPLES / f"{name}.py") == []
+
+
+@pytest.mark.parametrize("name", ["HK2", "HK6", "HK8"])
+def test_example_runs_through_main(name, load, standalone, agg):
+    hp = load("hk_page")
+    out = io.StringIO()
+    assert hp.main(load_example(name).HOMEWORK, argv=["--all"], out=out, show_fn=drawn(agg)) == 0
+    assert "Traceback" not in out.getvalue()
+
+
+def test_examples_readme_says_how_to_run():
+    text = (EXAMPLES / "README.md").read_text(encoding="utf-8")
+    assert "cp ../hk_page.py ." in text and "python3 HK6.py" in text
+
+
+def test_main_from_iplot_shows_text_and_stats_in_a_window(load, agg, monkeypatch):
+    hp = load("hk_page")
+    monkeypatch.setenv("HK_FROM_IPLOT", "1")  # iPLoT 另開的程序沒有終端機：文字也要開在視窗裡
+    calls, texts = [], []
+
+    def show_fn():
+        texts.append("\n".join(t.get_text() for t in agg.gcf().texts))
+
+    hw = make_hw(calls, draw=False, text="the quick brown fox")
+    assert hp.main(hw, argv=["--all"], out=io.StringIO(), show_fn=drawn(agg, show_fn)) == 0
+    assert len(texts) == 2 and "the quick brown fox" in texts[0] and "點數：3" in texts[0]
+    monkeypatch.delenv("HK_FROM_IPLOT")
+    texts.clear()
+    hp.main(hw, argv=["--all"], out=io.StringIO(), show_fn=drawn(agg, show_fn))  # 學生在終端機：只印、不開文字視窗
+    assert texts == []
+
+
+def test_check_flags_names_the_homework_line_needs(tmp_path, load):
+    hp = load("hk_page")
+    src = spec_example().replace("def stats(run):", "def numbers(run):")
+    (tmp_path / "HK0Space").mkdir()
+    problems = hp.check(homework(tmp_path, src))
+    assert problems == ["HOMEWORK = dict(…) 用到的 stats 沒有定義（不需要就寫 stats = None）"]

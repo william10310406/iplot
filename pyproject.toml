@@ -6,6 +6,10 @@ extend-exclude = ["docs/original"]
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "BLE", "S102", "S605", "S602"]
 
+[tool.ruff.lint.per-file-ignores]
+# docs/09 格式的作業檔：第二行 import hk_page; hk_page.ensure(…) 先裝好套件才 import 別的，固定尾段的 import sys 在檔尾
+"modules/科學計算/examples/*.py" = ["E402", "E702", "I001"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
