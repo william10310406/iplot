@@ -247,6 +247,6 @@ def stats(run):
 import sys
 HOMEWORK = dict(name=NAME, docs=DOCS, note=NOTE, cases=CASES, compute=compute, draw=draw, stats=stats, file=__file__)
 def run(app): hk_page.show(app, HOMEWORK)                        # iPLoT 裡按下去
-def on_files(app, paths): hk_page.collect(app, paths)            # 把 TronClass 的 zip 拖到這顆按鈕上＝收作業
+def on_files(app, paths): hk_page.collect(app, paths)            # 收作業（0.5.1 的面板沒有拖放：用「收作業」那一格，或「互通」的命令列）
 if __name__ == "__main__" and "core.runner" not in sys.modules:  # 單獨跑
     hk_page.main(HOMEWORK)
