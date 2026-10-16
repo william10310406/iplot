@@ -9,14 +9,19 @@ LF_subWIN 那個框、HKn.txt 要的全域；exec 之後叫 HKn()，HKn.txt 自�
 面板擋 tkinter；tkinter 只在真的開視窗的函式裡 import。
 """
 
+import ast
+import collections
 import contextlib
 import dataclasses
+import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 import unicodedata
 import zipfile
@@ -113,6 +118,147 @@ def launch(app, folder: Path, popen=None) -> None:
         app.log("課程的 .venv 還沒建：先按「科學計算」裝課程套件；這次用 iPLoT 自己的 Python 試")
     (popen or subprocess.Popen)([str(python), str(course / "hk_tk.py"), str(folder), hk], cwd=str(folder))
     app.log(f"{folder.name}：{hk} 的視窗開了（在 Dock 上找 Python）")
+
+
+# ── 套件：課程自己的 .venv（設計第 6 節、D96）──
+
+# 從老師的 12 份掃出來的。分兩批裝（Task 0 量的：基本那批約 480 MB，第二批約 1.1 GB）：
+# 基本那批 HK1–HK8 要；第二批 HK9–HK12 要。pykan 沒寫它的依賴，import kan 要 PyYAML 與 tqdm。
+BASIC_PACKAGES = ("numpy", "matplotlib", "scipy", "Pillow", "opencv-python", "pandas", "scikit-learn", "PyWavelets")
+HEAVY_PACKAGES = ("torch", "pykan", "PyYAML", "tqdm", "torchdiffeq")
+COURSE_PACKAGES = BASIC_PACKAGES + HEAVY_PACKAGES
+APPLE_SILICON_ONLY = ("mlx-lm",)  # HK9；只有 Apple Silicon 的 Mac 有
+NO_APPLE_SILICON = "這台機器裝不了，HK9 要在 Apple Silicon 的 Mac 上看"
+PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
+             "pywt": "PyWavelets", "yaml": "PyYAML", "bs4": "beautifulsoup4", "skimage": "scikit-image",
+             "dateutil": "python-dateutil"}
+# 子程序裡列出這個 Python 裝了哪些套件（不 import 它們）
+LIST_INSTALLED = ("import importlib.metadata, json; "
+                  "print(json.dumps([d.metadata['Name'] for d in importlib.metadata.distributions()]))")
+
+
+def _apple_silicon(platform_: str | None = None, machine: str | None = None) -> bool:
+    return (platform_ or sys.platform) == "darwin" and (machine or platform.machine()) == "arm64"
+
+
+def course_packages(platform_: str | None = None, machine: str | None = None) -> tuple[str, ...]:
+    """課程套件；Apple Silicon 的 Mac 多 mlx-lm。"""
+    return COURSE_PACKAGES + (APPLE_SILICON_ONLY if _apple_silicon(platform_, machine) else ())
+
+
+def course_batches(platform_: str | None = None, machine: str | None = None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """（基本那批, 第二批）；第二批在 Apple Silicon 的 Mac 多 mlx-lm。"""
+    extra = APPLE_SILICON_ONLY if _apple_silicon(platform_, machine) else ()
+    return BASIC_PACKAGES, HEAVY_PACKAGES + extra
+
+
+def pip_name(name: str) -> str:
+    """import 名 → pip 名；表上沒有的當作同名。"""
+    return PIP_NAMES.get(name, name)
+
+
+def _normal(dist: str) -> str:
+    return re.sub(r"[-_.]+", "-", dist).lower()
+
+
+def scan_imports(file: Path) -> set[str]:
+    """檔裡所有 import 的頂層名字（連函式裡的也算，ast.walk 整棵樹；相對 import 不算）；讀不懂回空集合。"""
+    try:
+        tree = ast.parse(Path(file).read_text(encoding="utf-8-sig"))
+    except (SyntaxError, ValueError, OSError):  # UnicodeDecodeError 是 ValueError
+        return set()
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+def third_party(names: set[str], folder: Path) -> set[str]:
+    """扣掉標準庫、__future__、folder 裡同名的 .py 或資料夾，剩下的就是要 pip 裝的。"""
+    try:
+        siblings = {p.stem if p.suffix == ".py" else p.name for p in Path(folder).iterdir()}
+    except OSError:
+        siblings = set()
+    return set(names) - set(sys.stdlib_module_names) - {"__future__"} - siblings
+
+
+def ensure_venv(venv_dir: Path, say, popen=subprocess.Popen, python: str = sys.executable) -> Path:
+    """venv_dir 的 Python；還沒有就用 python -m venv 建（不帶 --system-site-packages）。"""
+    venv_dir = Path(venv_dir)
+    exe = python_in(venv_dir)
+    if exe.is_file():
+        return exe
+    if os.environ.get(NO_INSTALL):
+        raise RuntimeError("HK_NO_INSTALL：不建 .venv")
+    say(f"在建 {venv_dir.name} …")
+    code = popen([str(python), "-m", "venv", str(venv_dir)]).wait()
+    if code != 0:
+        raise RuntimeError(f"建不了 {venv_dir}：代碼 {code}")
+    return exe
+
+
+def installed(python: Path, popen=subprocess.Popen) -> set[str]:
+    """python 那個環境裝了哪些套件（名字正規化成小寫、- 連接）；問不到回空集合。"""
+    proc = popen([str(python), "-c", LIST_INSTALLED], stdout=subprocess.PIPE, text=True)
+    out, _ = proc.communicate()
+    try:
+        return {_normal(n) for n in json.loads(out)}
+    except (ValueError, TypeError):
+        return set()
+
+
+def missing(python: Path, pkgs, popen=subprocess.Popen) -> list[str]:
+    """pkgs 裡 python 那個環境還沒有的，照原順序、不重複。"""
+    have, out = installed(python, popen=popen), []
+    for pkg in pkgs:
+        if _normal(pkg) not in have and _normal(pkg) not in map(_normal, out):
+            out.append(pkg)
+    return out
+
+
+def install(python: Path, pkgs: list[str], say, popen=subprocess.Popen, clock=time.monotonic):
+    """一個一個 pip install 進 python 那個環境；一個裝不了，其他照裝（Review Focus 第 3 條）。
+    pip 的輸出一行一行讀，每 5 秒 say 一次最後一行。回（裝好的, [(裝不了的, 原因)]）。"""
+    ok, failed = [], []
+    for pkg in pkgs:
+        if not re.match(NAME_RE, pkg):
+            failed.append((pkg, "名字不合法"))
+        elif os.environ.get(NO_INSTALL):
+            failed.append((pkg, "HK_NO_INSTALL"))
+        elif pkg in APPLE_SILICON_ONLY and not _apple_silicon():
+            failed.append((pkg, NO_APPLE_SILICON))
+        else:
+            proc = popen([str(python), "-m", "pip", "install", "--no-input", "--disable-pip-version-check", pkg],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            tail, last = collections.deque(maxlen=5), clock()
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if not line:
+                    continue
+                tail.append(line)
+                now = clock()
+                if now - last >= 5:
+                    say(f"{pkg}：{line}")
+                    last = now
+            if proc.wait() == 0:
+                ok.append(pkg)
+            else:
+                errors = [t.strip() for t in tail if t.strip().startswith("ERROR")]
+                failed.append((pkg, " / ".join(errors or [t.strip() for t in tail])))
+    return ok, failed
+
+
+def summary_of_install(ok, failed) -> str:
+    """「已裝 a、b；裝不了 c（原因）」；兩個都空回空字串。"""
+    parts = []
+    if ok:
+        parts.append("已裝 " + "、".join(ok))
+    if failed:
+        parts.append("裝不了 " + "、".join(f"{p}（{why}）" for p, why in failed))
+    return "；".join(parts)
 
 
 def _nfc(name: str) -> str:
@@ -298,7 +444,7 @@ def explain(exc: BaseException) -> str:
     if isinstance(exc, SyntaxError):
         return f"語法錯誤：第 {exc.lineno} 行\n\n{text}"
     if isinstance(exc, ModuleNotFoundError) and exc.name:
-        return f"{text}\n缺 {exc.name}：{sys.executable} -m pip install {exc.name}"
+        return f"{text}\n缺 {exc.name}：{sys.executable} -m pip install {pip_name(exc.name.split('.')[0])}"
     if isinstance(exc, UnicodeDecodeError):
         return f"這個檔不是 UTF-8（存檔時選 UTF-8 再交）\n\n{text}"
     return text

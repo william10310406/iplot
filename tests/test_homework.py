@@ -250,7 +250,7 @@ def test_run_homework_reports_missing_module_with_pip_hint(tmp_path, load, fake_
     hk.run_homework(tmp_path, "HK5")
     [(_, message)] = fake_tk.errors
     assert "ModuleNotFoundError" in message
-    assert f"缺 sklearn：{sys.executable} -m pip install sklearn" in message
+    assert f"缺 sklearn：{sys.executable} -m pip install scikit-learn" in message
 
 
 def test_run_homework_says_when_the_file_is_not_utf8(tmp_path, load, fake_tk):
@@ -536,4 +536,162 @@ def test_import_kit_with_nothing_says_so(tmp_path, load):
     assert said == "收到的東西裡沒有 HK<n>.txt；要給的是老師的 t2026fscSpace 資料夾或它的 zip"
     assert app.logs == [said] and app.rescans == 0
     assert sorted(p.name for p in course.iterdir()) == ["hk_tk.py"]
+
+
+# ── Task 4：課程 .venv、import 掃描、pip 名對照、一個一個裝 ──
+
+
+def test_course_packages_adds_mlx_only_on_apple_silicon(load):
+    hk = load("hk_tk")
+    mac_arm = hk.course_packages("darwin", "arm64")
+    assert mac_arm[-1] == "mlx-lm" and mac_arm[:-1] == hk.COURSE_PACKAGES
+    assert hk.course_packages("darwin", "x86_64") == hk.COURSE_PACKAGES
+    assert hk.course_packages("win32", "AMD64") == hk.COURSE_PACKAGES
+    assert {"PyYAML", "tqdm"} <= set(hk.COURSE_PACKAGES)  # pykan 沒寫、但 import kan 要（Task 0 量的）
+
+
+def test_course_batches_split_basic_from_heavy(load):
+    hk = load("hk_tk")
+    basic, heavy = hk.course_batches("darwin", "arm64")
+    assert basic + heavy[:-1] == hk.COURSE_PACKAGES and heavy[-1] == "mlx-lm"
+    assert "numpy" in basic and "torch" in heavy and "torch" not in basic
+    assert hk.course_batches("linux", "x86_64")[1] == tuple(p for p in heavy if p != "mlx-lm")
+
+
+def test_pip_name_table_and_default(load):
+    hk = load("hk_tk")
+    assert hk.pip_name("cv2") == "opencv-python"
+    assert hk.pip_name("sklearn") == "scikit-learn"
+    assert hk.pip_name("kan") == "pykan"
+    assert hk.pip_name("mlx_lm") == "mlx-lm"
+    assert hk.pip_name("foo") == "foo"
+
+
+def test_scan_imports_walks_into_functions(tmp_path, load):
+    hk = load("hk_tk")
+    assert hk.scan_imports(old_hk(tmp_path)) == {"tkinter", "json", "sklearn"}
+    bad = tmp_path / "bad.txt"
+    bad.write_text("import numpy\nx = (\n", encoding="utf-8")
+    assert hk.scan_imports(bad) == set()  # 讀不懂就當沒有
+    assert hk.scan_imports(tmp_path / "沒有這個檔.txt") == set()
+    rel = tmp_path / "rel.py"
+    rel.write_text("from . import x\nfrom .y import z\nimport a.b.c\n", encoding="utf-8")
+    assert hk.scan_imports(rel) == {"a"}
+
+
+def test_third_party_drops_stdlib_and_siblings(tmp_path, load):
+    hk = load("hk_tk")
+    (tmp_path / "helper.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg").mkdir()
+    names = {"json", "os", "__future__", "helper", "pkg", "numpy", "sklearn"}
+    assert hk.third_party(names, tmp_path) == {"numpy", "sklearn"}
+
+
+def test_ensure_venv_argv_and_no_install_guard(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    said, popen = [], FakePopen()
+    with pytest.raises(RuntimeError, match="HK_NO_INSTALL"):
+        hk.ensure_venv(tmp_path / ".venv", said.append, popen=popen)
+    assert popen.calls == []
+    monkeypatch.delenv("HK_NO_INSTALL")
+    got = hk.ensure_venv(tmp_path / ".venv", said.append, popen=popen, python="/py")
+    assert popen.argvs == [["/py", "-m", "venv", str(tmp_path / ".venv")]]
+    assert got == hk.python_in(tmp_path / ".venv") and said == ["在建 .venv …"]
+    got.parent.mkdir(parents=True)
+    got.write_text("", encoding="utf-8")
+    assert hk.ensure_venv(tmp_path / ".venv", said.append, popen=popen) == got
+    assert len(popen.calls) == 1  # 已經有了：不再建
+    with pytest.raises(RuntimeError, match="建不了"):
+        hk.ensure_venv(tmp_path / "v2", said.append, popen=FakePopen(fail=lambda argv: True))
+
+
+def test_installed_parses_json_and_normalizes(tmp_path, load):
+    hk = load("hk_tk")
+    popen = FakePopen(output=lambda argv: ['["Scikit_Learn","numpy","PyYAML","zope.interface"]\n'])
+    assert hk.installed(Path("/venv/python"), popen=popen) == {"scikit-learn", "numpy", "pyyaml", "zope-interface"}
+    argv, kw = popen.calls[0]
+    assert argv[:2] == ["/venv/python", "-c"] and "importlib.metadata" in argv[2]
+    assert "shell" not in kw
+    assert hk.installed(Path("/x"), popen=FakePopen(output=lambda argv: ["壞掉\n"])) == set()
+
+
+def test_missing_keeps_order_and_dedupes(load):
+    hk = load("hk_tk")
+    popen = FakePopen(output=lambda argv: ['["numpy","scikit-learn"]'])
+    got = hk.missing(Path("/py"), ["torch", "numpy", "scikit_learn", "Pillow", "torch"], popen=popen)
+    assert got == ["torch", "Pillow"]
+
+
+def pip_popen(fail=(), lines=("Collecting x\n", "Successfully installed x\n")):
+    """假的 pip：argv 最後一個是套件名；在 fail 裡的回非零，輸出帶一行 ERROR。"""
+    def output(argv):
+        if argv[-1] in fail:
+            return ["Collecting x\n", "  some detail\n", f"ERROR: No matching distribution found for {argv[-1]}\n"]
+        return list(lines)
+    return FakePopen(output=output, fail=lambda argv: argv[-1] in fail)
+
+
+def test_install_one_at_a_time_without_shell(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    popen = pip_popen()
+    ok, failed = hk.install(Path("/venv/bin/python"), ["pandas", "PyWavelets"], [].append, popen=popen)
+    assert ok == ["pandas", "PyWavelets"] and failed == []
+    assert popen.argvs == [["/venv/bin/python", "-m", "pip", "install", "--no-input", "--disable-pip-version-check", p]
+                           for p in ("pandas", "PyWavelets")]
+    for _, kw in popen.calls:
+        assert "shell" not in kw and kw["text"] is True
+
+
+def test_install_keeps_going_when_one_package_fails(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    popen = pip_popen(fail={"mlx-lm"})
+    ok, failed = hk.install(Path("/py"), ["mlx-lm", "pandas"], [].append, popen=popen)
+    assert ok == ["pandas"]
+    assert failed == [("mlx-lm", "ERROR: No matching distribution found for mlx-lm")]
+    assert hk.summary_of_install(ok, failed) == "已裝 pandas；裝不了 mlx-lm（ERROR: No matching distribution found for mlx-lm）"
+
+
+def test_install_reason_falls_back_to_the_last_lines(load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    lines = [f"line {n}\n" for n in range(8)]
+    popen = FakePopen(output=lambda argv: lines, fail=lambda argv: True)
+    _, failed = hk.install(Path("/py"), ["x"], [].append, popen=popen)
+    assert failed == [("x", "line 3 / line 4 / line 5 / line 6 / line 7")]
+
+
+def test_install_rejects_bad_names(load):
+    hk = load("hk_tk")
+    popen = FakePopen()
+    ok, failed = hk.install(Path("/py"), ["-x", "a b", "numpy"], [].append, popen=popen)
+    assert ok == [] and popen.calls == []
+    assert failed == [("-x", "名字不合法"), ("a b", "名字不合法"), ("numpy", "HK_NO_INSTALL")]
+
+
+def test_install_says_mlx_needs_apple_silicon(load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    monkeypatch.setattr(hk.platform, "machine", lambda: "x86_64")
+    popen = pip_popen()
+    ok, failed = hk.install(Path("/py"), ["mlx-lm", "numpy"], [].append, popen=popen)
+    assert ok == ["numpy"] and popen.argvs[0][-1] == "numpy" and len(popen.calls) == 1
+    assert failed == [("mlx-lm", "這台機器裝不了，HK9 要在 Apple Silicon 的 Mac 上看")]
+
+
+def test_install_says_progress_every_five_seconds(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    ticks = iter([0, 4, 6, 12])
+    said = []
+    popen = pip_popen(lines=("Collecting torch\n", "Downloading torch (127 MB)\n", "Installing collected packages\n"))
+    hk.install(Path("/py"), ["torch"], said.append, popen=popen, clock=lambda: next(ticks, 12))
+    assert said == ["torch：Downloading torch (127 MB)", "torch：Installing collected packages"]
+
+
+def test_summary_of_install_empty(load):
+    hk = load("hk_tk")
+    assert hk.summary_of_install([], []) == ""
+    assert hk.summary_of_install(["a", "b"], []) == "已裝 a、b"
 
