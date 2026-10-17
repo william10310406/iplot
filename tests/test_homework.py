@@ -9,7 +9,6 @@ import importlib
 import importlib.util
 import io
 import os
-import shutil
 import sys
 import types
 import unicodedata
@@ -1489,27 +1488,24 @@ def lone_hk_tk(tmp_path):
     return module
 
 
-def test_batch_without_the_shell_places_new_format_files_without_it(tmp_path, load):
-    hk = lone_hk_tk(tmp_path)
+def test_batch_without_the_shell_leaves_new_format_files_out(tmp_path, load):
+    hk = lone_hk_tk(tmp_path)  # 情境 F；裁決（再審第 3 節第 2 點）：沒殼時新格式不收
     assert not hk.SHELL.exists()
     zipped = make_zip(tmp_path / "下載" / "HK5.zip", {"B1/HK5.py": NEW_HK, "B2/HK5.py": NEW_HK, "B3/HK5.txt": GOOD})
     said = []
     out = hk.batch(zipped, kit=teacher_kit(tmp_path), say=said.append)
-    for name in ("B1", "B2"):
-        assert (out / name / "iplot.py").read_text(encoding="utf-8") == NEW_HK  # 照放
-        assert (out / name / "HK5Space" / "a.pdf").read_bytes() == b"%PDF"
-        assert not (out / name / "hk_page.py").exists()
-    assert (out / "B3" / "t2026fscSpace" / "HK5.txt").exists()  # 舊格式不受影響
-    assert said[-1].startswith("收了 3 份進 HK5（舊格式 1、新格式 2；新 3、覆蓋 0）")
-    assert "；hk_page.py 不在 hk_tk.py 旁邊，新格式的 2 份沒放殼（B1、B2）" in said[-1]
-    assert [name for name, _ in hk.roster(out)] == ["B3"]  # 沒有殼的不是學生資料夾，名單上沒有
-    # docs/08 8.8 寫的補法：hk_page.py 放到旁邊、刪掉那幾個學生的資料夾、再跑一次
+    assert not (out / "B1").exists() and not (out / "B2").exists()  # 不落地：沒有程式自己不承認的資料夾
+    assert (out / "B3" / "t2026fscSpace" / "HK5.txt").exists()  # 舊格式照收
+    assert said[-1].startswith("收了 1 份進 HK5（新 1、覆蓋 0）")
+    assert "；2 份新格式沒收：hk_page.py 不在 hk_tk.py 旁邊（B1、B2）" in said[-1]
+    assert [name for name, _ in hk.roster(out)] == ["B3"]
+    # docs/08 8.8 的補法：hk_page.py 放到 hk_tk.py 旁邊，什麼都不刪，再跑一次
     hk.SHELL.write_bytes((COURSE / "hk_page.py").read_bytes())
-    for name in ("B1", "B2"):
-        shutil.rmtree(out / name)
     hk.batch(zipped, kit=teacher_kit(tmp_path), say=said.append)
+    assert said[-1].startswith("收了 3 份進 HK5（舊格式 1、新格式 2；新 2、覆蓋 1）") and "新格式沒收" not in said[-1]
+    assert sorted(p.name for p in out.iterdir() if p.is_dir() and p.name != "t2026fscSpace") == ["B1", "B2", "B3"]
     assert (out / "B1" / "hk_page.py").read_bytes() == hk.SHELL.read_bytes()
-    assert said[-1].startswith("收了 3 份進 HK5（舊格式 1、新格式 2；新 2、覆蓋 1）") and "沒放殼" not in said[-1]
+    assert [name for name, _ in hk.roster(out)] == ["B1", "B2", "B3"]
 
 
 def test_collect_keeps_one_file_per_student_folder(tmp_path, load):

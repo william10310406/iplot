@@ -694,19 +694,22 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         kinds = {"old": 0, "new": 0}
         unsafe = got.skipped
         imports: set[str] = set()
-        has_shell = SHELL.is_file()  # 批次模式只複製了 hk_tk.py：新格式照放，不放殼、不查
+        has_shell = SHELL.is_file()  # 批次模式只複製了 hk_tk.py：新格式不收（補上殼再跑就對了，不用刪東西）
         students = [s for top in sorted(_visible(got.root), key=lambda p: _nfc(p.name))
                     for s in _students_in(top, hk, got.zips, wrapper=batch)]  # 批次模式給的 zip 就是全班那一包
         placed: list[tuple[str, Student]] = []
         for student in students:
             file = student.files[0]
+            kind, found = classify(file)
+            if kind == "new" and not has_shell:  # 不落地、不佔名字：放進去的會是程式自己不承認的資料夾
+                lists["no-shell"].append(student_name(student.name, set()))
+                continue
             name = student_name(student.name, taken)
             dest = hk_folder / name
             if (not _inside(dest, hk_folder) or dest.resolve() == hk_folder.resolve()
                     or (dest.exists() and not _is_student(dest, hk))):
                 unsafe += 1
                 continue
-            kind, found = classify(file)
             if kind in ("broken", "not-utf8"):
                 lists[kind].append(name)
             elif kind != "new" and found != hk:
@@ -723,10 +726,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             if kind == "new":  # 新格式：學生的檔就是 iplot.py，旁邊放殼與老師的 Space，沒有墊片
                 dest.mkdir(parents=True, exist_ok=True)
                 (dest / "iplot.py").write_bytes(file.read_bytes())
-                if has_shell:
-                    shutil.copy2(SHELL, dest / "hk_page.py")
-                else:
-                    lists["no-shell"].append(name)
+                shutil.copy2(SHELL, dest / "hk_page.py")
                 target_space = dest / f"{hk}Space"
                 requires = _requires_of(file)
             else:
@@ -740,7 +740,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             else:
                 target_space.mkdir(exist_ok=True)
             if kind == "new":
-                problems = _shell_check(dest / "iplot.py") if has_shell else []  # Space 放好了才查（DATA 指的資料夾要在）
+                problems = _shell_check(dest / "iplot.py")  # Space 放好了才查（DATA 指的資料夾要在）
                 if problems:
                     lists["check"].append(f"{name}：{problems[0]}")
             else:
@@ -754,7 +754,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             if lists[key]:
                 notes.append(f"{len(lists[key])} 份{what}（{'、'.join(lists[key])}）")
         if lists["no-shell"]:
-            notes.append(f"hk_page.py 不在 hk_tk.py 旁邊，新格式的 {len(lists['no-shell'])} 份沒放殼"
+            notes.append(f"{len(lists['no-shell'])} 份新格式沒收：hk_page.py 不在 hk_tk.py 旁邊"
                          f"（{'、'.join(lists['no-shell'])}）")
         if others:
             notes.append(f"略過 {others} 個不是 .py/.txt 的檔")
