@@ -1,0 +1,549 @@
+def cmdHK1_SAVEB():
+    import os
+    import re
+    import tkinter
+    from tkinter import messagebox
+    # The note widget may already be gone (RUN or HK1 clears the window).
+    if 'HK1LB02' not in globals() or not HK1LB02.winfo_exists():
+       cmdHK1_NOTE(LF_subWIN)
+       messagebox.showinfo('SAVE','筆記已開啟；修改內容後再按一次 SAVE 儲存。')
+       return
+
+    try:
+       # 'end-1c' drops the newline Tk always keeps at the end of a Text widget,
+       # so saving repeatedly does not keep adding blank lines.
+       ss=HK1LB02.get('1.0','end-1c')
+       dirname=os.path.join(t2026fscHOMEDIR,'t2026fscSpace')
+       filenameTXT=os.path.join(dirname,'HK1.txt')
+       with open(filenameTXT,'r',encoding='utf-8') as fid:
+          ssOLD=fid.read()
+
+       # Tags are built in pieces so this function never mistakes its own
+       # source code for the editable note block.
+       beginTag='###'+'CONTBEGIN'
+       endTag='###'+'CONTEND'
+       beginMatch=re.search(r'^[ \t]*'+re.escape(beginTag)+r'[ \t]*$',ssOLD,re.MULTILINE)
+       if beginMatch is None:
+          raise RuntimeError('找不到筆記開始標記')
+       endMatch=re.search(r'^[ \t]*'+re.escape(endTag)+r'[ \t]*$',ssOLD[beginMatch.end():],re.MULTILINE)
+       if endMatch is None:
+          raise RuntimeError('找不到筆記結束標記')
+
+       begin=beginMatch.start()
+       end=beginMatch.end()+endMatch.end()
+       indent=re.match(r'[ \t]*',beginMatch.group()).group()
+       newNote=indent+beginTag+'\n\n'+indent+'ss = '+repr(ss)+'\n'+indent+endTag
+       sContent=ssOLD[:begin]+newNote+ssOLD[end:]
+       with open(filenameTXT,'w',encoding='utf-8') as fid:
+          fid.write(sContent)
+       # Reload the module so mkNOTE shows (and the next SAVE keeps) the new note.
+       exec(compile(sContent,filenameTXT,'exec'),globals())
+    except Exception as error:
+       messagebox.showerror('SAVE 失敗',str(error))
+       return
+
+    HK1()
+    cmdHK1_NOTE(LF_subWIN)
+    messagebox.showinfo('SAVE','筆記已儲存。')
+
+def cmdHK1_SpaceB():
+       global t2026fscHK1ListSpaceWIN
+       global HK1_BBB
+       import os
+       import platform
+       import tkinter
+       meDIR=os.path.join(os.path.join(t2026fscHOMEDIR,'t2026fscSpace'),'HK1Space')
+       DIRC=meDIR
+       os.makedirs(DIRC,exist_ok=True)
+       # Always reveal the folder, including when it is still empty.
+       open_local_path(meDIR)
+       pdflist=sorted(x for x in os.listdir(DIRC) if not os.path.isdir(os.path.join(DIRC,x)))
+       NN=len(pdflist)
+       NC=3
+       NR=max(1,NN//NC+int(NN%NC>0))
+       DX=1./NC
+       DY=1./NR
+       iii=-1
+       if len(pdflist)>0:
+          if 't2026fscHK1ListSpaceWIN' in globals():
+              if t2026fscHK1ListSpaceWIN.winfo_exists():
+                 t2026fscHK1ListSpaceWIN.destroy()
+          t2026fscHK1ListSpaceWIN=tkinter.Toplevel()
+          t2026fscHK1ListSpaceWIN.geometry('600x400+80+80')
+          # HK1_BBB, not BBB: the launcher's own Space button uses a BBB name.
+          HK1_BBB=[]
+          for x in pdflist:
+              B=tkinter.Button(t2026fscHK1ListSpaceWIN)
+              HK1_BBB.append(B)
+              HK1_BBB[-1].configure(text=x)
+              filePDF=os.path.join(DIRC,x)
+              HK1_BBB[-1].configure(command=lambda bbb=filePDF:open_local_path(bbb))
+              iii+=1
+              HK1_BBB[-1].place(relx=(iii%NC)*DX,rely=(iii//NC)*DY,relwidth=DX,relheight=DY)
+
+
+import os
+import platform
+import subprocess
+import tkinter
+import warnings
+import webbrowser
+import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.animation import FuncAnimation
+
+# Pressing RUN again before the first frame is drawn discards that animation on
+# purpose; matplotlib would otherwise print a harmless warning about it.
+warnings.filterwarnings('ignore',message='Animation was deleted without rendering anything',
+                        category=UserWarning)
+
+def open_local_path(path):
+    """Open a local file or folder with the platform's default application."""
+    if platform.system()=='Darwin':
+       subprocess.Popen(['open',path])
+    elif platform.system()=='Windows':
+       os.startfile(path)
+    else:
+       subprocess.Popen(['xdg-open',path])
+
+def open_web_page(url):
+    """Open documentation in whichever browser is available on this computer."""
+    webbrowser.open_new_tab(url)
+
+# ---------------------------------------------------------------------------
+# Two-body physics.  These functions do not touch Tkinter, so they can also be
+# loaded and checked by test_HK1_twobody.py without opening a window.
+# ---------------------------------------------------------------------------
+G=1.0              # dimensionless gravitational constant
+SOFTENING=1.0e-6   # tiny protection against division by zero only
+N_PERIODS=3        # bound orbits are simulated for 3 Kepler periods
+MAX_FRAMES=80      # ~80 frames x 150 ms keeps the 3D animation responsive
+MAX_TRAIL_POINTS=20000   # plotted points per trail (data are thinned if longer)
+
+# m1, m2 : masses
+# a, e   : semi-major axis and eccentricity of the relative (Kepler) orbit
+# r0, v_factor : start distance and speed / escape speed (hyperbolic case)
+# tilt   : inclination of the orbital plane about the x axis, in degrees
+# view   : optional (elev, azim) camera angle for the 3D plot
+# dt     : target time step.  Verlet errors grow like (omega dt)^2, so fast
+#          orbits and high eccentricity (fast periapsis) need a smaller dt
+CASES={
+    'case-1':dict(m1=1.0,m2=1.0,a=1.0,e=0.0,tilt=0.0,dt=0.002,
+                  label='equal masses (1, 1), circular'),
+    'case-2':dict(m1=1.0,m2=3.0,a=1.0,e=0.0,tilt=0.0,dt=0.002,
+                  label='unequal masses (1, 3), circular'),
+    'case-3':dict(m1=1.0,m2=1.0,a=1.0,e=0.5,tilt=0.0,dt=0.001,
+                  label='equal masses (1, 1), ellipse e = 0.5'),
+    'case-4':dict(m1=1.0,m2=5.0,a=1.0,e=0.7,tilt=0.0,dt=0.0003,
+                  label='unequal masses (1, 5), ellipse e = 0.7'),
+    'case-5':dict(m1=100.0,m2=0.1,a=1.0,e=0.0,tilt=0.0,dt=0.0005,
+                  label='star + planet (100, 0.1), circular'),
+    'case-6':dict(m1=1.0,m2=1.0,a=1.0,e=0.9,tilt=0.0,dt=0.0001,
+                  label='high eccentricity e = 0.9 (small dt)'),
+    'case-7':dict(m1=1.0,m2=1.0,a=1.0,e=0.5,tilt=35.0,dt=0.001,view=(12,-25),
+                  label='case-3 orbit tilted by 35 deg (3D)'),
+    'case-8':dict(m1=1.0,m2=1.0,r0=1.0,v_factor=1.2,tilt=0.0,dt=0.002,
+                  label='hyperbolic, v = 1.2 x escape speed'),
+}
+
+def case_parameters(case):
+    """Return (case name, parameters); unknown names fall back to case-1."""
+    if case not in CASES:
+       case='case-1'
+    return case,CASES[case]
+
+def rotate_about_x(vec,tilt_deg):
+    """Tilt a vector about the x axis, i.e. incline the orbital plane."""
+    t=np.deg2rad(tilt_deg)
+    c,s=np.cos(t),np.sin(t)
+    return np.array([vec[0],c*vec[1]-s*vec[2],s*vec[1]+c*vec[2]],dtype=float)
+
+def center_of_mass_frame(mass,r_rel,v_rel):
+    """Split relative position/velocity (r = r2 - r1) into the two bodies so
+    that the centre of mass is at the origin and the total momentum is zero."""
+    M=mass[0]+mass[1]
+    pos=np.array([-(mass[1]/M)*r_rel,(mass[0]/M)*r_rel],dtype=float)
+    vel=np.array([-(mass[1]/M)*v_rel,(mass[0]/M)*v_rel],dtype=float)
+    return pos,vel
+
+def initial_conditions(case):
+    """Return pos (2,3), vel (2,3) and mass (2,) for the selected case.
+
+    Bound orbits start at periapsis: r_p = a(1-e) and
+    v_p = sqrt(G M (1+e) / (a(1-e))), perpendicular to r."""
+    case,p=case_parameters(case)
+    mass=np.array([p['m1'],p['m2']],dtype=float)
+    M=mass[0]+mass[1]
+    if 'a' in p:
+       r_start=p['a']*(1.0-p['e'])
+       v_start=np.sqrt(G*M*(1.0+p['e'])/(p['a']*(1.0-p['e'])))
+    else:
+       # Faster than the escape speed sqrt(2GM/r): the orbit is a hyperbola.
+       r_start=p['r0']
+       v_start=p['v_factor']*np.sqrt(2.0*G*M/r_start)
+    r_rel=rotate_about_x(np.array([r_start,0.0,0.0]),p['tilt'])
+    v_rel=rotate_about_x(np.array([0.0,v_start,0.0]),p['tilt'])
+    pos,vel=center_of_mass_frame(mass,r_rel,v_rel)
+    return pos,vel,mass
+
+def orbital_period(case):
+    """Kepler's third law T = 2 pi sqrt(a^3 / (G M)); inf for an unbound orbit."""
+    case,p=case_parameters(case)
+    if 'a' not in p:
+       return np.inf
+    return 2.0*np.pi*np.sqrt(p['a']**3/(G*(p['m1']+p['m2'])))
+
+def acceleration(pos,mass,G=G,softening=SOFTENING):
+    """Newtonian gravity between the two bodies.
+
+    a1 = G m2 (r2 - r1) / |r2 - r1|^3 and, by Newton's third law,
+    a2 = -a1 m1 / m2."""
+    r_vec=pos[1]-pos[0]
+    dist_sq=np.dot(r_vec,r_vec)+softening**2
+    acc=np.empty_like(pos)
+    acc[0]=G*mass[1]*r_vec/(dist_sq**1.5)
+    acc[1]=-acc[0]*mass[0]/mass[1]
+    return acc
+
+def total_energy(pos,vel,mass,G=G):
+    """E = 1/2 m1 v1^2 + 1/2 m2 v2^2 - G m1 m2 / r (works on one step or a whole run)."""
+    kinetic=0.5*mass[0]*np.sum(vel[...,0,:]**2,axis=-1)+0.5*mass[1]*np.sum(vel[...,1,:]**2,axis=-1)
+    r=np.linalg.norm(pos[...,1,:]-pos[...,0,:],axis=-1)
+    return kinetic-G*mass[0]*mass[1]/r
+
+def total_angular_momentum(pos,vel,mass):
+    """L = m1 r1 x v1 + m2 r2 x v2."""
+    return mass[0]*np.cross(pos[...,0,:],vel[...,0,:])+mass[1]*np.cross(pos[...,1,:],vel[...,1,:])
+
+def velocity_verlet(pos,vel,mass,dt,steps):
+    """Integrate `steps` points (including the initial one) with Velocity-Verlet."""
+    trajectory=np.empty((steps,2,3),dtype=float)
+    velocities=np.empty((steps,2,3),dtype=float)
+    trajectory[0]=pos
+    velocities[0]=vel
+    acc=acceleration(pos,mass)
+
+    # Velocity-Verlet is second order and symplectic: the energy error stays
+    # bounded instead of drifting, and angular momentum is conserved.
+    for s in range(1,steps):
+        pos=pos+vel*dt+0.5*acc*dt**2
+        next_acc=acceleration(pos,mass)
+        vel=vel+0.5*(acc+next_acc)*dt
+        acc=next_acc
+        trajectory[s]=pos
+        velocities[s]=vel
+    return trajectory,velocities
+
+def compute_orbit(case=None,dt=None,n_periods=N_PERIODS):
+    """Simulate one case and return the trajectory plus conservation checks."""
+    if case is None:
+       case=optionValue.get() if 'optionValue' in globals() else 'case-1'
+    case,p=case_parameters(case)
+    pos,vel,mass=initial_conditions(case)
+    T=orbital_period(case)
+    dt_target=p['dt'] if dt is None else dt
+
+    if np.isfinite(T):
+       # The total time follows the period.  dt is rounded to T / integer so
+       # that step number steps_per_period is exactly t = T.
+       steps_per_period=int(np.ceil(T/dt_target))
+       dt=T/steps_per_period
+       steps=n_periods*steps_per_period+1
+    else:
+       # A hyperbola has no period: run long enough for the bodies to travel
+       # about ten start distances at the escape-limit speed v_inf.
+       r0=np.linalg.norm(pos[1]-pos[0])
+       v0=np.linalg.norm(vel[1]-vel[0])
+       v_inf=np.sqrt(v0**2-2.0*G*np.sum(mass)/r0)
+       t_end=10.0*r0/v_inf
+       steps_per_period=None
+       steps=int(np.ceil(t_end/dt_target))+1
+       dt=t_end/(steps-1)
+
+    trajectory,velocities=velocity_verlet(pos,vel,mass,dt,steps)
+    energy=total_energy(trajectory,velocities,mass)
+    angular=total_angular_momentum(trajectory,velocities,mass)
+    return {'case':case,'label':p['label'],'mass':mass,'dt':dt,'period':T,
+            'steps_per_period':steps_per_period,'time':np.arange(steps)*dt,
+            'pos':trajectory,'vel':velocities,'energy':energy,'angular_momentum':angular,
+            'energy_error':float(np.max(np.abs((energy-energy[0])/energy[0]))),
+            'angular_momentum_error':float(np.max(np.linalg.norm(angular-angular[0],axis=1))
+                                           /np.linalg.norm(angular[0]))}
+
+def animation_frames(n_points,max_frames=MAX_FRAMES):
+    """About max_frames evenly spaced step indices, always ending on the last step."""
+    stride=max(1,int(np.ceil((n_points-1)/max_frames)))
+    frames=list(range(0,n_points,stride))
+    if frames[-1]!=n_points-1:
+       frames.append(n_points-1)
+    return frames
+
+class TwoBodyApp:
+    def __init__(self, root):
+        self.root = root
+
+        self.case=optionValue.get()
+        # Use a genuine 3D plot as required by the assignment.  The frame rate
+        # below is deliberately modest so Tkinter can still process controls.
+        self.fig = Figure(figsize=(8, 8))
+        self.ax = self.fig.add_subplot(111,projection='3d')
+
+        self.run = compute_orbit(self.case)
+        self.data = self.run['pos']
+        mass=self.run['mass']
+        extent=float(np.max(np.abs(self.data)))*1.10
+        self.ax.set_xlim(-extent,extent)
+        self.ax.set_ylim(-extent,extent)
+        self.ax.set_zlim(-extent,extent)
+        self.ax.set_xlabel('x')
+        self.ax.set_ylabel('y')
+        self.ax.set_zlabel('z')
+        T=self.run['period']
+        period_text='T = %.4f'%T if np.isfinite(T) else 'T = ∞ (unbound)'
+        self.title_line2=(self.run['label']+'\n'+period_text+
+                          ',   max|ΔE/E0| = %.2e'%self.run['energy_error'])
+        self.set_status('')
+        elev,azim=CASES[self.run['case']].get('view',(28,-55))
+        self.ax.view_init(elev=elev,azim=azim)
+
+        # A line is the whole trajectory; the larger dot is the live position.
+        # The heavier body gets the bigger dot; body 1 has the wider line so
+        # it stays visible when both bodies share one orbit (equal masses).
+        colors=['deepskyblue','gold']
+        widths=[2.8,1.3]
+        self.trails=[]
+        self.bodies=[]
+        for i in range(2):
+            self.trails.append(self.ax.plot([],[],[],'-',color=colors[i],lw=widths[i],
+                                            label='Body '+str(i+1)+' (m = %g)'%mass[i])[0])
+            self.bodies.append(self.ax.plot([],[],[],'o',color=colors[i],
+                                            ms=6+4*mass[i]/np.max(mass))[0])
+        self.ax.plot([0],[0],[0],'k+',ms=9,label='center of mass')
+        self.ax.legend(loc='upper right')
+        self.info=self.ax.text2D(0.0,0.97,'',transform=self.ax.transAxes,va='top',
+                                 family='monospace',fontsize=9)
+
+        # Embed canvas into Tkinter
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
+        # Leave a visible gap below the top control row so the canvas never
+        # sits on top of the buttons.
+        self.canvas.get_tk_widget().place(relx=0.05,rely=0.10,relwidth=0.9,relheight=0.85)
+
+        self.paused=False
+        self.stopped=False
+        # A 3D redraw is expensive.  The frame stride follows the number of
+        # steps, so every case plays about 80 frames at 150 ms (~12 s).
+        self.frames=animation_frames(len(self.data))
+        # Very long runs (small dt) are thinned for drawing only.
+        thin=max(1,len(self.data)//MAX_TRAIL_POINTS)
+        self.view_index=np.union1d(np.arange(0,len(self.data),thin),self.frames)
+        self.ani = FuncAnimation(self.fig,self.update,frames=self.frames,
+                                 interval=150,blit=False,repeat=True)
+        # Bind Esc to cmdSTOP (which finds the current app) instead of to this
+        # app: a lambda holding self would keep every old run in memory.
+        self.root.winfo_toplevel().bind('<Escape>',lambda event,w=self.root:cmdSTOP(w))
+
+    def set_status(self,status):
+        self.ax.set_title('Two-body gravitational simulation — '+self.case+status+'\n'+
+                          self.title_line2,fontsize=10)
+
+    def update(self, frame):
+        # Show the complete path from time 0 to the current time.
+        upto=self.view_index[:np.searchsorted(self.view_index,frame,side='right')]
+        for i in range(2):
+            trail=self.data[upto,i]
+            self.trails[i].set_data(trail[:,0],trail[:,1])
+            self.trails[i].set_3d_properties(trail[:,2])
+            self.bodies[i].set_data([trail[-1,0]],[trail[-1,1]])
+            self.bodies[i].set_3d_properties([trail[-1,2]])
+        energy=self.run['energy']
+        self.info.set_text('dt = %.1e   steps = %d\n'%(self.run['dt'],len(self.data))+
+                           't  = %.3f / %.3f\n'%(self.run['time'][frame],self.run['time'][-1])+
+                           'ΔE/E0(t)   = %+.2e\n'%(energy[frame]/energy[0]-1.0)+
+                           'max|ΔL/L0| = %.1e'%self.run['angular_momentum_error'])
+        return self.trails+self.bodies
+
+    def stop(self,redraw=True):
+        """Stop the current animation immediately and leave its path visible."""
+        if not self.stopped:
+           # event_source becomes None once matplotlib has closed the canvas
+           # (mkNOTE, SAVE or the launcher's HK button destroy the window).
+           if self.ani.event_source is not None:
+              self.ani.event_source.stop()
+           self.paused=False
+           self.stopped=True
+           if redraw and self.canvas.get_tk_widget().winfo_exists():
+              self.set_status(' (stopped)')
+              self.canvas.draw_idle()
+
+    def toggle_pause(self):
+        """Pause or continue without losing the current trajectory."""
+        if self.ani.event_source is None:
+           self.stopped=True
+        if self.stopped:
+           return
+        if self.paused:
+           self.ani.event_source.start()
+           self.paused=False
+           self.set_status('')
+        else:
+           self.ani.event_source.stop()
+           self.paused=True
+           self.set_status(' (paused)')
+        self.canvas.draw_idle()
+
+def stop_running_animation(LF_subWIN):
+    """Stop the animation before its canvas is destroyed, so that RUN,
+    PAUSE / GO, STOP and Esc keep working afterwards."""
+    app=getattr(LF_subWIN,'twoBodyApp',None)
+    if app is not None:
+       app.stop(redraw=False)
+
+def cmdSTOP(LF_subWIN):
+    app=getattr(LF_subWIN,'twoBodyApp',None)
+    if app is not None:
+       app.stop()
+
+def cmdPAUSE(LF_subWIN):
+    app=getattr(LF_subWIN,'twoBodyApp',None)
+    if app is not None:
+       app.toggle_pause()
+
+def cmdRUN(LF_subWIN):
+    previous_app=getattr(LF_subWIN,'twoBodyApp',None)
+    if previous_app is not None:
+       previous_app.stop()
+    for w in LF_subWIN.winfo_children():
+        if isinstance(w,tkinter.Button) or isinstance(w,tkinter.OptionMenu):
+           pass
+        else:
+           print(w)
+           w.destroy()
+    pass
+    # Keep a reference on the window so the animation is not garbage-collected.
+    LF_subWIN.twoBodyApp = TwoBodyApp(LF_subWIN)
+
+def cmdEditHK1():
+    import os
+    dirname=os.path.join(t2026fscHOMEDIR,'t2026fscSpace')
+    fileHK1TXT=os.path.join(dirname,'HK1.txt')
+    # Use the operating system's regular text editor rather than relying on
+    # the optional t2026fscEdit.txt helper, which may not be installed.
+    open_local_path(fileHK1TXT)
+
+def cmdHK1_NOTE(LF_subWIN):
+    global HK1LB02
+    stop_running_animation(LF_subWIN)
+    for w in LF_subWIN.winfo_children():
+        if isinstance(w,tkinter.Button) or isinstance(w,tkinter.OptionMenu):
+           pass
+        else:
+           w.destroy()
+    pass
+    ypos=0
+    DY=0.2
+    xpos=0.05;ypos=ypos+DY;DX=1-0.1;DY=0.7
+    HK1LB02=tkinter.Text(LF_subWIN)
+    HK1LB02.configure(relief="solid")
+    HK1LB02.configure(borderwidth=1)
+    
+    
+    
+    
+    
+    
+    ###CONTBEGIN
+
+    ss = '二體重力運動模擬（Two-body problem）\n====================================\n\n目的\n----\n依照牛頓萬有引力定律，模擬兩個天體互相吸引的運動；用 Velocity-Verlet\n數值積分，並以能量守恆、角動量守恆與 Kepler 理論週期檢查數值結果是否正確。\n\n物理模型\n--------\n無因次單位 G = 1。位置 pos 與速度 vel 都是 shape (2,3) 的陣列\n（2 個天體 × x, y, z 三個座標）。\n  天體 1 的加速度  a1 = G m2 (r2 - r1) / |r2 - r1|^3\n  天體 2 的加速度  a2 = -a1 · m1 / m2        （牛頓第三定律）\n距離中加入極小的 softening = 1e-6，只用來避免除以零，不影響結果。\n\n質心座標系（總動量 = 0）\n------------------------\n給定相對位置 r = r2 - r1、相對速度 v，總質量 M = m1 + m2：\n  r1 = -(m2/M) r,  r2 = (m1/M) r,  v1 = -(m2/M) v,  v2 = (m1/M) v\n因此質心在原點、總動量為 0，質心在整個模擬中都不會移動。\n\n初始條件與理論週期\n------------------\n橢圓（含圓，e = 0）從近日點出發：\n  近日點距離 r_p = a(1-e)\n  近日點速率 v_p = sqrt(G M (1+e) / (a(1-e)))，方向垂直於 r\n  理論週期   T   = 2π sqrt(a^3 / (G M))       （Kepler 第三定律）\n雙曲線（case-8）：v = 1.2 × sqrt(2 G M / r)，大於逃逸速度，E > 0，沒有週期。\n\nVelocity-Verlet 數值方法\n------------------------\n  pos = pos + vel·dt + ½·acc·dt²\n  new_acc = acceleration(pos, mass)\n  vel = vel + ½·(acc + new_acc)·dt\n這是二階、辛（symplectic）的方法：能量誤差 ∝ dt²，而且不會越積越大，\n只在小範圍內振盪；角動量則守恆到電腦捨入誤差（約 1e-14）。\n總時間依週期決定：束縛軌道模擬 3 個週期，dt 微調成 T / 整數，\n讓某一步剛好落在 t = T。動畫依總步數自動跳格，每次播放約 80 幀。\n\n各 case 要觀察什麼\n------------------\ncase-1 等質量 (1,1)、圓軌道：兩個天體在同一個半徑 0.5 的圓上，\n       永遠在質心兩側正對面。\ncase-2 不等質量 (1,3)、圓軌道：兩個同心圓；較重的天體 2 半徑只有 0.25，\n       較輕的天體 1 為 0.75（半徑比 = 質量反比 3 : 1）。\ncase-3 等質量、橢圓 e = 0.5：兩個一樣大的橢圓；近日點附近走得快，\n       遠日點附近走得慢（Kepler 第二定律）。\ncase-4 不等質量 (1,5)、橢圓 e = 0.7：兩個形狀相同、大小比 5 : 1 的橢圓，\n       同時到達近日點與遠日點。\ncase-5 恆星與行星 (100, 0.1)：像太陽與行星（質量比 1000 : 1，接近\n       太陽與木星；太陽與地球約 33 萬 : 1）。恆星只在質心附近晃動約 0.001，\n       看起來幾乎不動，行星繞著它做圓周運動。\ncase-6 高偏心率 e = 0.9：非常扁的橢圓，近日點速度極快，所以 dt = 1e-4；\n       若用 dt = 1e-3，能量誤差會變成約 5e-3（大 100 倍，因為誤差 ∝ dt²）。\ncase-7 把 case-3 的軌道平面繞 x 軸傾斜 35°：z 座標不再是 0，\n       旋轉 3D 圖可看到傾斜的軌道平面。\ncase-8 雙曲線（v = 1.2 倍逃逸速度）：兩個天體在起點附近轉彎後\n       各自沿接近直線的路徑飛離，不會再回來。\n\n能量守恆檢查\n------------\n每一步都計算 E = ½m1v1² + ½m2v2² - G m1 m2 / r 與總角動量 L = Σ m r × v。\n圖的標題顯示 case 名稱、理論週期 T 與 max|ΔE/E0|；左上角顯示\n目前時間 t、當下的 ΔE/E0 與 max|ΔL/L0|。所有 case 的 max|ΔE/E0| < 1e-4。\n自我測試（不需要 GUI）：python3 t2026fscSpace/test_HK1_twobody.py\n檢查圓軌道半徑不變、能量誤差 < 1e-4、經過 T 後回到起點、質心不動。\n\n操作方式\n--------\n選擇 case-1 ~ case-8，按 RUN。藍、黃兩個大圓點是兩個天體目前的位置，\n同色曲線是從開始到目前時間的完整軌跡，黑色 + 號是質心。\nPAUSE / GO 暫停或繼續；STOP 或 Esc 立即停止。\n'
+    ###CONTEND
+
+
+
+
+
+    HK1LB02.insert(0.0,ss)
+    HK1LB02.place(relx=xpos,rely=ypos,relwidth=DX,relheight=DY)
+    xpos=1-0.05;DX=0.05;DY=0.7
+    HK1LB02_Scrollbar=tkinter.Scrollbar(LF_subWIN,command=HK1LB02.yview)
+    HK1LB02.configure(yscrollcommand=HK1LB02_Scrollbar.set)
+    HK1LB02_Scrollbar.place(relx=xpos,rely=ypos,relwidth=DX,relheight=DY)
+
+
+def HK1():
+    import tkinter
+    import os
+    global LF_subWIN
+    global optionValue
+    global HK1_NoteB
+    pass
+    print('homework1')
+    LF_subWIN.configure(text='Homework1')
+    stop_running_animation(LF_subWIN)
+    LF_subWIN.twoBodyApp=None
+    for w in LF_subWIN.winfo_children():
+        w.destroy()
+    NNN=10
+    iii=-1
+    iii=iii+1 
+    DXDX=1.0/NNN
+    DocB01=tkinter.Button(LF_subWIN)
+    DocB01.configure(text='Doc1')
+    DocB01.configure(command=lambda a='https://en.wikipedia.org/wiki/Two-body_problem':open_web_page(a))
+    DocB01.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    DocB02=tkinter.Button(LF_subWIN)
+    DocB02.configure(text='Doc2')
+
+    DocB02.configure(command=lambda a='https://en.wikipedia.org/wiki/Kepler_orbit':open_web_page(a))
+    DocB02.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    RUNB03=tkinter.Button(LF_subWIN)
+    RUNB03.configure(text='RUN')
+    RUNB03.configure(command=lambda a=LF_subWIN:cmdRUN(a))
+    RUNB03.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    optionList=['case-1','case-2','case-3','case-4',
+                'case-5','case-6','case-7','case-8']
+    optionValue=tkinter.StringVar()
+    CHKOM04=tkinter.OptionMenu(LF_subWIN,optionValue,*optionList)
+    optionValue.set(optionList[0])
+    CHKOM04.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1
+    PAUSEB05=tkinter.Button(LF_subWIN)
+    PAUSEB05.configure(text='PAUSE / GO')
+    PAUSEB05.configure(command=lambda a=LF_subWIN:cmdPAUSE(a))
+    PAUSEB05.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1
+    STOPB06=tkinter.Button(LF_subWIN)
+    STOPB06.configure(text='STOP')
+    STOPB06.configure(command=lambda a=LF_subWIN:cmdSTOP(a))
+    STOPB06.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    HK1_EditB=tkinter.Button(LF_subWIN)
+    HK1_EditB.configure(text='Edit-HK1')
+    HK1_EditB.configure(command=cmdEditHK1)
+    HK1_EditB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    HK1_NoteB=tkinter.Button(LF_subWIN)
+    HK1_NoteB.configure(text='mkNOTE')
+    HK1_NoteB.configure(command=lambda a=LF_subWIN:cmdHK1_NOTE(a))
+    HK1_NoteB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    HK1_SAVEB=tkinter.Button(LF_subWIN)
+    HK1_SAVEB.configure(text='SAVE')
+    HK1_SAVEB.configure(command=cmdHK1_SAVEB)
+    HK1_SAVEB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    iii=iii+1 
+    HK1_SpaceB=tkinter.Button(LF_subWIN)
+    HK1_SpaceB.configure(text='Space')
+    HK1_SpaceB.configure(command=cmdHK1_SpaceB)
+    HK1_SpaceB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)

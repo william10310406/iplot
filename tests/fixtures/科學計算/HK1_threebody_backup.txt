@@ -1,0 +1,414 @@
+def cmdHK1_SAVEB():
+    import os
+    import re
+    import tkinter
+    from tkinter import messagebox
+    if 'HK1LB02' not in globals():
+       cmdHK1_NOTE(LF_subWIN)
+       messagebox.showinfo('SAVE','筆記已開啟；修改內容後再按一次 SAVE 儲存。')
+       return
+
+    try:
+       ss=HK1LB02.get(0.0,tkinter.END)
+       dirname=os.path.join(t2026fscHOMEDIR,'t2026fscSpace')
+       filenameTXT=os.path.join(dirname,'HK1.txt')
+       with open(filenameTXT,'r',encoding='utf-8') as fid:
+          ssOLD=fid.read()
+
+       # Tags are built in pieces so this function never mistakes its own
+       # source code for the editable note block.
+       beginTag='###'+'CONTBEGIN'
+       endTag='###'+'CONTEND'
+       beginMatch=re.search(r'^[ \t]*'+re.escape(beginTag)+r'[ \t]*$',ssOLD,re.MULTILINE)
+       if beginMatch is None:
+          raise RuntimeError('找不到筆記開始標記')
+       endMatch=re.search(r'^[ \t]*'+re.escape(endTag)+r'[ \t]*$',ssOLD[beginMatch.end():],re.MULTILINE)
+       if endMatch is None:
+          raise RuntimeError('找不到筆記結束標記')
+
+       begin=beginMatch.start()
+       end=beginMatch.end()+endMatch.end()
+       indent=re.match(r'[ \t]*',beginMatch.group()).group()
+       newNote=indent+beginTag+'\n\n'+indent+'ss = '+repr(ss)+'\n'+indent+endTag
+       sContent=ssOLD[:begin]+newNote+ssOLD[end:]
+       with open(filenameTXT,'w',encoding='utf-8') as fid:
+          fid.write(sContent)
+    except Exception as error:
+       messagebox.showerror('SAVE 失敗',str(error))
+       return
+
+    HK1()
+    cmdHK1_NOTE(LF_subWIN)
+    messagebox.showinfo('SAVE','筆記已儲存。')
+
+def cmdHK1_SpaceB():
+       global t2026fscHK1ListSpaceWIN
+       global BBB
+       import os
+       import platform
+       import tkinter
+       meDIR=os.path.join(os.path.join(t2026fscHOMEDIR,'t2026fscSpace'),'HK1Space')
+       DIRC=meDIR
+       os.makedirs(DIRC,exist_ok=True)
+       # Always reveal the folder, including when it is still empty.
+       open_local_path(meDIR)
+       pdflist=sorted(x for x in os.listdir(DIRC) if not os.path.isdir(os.path.join(DIRC,x)))
+       NN=len(pdflist)
+       NC=3
+       NR=max(1,NN//NC+int(NN%NC>0))
+       DX=1./NC
+       DY=1./NR
+       iii=-1
+       if len(pdflist)>0:
+          if 't2026fscHK1ListSpaceWIN' in globals():
+              if t2026fscHK1ListSpaceWIN.winfo_exists():
+                 t2026fscHK1ListSpaceWIN.destroy()
+          t2026fscHK1ListSpaceWIN=tkinter.Toplevel()
+          t2026fscHK1ListSpaceWIN.geometry('600x400+80+80')
+          BBB=[]
+          for x in pdflist:
+              B=tkinter.Button(t2026fscHK1ListSpaceWIN)
+              BBB.append(B)
+              BBB[-1].configure(text=x)
+              filePDF=os.path.join(DIRC,x)
+              BBB[-1].configure(command=lambda bbb=filePDF:open_local_path(bbb))
+              iii+=1
+              BBB[-1].place(relx=(iii%NC)*DX,rely=(iii//NC)*DY,relwidth=DX,relheight=DY)
+
+
+import os
+import platform
+import subprocess
+import tkinter
+import webbrowser
+import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.animation import FuncAnimation
+
+def open_local_path(path):
+    """Open a local file or folder with the platform's default application."""
+    if platform.system()=='Darwin':
+       subprocess.Popen(['open',path])
+    elif platform.system()=='Windows':
+       os.startfile(path)
+    else:
+       subprocess.Popen(['xdg-open',path])
+
+def open_web_page(url):
+    """Open documentation in whichever browser is available on this computer."""
+    webbrowser.open_new_tab(url)
+
+# The integration is written separately from the GUI so the physical model is
+# clear: every body attracts every other body according to Newton's law.
+def equilateral_orbit(mass,tilt=0.0):
+    """Return an Euler-Lagrange equilateral three-body orbit."""
+    side=2.0
+    pos=np.array([[side/np.sqrt(3),0.0,0.0],
+                  [-side/(2*np.sqrt(3)),side/2,0.0],
+                  [-side/(2*np.sqrt(3)),-side/2,0.0]],dtype=float)
+    center_of_mass=np.average(pos,axis=0,weights=mass)
+    relative_pos=pos-center_of_mass
+    angular_speed=np.sqrt(np.sum(mass)/side**3)
+    vel=np.zeros_like(pos)
+    vel[:,0]=-angular_speed*relative_pos[:,1]
+    vel[:,1]= angular_speed*relative_pos[:,0]
+    if tilt:
+       c,s=np.cos(tilt),np.sin(tilt)
+       pos[:,1],pos[:,2]=c*pos[:,1]-s*pos[:,2],s*pos[:,1]+c*pos[:,2]
+       vel[:,1],vel[:,2]=c*vel[:,1]-s*vel[:,2],s*vel[:,1]+c*vel[:,2]
+    return pos,vel,mass
+
+def figure_eight_orbit(perturbation=0.0):
+    """Return the equal-mass figure-eight solution, optionally perturbed."""
+    pos=np.array([[-1.325626981682458,0.0,0.0],[1.0,0.0,0.0],[0.0,0.0,0.0]],dtype=float)
+    vel=np.array([[0.0,-0.8933877752879044,0.0],
+                  [0.0,-0.2885702941263346,0.0],
+                  [0.0,1.181958069414239,0.0]],dtype=float)
+    # Preserve total momentum while making the orbit slightly non-periodic.
+    vel[0,1]+=perturbation
+    vel[2,1]-=perturbation
+    return pos,vel,np.ones(3,dtype=float)
+
+def initial_conditions(case):
+    if case=='case-2':
+       return equilateral_orbit(np.array([1.0,5.0,3.0],dtype=float))
+    if case=='case-3':
+       return figure_eight_orbit()
+    if case=='case-4':
+       # Euler's collinear periodic orbit for three equal masses.
+       pos=np.array([[-1.0,0.0,0.0],[0.0,0.0,0.0],[1.0,0.0,0.0]],dtype=float)
+       omega=np.sqrt(1.25)
+       vel=np.array([[0.0,-omega,0.0],[0.0,0.0,0.0],[0.0,omega,0.0]],dtype=float)
+       return pos,vel,np.ones(3,dtype=float)
+    if case=='case-5':
+       # A massive central body with two lighter planet-like bodies.
+       mass=np.array([10.0,0.01,0.02],dtype=float)
+       pos=np.array([[0.0,0.0,0.0],[1.0,0.0,0.0],[-1.6,0.0,0.0]],dtype=float)
+       vel=np.array([[0.0,0.0,0.0],[0.0,np.sqrt((mass[0]+mass[1])/1.0),0.0],
+                     [0.0,-np.sqrt((mass[0]+mass[2])/1.6),0.0]],dtype=float)
+       vel[0]=-(mass[1]*vel[1]+mass[2]*vel[2])/mass[0]
+       return pos,vel,mass
+    if case=='case-6':
+       # Equal binary stars with a small third body orbiting farther away.
+       mass=np.array([1.0,1.0,0.02],dtype=float)
+       pos=np.array([[-1.0,0.0,0.0],[1.0,0.0,0.0],[0.0,5.0,0.0]],dtype=float)
+       vel=np.array([[0.0,-0.5,0.0],[0.0,0.5,0.0],[-np.sqrt(2.02/5.0),0.0,0.0]],dtype=float)
+       vel[:2]-=np.sum(mass[:,None]*vel,axis=0)/np.sum(mass[:2])
+       return pos,vel,mass
+    if case=='case-7':
+       # The same Lagrange solution, rotated into a genuine three-dimensional plane.
+       return equilateral_orbit(np.ones(3,dtype=float),tilt=np.deg2rad(35.0))
+    if case=='case-8':
+       return figure_eight_orbit(perturbation=0.01)
+    return equilateral_orbit(np.ones(3,dtype=float))
+
+def acceleration(pos,mass,G=1.0,softening=1.0e-3):
+    acc=np.zeros_like(pos)
+    for i in range(3):
+        for j in range(3):
+            if i!=j:
+                r_vec=pos[j]-pos[i]
+                dist_sq=np.dot(r_vec,r_vec)+softening**2
+                acc[i]+=G*mass[j]*r_vec/(dist_sq**1.5)
+    return acc
+
+def compute_orbit(steps=1200,dt=0.01):
+    case=optionValue.get() if 'optionValue' in globals() else 'case-1'
+    pos,vel,mass=initial_conditions(case)
+    trajectory=np.empty((steps,3,3),dtype=float)
+    trajectory[0]=pos
+    acc=acceleration(pos,mass)
+
+    # Velocity-Verlet is a second-order method and conserves orbital motion
+    # much better than the original first-order Euler update.
+    for s in range(1,steps):
+        pos=pos+vel*dt+0.5*acc*dt**2
+        next_acc=acceleration(pos,mass)
+        vel=vel+0.5*(acc+next_acc)*dt
+        acc=next_acc
+        trajectory[s]=pos
+    return trajectory
+
+class ThreeBodyApp:
+    def __init__(self, root):
+        self.root = root
+        
+        self.case=optionValue.get()
+        # Use a genuine 3D plot as required by the assignment.  The frame rate
+        # below is deliberately modest so Tkinter can still process controls.
+        self.fig = Figure(figsize=(8, 8))
+        self.ax = self.fig.add_subplot(111,projection='3d')
+
+        self.data = compute_orbit()
+        extent=max(2.0,float(np.max(np.abs(self.data)))*1.10)
+        self.ax.set_xlim(-extent,extent)
+        self.ax.set_ylim(-extent,extent)
+        self.ax.set_zlim(-extent,extent)
+        self.ax.set_xlabel('x')
+        self.ax.set_ylabel('y')
+        self.ax.set_zlabel('z')
+        self.ax.set_title('Three-body gravitational simulation — '+self.case)
+        self.ax.view_init(elev=28,azim=-55)
+
+        # A line is the whole trajectory; the larger dot is the live position.
+        colors=['deepskyblue','gold','tomato']
+        self.trails=[]
+        self.bodies=[]
+        for i in range(3):
+            self.trails.append(self.ax.plot([],[],[],'-',color=colors[i],lw=1.4,
+                                            label='Body '+str(i+1))[0])
+            self.bodies.append(self.ax.plot([],[],[],'o',color=colors[i],ms=7)[0])
+        self.ax.legend(loc='upper right')
+        
+        # Embed canvas into Tkinter
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
+        # Leave a visible gap below the top control row so the canvas never
+        # sits on top of the buttons.
+        self.canvas.get_tk_widget().place(relx=0.05,rely=0.10,relwidth=0.9,relheight=0.85)
+        
+        self.paused=False
+        self.stopped=False
+        # A 3D redraw is expensive.  Rendering 60 frames at 150 ms intervals
+        # leaves the event loop free for buttons and makes one pass last 9 s.
+        self.ani = FuncAnimation(self.fig,self.update,frames=range(0,len(self.data),20),
+                                 interval=150,blit=False,repeat=True)
+        self.root.winfo_toplevel().bind('<Escape>',lambda event:self.stop())
+
+    def update(self, frame):
+        # Show the complete path from time 0 to the current time.
+        for i in range(3):
+            trail=self.data[:frame+1,i]
+            self.trails[i].set_data(trail[:,0],trail[:,1])
+            self.trails[i].set_3d_properties(trail[:,2])
+            self.bodies[i].set_data([trail[-1,0]],[trail[-1,1]])
+            self.bodies[i].set_3d_properties([trail[-1,2]])
+        return self.trails+self.bodies
+
+    def stop(self):
+        """Stop the current animation immediately and leave its path visible."""
+        if not self.stopped:
+           self.ani.event_source.stop()
+           self.paused=False
+           self.stopped=True
+           self.ax.set_title('Three-body gravitational simulation — '+self.case+' (stopped)')
+           self.canvas.draw_idle()
+
+    def toggle_pause(self):
+        """Pause or continue without losing the current trajectory."""
+        if self.stopped:
+           return
+        if self.paused:
+           self.ani.event_source.start()
+           self.paused=False
+           self.ax.set_title('Three-body gravitational simulation — '+self.case)
+        else:
+           self.ani.event_source.stop()
+           self.paused=True
+           self.ax.set_title('Three-body gravitational simulation — '+self.case+' (paused)')
+        self.canvas.draw_idle()
+
+def cmdSTOP(LF_subWIN):
+    app=getattr(LF_subWIN,'threeBodyApp',None)
+    if app is not None:
+       app.stop()
+
+def cmdPAUSE(LF_subWIN):
+    app=getattr(LF_subWIN,'threeBodyApp',None)
+    if app is not None:
+       app.toggle_pause()
+
+def cmdRUN(LF_subWIN):
+    previous_app=getattr(LF_subWIN,'threeBodyApp',None)
+    if previous_app is not None:
+       previous_app.stop()
+    for w in LF_subWIN.winfo_children():
+        if isinstance(w,tkinter.Button) or isinstance(w,tkinter.OptionMenu):
+           pass
+        else:
+           print(w)
+           w.destroy()
+    pass
+    # Keep a reference on the window so the animation is not garbage-collected.
+    LF_subWIN.threeBodyApp = ThreeBodyApp(LF_subWIN)
+
+def cmdEditHK1():
+    import os
+    dirname=os.path.join(t2026fscHOMEDIR,'t2026fscSpace')
+    fileHK1TXT=os.path.join(dirname,'HK1.txt')
+    # Use the operating system's regular text editor rather than relying on
+    # the optional t2026fscEdit.txt helper, which may not be installed.
+    open_local_path(fileHK1TXT)
+
+def cmdHK1_NOTE(LF_subWIN):
+    global HK1LB02
+    for w in LF_subWIN.winfo_children():
+        if isinstance(w,tkinter.Button) or isinstance(w,tkinter.OptionMenu):
+           pass
+        else:
+           w.destroy()
+    pass
+    ypos=0
+    DY=0.2
+    xpos=0.05;ypos=ypos+DY;DX=1-0.1;DY=0.7
+    HK1LB02=tkinter.Text(LF_subWIN)
+    HK1LB02.configure(relief="solid")
+    HK1LB02.configure(borderwidth=1)
+    
+    
+    
+    
+    
+    
+    ###CONTBEGIN
+
+    ss = '三體重力運動模擬\n================\n\n目的\n----\n使用 Python、NumPy 與 Matplotlib，依照牛頓萬有引力定律，模擬三個\n天體彼此吸引後的位置與軌跡。\n\n數值方法\n--------\n每一個時間步都先計算三個天體受到另外兩個天體的加速度，再使用\nVelocity-Verlet 法更新位置與速度。時間步長 dt = 0.01；距離計算中\n加入很小的 softening = 0.001，以避免兩個天體重合時除以零。\n\ncase-1：相同質量的等邊三角形軌道\n----------------------------------\n三個天體質量皆為 1，從等邊三角形的位置開始，繞共同質心旋轉。\n\ncase-2：不同質量的等邊三角形軌道\n----------------------------------\n三個天體質量為 1、5、3。三者仍維持等邊三角形配置，但較重天體會\n更靠近系統質心，因此每個天體畫出的圓形軌道半徑不同。\n\ncase-3：figure-eight 八字形週期軌道\n-----------------------------------\n三個天體質量相同，採用已知的八字形初始條件。三個天體會依序沿著\n同一條八字軌道運動，是三體問題少數具有規律的特殊解。\n\ncase-4：Euler 共線週期軌道\n--------------------------\n三個等質量天體一開始排成一直線，並以特殊角速度繞共同質心旋轉。\n\ncase-5：中心天體與兩顆行星\n--------------------------\n一個質量為 10 的中心天體，加上兩顆較輕的行星；可觀察類太陽系的軌道。\n\ncase-6：雙星系統與第三天體\n--------------------------\n兩顆相同質量的星互相繞轉，較輕的第三天體在較遠處運行。\n\ncase-7：傾斜的三維等邊三角形軌道\n----------------------------------\n將 case-1 的運動平面傾斜 35 度，方便觀察三維座標的效果。\n\ncase-8：受微小擾動的八字軌道\n------------------------------\n在 case-3 的初始速度加入極小擾動，觀察軌跡如何偏離完美週期解。\n\n操作方式\n--------\n選擇 case-1 到 case-8，按 RUN。畫面中的藍、黃、紅三點是\n三個天體目前的位置；同色曲線是從開始到目前時間的完整軌跡。\n\n\n'
+    ###CONTEND
+
+
+
+
+
+    HK1LB02.insert(0.0,ss)
+    HK1LB02.place(relx=xpos,rely=ypos,relwidth=DX,relheight=DY)
+    xpos=1-0.05;DX=0.05;DY=0.7
+    HK1LB02_Scrollbar=tkinter.Scrollbar(LF_subWIN,command=HK1LB02.yview)
+    HK1LB02.configure(yscrollcommand=HK1LB02_Scrollbar.set)
+    HK1LB02_Scrollbar.place(relx=xpos,rely=ypos,relwidth=DX,relheight=DY)
+
+
+def HK1():
+    import tkinter
+    import os
+    global LF_subWIN
+    global optionValue
+    global HK1_NoteB
+    pass
+    print('homework1')
+    LF_subWIN.configure(text='Homework1')
+    for w in LF_subWIN.winfo_children():
+        w.destroy()
+    NNN=10
+    iii=-1
+    iii=iii+1 
+    DXDX=1.0/NNN
+    DocB01=tkinter.Button(LF_subWIN)
+    DocB01.configure(text='Doc1')
+    DocB01.configure(command=lambda a='https://en.wikipedia.org/wiki/Three-body_problem':open_web_page(a))
+    DocB01.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    DocB02=tkinter.Button(LF_subWIN)
+    DocB02.configure(text='Doc2')
+
+    DocB02.configure(command=lambda a='https://towardsdatascience.com/use-python-to-create-three-body-orbits-329ffb5b2627/':open_web_page(a))
+    DocB02.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    RUNB03=tkinter.Button(LF_subWIN)
+    RUNB03.configure(text='RUN')
+    RUNB03.configure(command=lambda a=LF_subWIN:cmdRUN(a))
+    RUNB03.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    optionList=['case-1','case-2','case-3','case-4',
+                'case-5','case-6','case-7','case-8']
+    optionValue=tkinter.StringVar()
+    CHKOM04=tkinter.OptionMenu(LF_subWIN,optionValue,*optionList)
+    optionValue.set(optionList[0])
+    CHKOM04.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1
+    PAUSEB05=tkinter.Button(LF_subWIN)
+    PAUSEB05.configure(text='PAUSE / GO')
+    PAUSEB05.configure(command=lambda a=LF_subWIN:cmdPAUSE(a))
+    PAUSEB05.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1
+    STOPB06=tkinter.Button(LF_subWIN)
+    STOPB06.configure(text='STOP')
+    STOPB06.configure(command=lambda a=LF_subWIN:cmdSTOP(a))
+    STOPB06.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    HK1_EditB=tkinter.Button(LF_subWIN)
+    HK1_EditB.configure(text='Edit-HK1')
+    HK1_EditB.configure(command=cmdEditHK1)
+    HK1_EditB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    HK1_NoteB=tkinter.Button(LF_subWIN)
+    HK1_NoteB.configure(text='mkNOTE')
+    HK1_NoteB.configure(command=lambda a=LF_subWIN:cmdHK1_NOTE(a))
+    HK1_NoteB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    ###
+    iii=iii+1 
+    HK1_SAVEB=tkinter.Button(LF_subWIN)
+    HK1_SAVEB.configure(text='SAVE')
+    HK1_SAVEB.configure(command=cmdHK1_SAVEB)
+    HK1_SAVEB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
+    iii=iii+1 
+    HK1_SpaceB=tkinter.Button(LF_subWIN)
+    HK1_SpaceB.configure(text='Space')
+    HK1_SpaceB.configure(command=cmdHK1_SpaceB)
+    HK1_SpaceB.place(relx=(iii%NNN)*DXDX,rely=0,relwidth=DXDX,relheight=0.05)
