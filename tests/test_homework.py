@@ -734,16 +734,23 @@ def course_with_hk(tmp_path, hk_name="HK5", space=True, venv=False):
     return course, folder
 
 
+def put(base, files):
+    """{相對路徑: bytes 或 str}；名字以 .zip 結尾、值是 dict 的，做成那個 zip（值是它的成員）。回 base。"""
+    base = Path(base)
+    for rel, data in files.items():
+        target = base / rel
+        if isinstance(data, dict):
+            make_zip(target, data)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
+    return base
+
+
 def handed_in(tmp_path, files):
-    """學生交的檔：{相對路徑: 內容}，寫在 tmp_path/交/ 底下；回（那個資料夾, [每個檔]）。"""
-    base = tmp_path / "交"
-    out = []
-    for rel, text in files.items():
-        f = base / rel
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(text, encoding="utf-8")
-        out.append(f)
-    return base, out
+    """學生交的檔：put 在 tmp_path/交/ 底下；回（那個資料夾, [每個檔]）。"""
+    base = put(tmp_path / "交", files)
+    return base, [base / rel for rel in files]
 
 
 GOOD = OLD_HK.replace("{hk}", "HK5")
@@ -928,6 +935,14 @@ def test_collect_with_nothing_useful_says_so(tmp_path, load):
     said = hk.collect(app, [zipped], folder)
     assert said == "收到的東西裡沒有 .py 或 .txt"
     assert app.rescans == 0
+
+
+def test_collect_asks_homework_file_what_counts(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")  # 收得進來的檔只有 _homework_file 一個地方說了算（「沒有 .py 或 .txt」也問它）
+    _, folder = course_with_hk(tmp_path)
+    _, files = handed_in(tmp_path, {"B1.txt": GOOD})
+    monkeypatch.setattr(hk, "_homework_file", lambda file: False)
+    assert hk.collect(HwApp(tmp_path, folder), files, folder) == hk.NOTHING
 
 
 def test_collect_refuses_paths_outside_hk_folder(tmp_path, load, monkeypatch):
@@ -1477,19 +1492,21 @@ def test_roster_window_uses_absolute_paths(tmp_path, load, tk_root, monkeypatch)
 # ── 最終審查延後的四件小事（回報第 3 節）──
 
 
-def lone_hk_tk(tmp_path):
-    """批次模式只複製了 hk_tk.py 的那個資料夾：從那裡載入一份，它的 SHELL 指到旁邊不存在的 hk_page.py。"""
-    folder = tmp_path / "只有hk_tk"
-    folder.mkdir()
-    (folder / "hk_tk.py").write_bytes((COURSE / "hk_tk.py").read_bytes())
-    spec = importlib.util.spec_from_file_location("_hk_tk_alone", folder / "hk_tk.py")
+def hk_tk_in(folder, shell=True):
+    """把 hk_tk.py（shell 時連 hk_page.py）複製進 folder，從那裡載入一份（批次模式就是這樣用的）。
+    shell=False 是只複製了 hk_tk.py 的那種：它的 SHELL 指到旁邊不存在的 hk_page.py。"""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in ("hk_tk.py", "hk_page.py") if shell else ("hk_tk.py",):
+        (folder / name).write_bytes((COURSE / name).read_bytes())
+    spec = importlib.util.spec_from_file_location(f"_hk_tk_in_{folder.name}", folder / "hk_tk.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 def test_batch_without_the_shell_leaves_new_format_files_out(tmp_path, load):
-    hk = lone_hk_tk(tmp_path)  # 情境 F；裁決（再審第 3 節第 2 點）：沒殼時新格式不收
+    hk = hk_tk_in(tmp_path / "只有hk_tk", shell=False)  # 情境 F；裁決（再審第 3 節第 2 點）：沒殼時新格式不收
     assert not hk.SHELL.exists()
     zipped = make_zip(tmp_path / "下載" / "HK5.zip", {"B1/HK5.py": NEW_HK, "B2/HK5.py": NEW_HK, "B3/HK5.txt": GOOD})
     said = []
@@ -1543,19 +1560,6 @@ def test_gather_keeps_folders_that_differ_only_in_case_apart(tmp_path, load):
 SAMPLES = Path(__file__).resolve().parent / "fixtures" / "科學計算"  # 研究助理給的標準樣本：學生交的不會比這複雜
 HK1 = (SAMPLES / "HK1.txt").read_bytes()  # 二體，舊格式的 HK1
 BACKUP = (SAMPLES / "HK1_threebody_backup.txt").read_bytes()  # 三體舊版：classify 一樣認得是 HK1
-
-
-def put(base, files):
-    """{相對路徑: bytes 或 str}；名字以 .zip 結尾、值是 dict 的，做成那個 zip（值是它的成員）。回 base。"""
-    base = Path(base)
-    for rel, data in files.items():
-        target = base / rel
-        if isinstance(data, dict):
-            make_zip(target, data)
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
-    return base
 
 
 def test_gather_unzips_zips_inside_a_selected_folder(tmp_path, load):
@@ -1630,27 +1634,29 @@ def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras)
     assert "不是作業的檔" not in said and "不是 HK1 的作業檔" not in said
 
 
-@pytest.mark.parametrize("files, picked, names", [
+@pytest.mark.parametrize("files, picked, names, note", [
     ({"HK5.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD,
-                  "HK5/名單.txt": "王小明\n李大華\n"}}, ["HK5.zip"], ["B1", "B2", "B3", "名單"]),  # 情境 A
+                  "HK5/名單.txt": "王小明\n李大華\n"}}, ["HK5.zip"], ["B1", "B2", "B3", "名單"],
+     "1 份不是 HK5 的作業檔（名單）"),  # 情境 A：zip 裡包一層、包裝層多一個散檔，散檔照舊一檔一人、照收、列出來
     ({"HK5.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD, "說明.txt": "x\n"}},
-     ["HK5.zip"], ["B1", "B2", "B3", "說明"]),  # 包裝層旁邊多一個散檔
-    ({"HK5/B1/HK5.txt": GOOD}, ["HK5"], ["B1"]),  # 情境 B：名字像 HK5 的資料夾是包裝，不是學生
-    ({"HK5.zip": {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD}}, ["HK5.zip"], ["B1", "B2"]),
+     ["HK5.zip"], ["B1", "B2", "B3", "說明"], "1 份不是 HK5 的作業檔（說明）"),  # 包裝層旁邊多一個散檔
+    ({"HK5/B1/HK5.txt": GOOD}, ["HK5"], ["B1"], None),  # 情境 B：名字像 HK5 的資料夾是包裝，不是學生
+    ({"HK5.zip": {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD}}, ["HK5.zip"], ["B1", "B2"], None),
     ({"HK5.zip": {"B11234567_王小明.txt": GOOD, "B11234568_李大華.txt": GOOD}}, ["HK5.zip"],
-     ["B11234567_王小明", "B11234568_李大華"]),  # TronClass 改過名的散檔
+     ["B11234567_王小明", "B11234568_李大華"], None),  # TronClass 改過名的散檔
     ({"下載/王小明.zip": {"HK5.txt": GOOD}, "下載/李大華.zip": {"HK5.txt": GOOD}, "下載/張三.zip": {"作業/HK5.txt": GOOD},
-      "下載/陳四.txt": GOOD, "下載/林五.py": GOOD}, ["下載"], ["張三", "李大華", "林五", "王小明", "陳四"]),
-    ({"全班/B1/HK5.txt": GOOD, "全班/B2/HK5.txt": GOOD}, ["全班"], ["B1", "B2"]),
-    ({"全班/B1.txt": GOOD, "全班/B2.txt": GOOD}, ["全班"], ["B1", "B2"]),  # 一人一個散檔的也是全班
-    ({"全班/HK5/B1/HK5.txt": GOOD, "全班/HK5/B2/x/HK5.txt": GOOD}, ["全班"], ["B1", "B2"]),  # 只包了一層：兩個人都在
-    ({"全班.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD}}, ["全班.zip"], ["B1", "B2"]),
-    ({"全班.zip": {"作業/B1/HK5.txt": GOOD, "作業/B2/筆記.txt": "x\n"}}, ["全班.zip"], ["B1", "B2"]),  # 拿不準：一人一份
+      "下載/陳四.txt": GOOD, "下載/林五.py": GOOD}, ["下載"], ["張三", "李大華", "林五", "王小明", "陳四"], None),
+    ({"全班/B1/HK5.txt": GOOD, "全班/B2/HK5.txt": GOOD}, ["全班"], ["B1", "B2"], None),
+    ({"全班/B1.txt": GOOD, "全班/B2.txt": GOOD}, ["全班"], ["B1", "B2"], None),  # 一人一個散檔的也是全班
+    ({"全班/HK5/B1/HK5.txt": GOOD, "全班/HK5/B2/x/HK5.txt": GOOD}, ["全班"], ["B1", "B2"], None),  # 只包了一層：兩個人都在
+    ({"全班.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD}}, ["全班.zip"], ["B1", "B2"], None),
+    ({"全班.zip": {"作業/B1/HK5.txt": GOOD, "作業/B2/筆記.txt": "x\n"}}, ["全班.zip"], ["B1", "B2"],  # 拿不準：一人一份
+     "1 份不是 HK5 的作業檔（B2）"),
     ({"HK5.zip": {"王小明.ZIP": zip_bytes({"HK5.txt": GOOD}), "李大華.Zip": zip_bytes({"HK5.txt": GOOD})}}, ["HK5.zip"],
-     ["李大華", "王小明"]),  # 全班一包裡的 zip，副檔名大寫也解（最終審查）
+     ["李大華", "王小明"], None),  # 全班一包裡的 zip，副檔名大寫也解（最終審查）
 ], ids=["A", "A-loose-beside-wrapper", "B", "zip-folders", "zip-renamed-files", "downloads", "folder-of-folders",
         "folder-of-files", "folder-wrapped-once", "zip-wrapped-once", "zip-wrapped-unsure", "zips-uppercase-in-zip"])
-def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names):
+def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names, note):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path)
     base = put(tmp_path / "交", files)
@@ -1658,6 +1664,8 @@ def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names):
     assert students_in(folder) == sorted(names)
     assert said.startswith(f"收了 {len(names)} 份進 HK5（新 {len(names)}、覆蓋 0）")
     assert "多交的" not in said
+    if note:
+        assert f"；{note}" in said
 
 
 def test_collect_hints_when_names_look_like_files(tmp_path, load):
@@ -1680,23 +1688,7 @@ def test_collect_hints_when_names_look_like_files(tmp_path, load):
     assert said.endswith("；這幾份的名字看起來是檔名不是學生（HK1）：把檔（或 zip）改成學生的名字再收一次")
 
 
-# ── 再審 Task 1：合併只在確定同一個學生時做；正本先看檔名 ──
-
-
-@pytest.mark.parametrize("members, names", [
-    ({"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD, "HK5/名單.txt": "王小明\n李大華\n"},
-     ["B1", "B2", "B3", "名單"]),  # 情境 A：zip 裡包一層、包裝層多一個散檔
-    ({"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD, "說明.txt": "收作業說明\n"},
-     ["B1", "B2", "B3", "說明"]),  # 包裝層旁邊多一個散檔
-])
-def test_collect_never_merges_students_when_the_wrapper_has_a_loose_file(tmp_path, load, members, names):
-    hk = load("hk_tk")
-    _, folder = course_with_hk(tmp_path)
-    said = hk.collect(HwApp(tmp_path, folder), [make_zip(tmp_path / "下載" / "HK5.zip", members)], folder)
-    assert students_in(folder) == sorted(names)
-    assert said.startswith("收了 4 份進 HK5（新 4、覆蓋 0）")
-    assert f"；1 份不是 HK5 的作業檔（{names[-1]}）" in said  # 散檔照舊一檔一人、照收、列出來
-    assert "多交的" not in said and "不是作業的檔" not in said
+# ── 再審 Task 1：正本先看檔名（情境 A 在 test_collect_unwraps_a_class_bundle）──
 
 
 def test_collect_keeps_the_exact_hk_file_over_backups(tmp_path, load):
@@ -1715,18 +1707,6 @@ def test_collect_keeps_the_exact_hk_file_over_backups(tmp_path, load):
 # ── 再審 Task 2：批次模式明說，不猜 ──
 
 
-def hk_tk_in(folder, shell=True):
-    """把 hk_tk.py（shell 時連 hk_page.py）複製進 folder，從那裡載入一份（批次模式就是這樣用的）。"""
-    folder = Path(folder)
-    folder.mkdir(parents=True, exist_ok=True)
-    for name in ("hk_tk.py", "hk_page.py") if shell else ("hk_tk.py",):
-        (folder / name).write_bytes((COURSE / name).read_bytes())
-    spec = importlib.util.spec_from_file_location(f"_hk_tk_in_{folder.name}", folder / "hk_tk.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_batch_collects_when_hk_tk_is_higher_up(tmp_path, load):
     hk = hk_tk_in(tmp_path / "助教")  # 情境 D：zip 放在 hk_tk.py 那個資料夾的子資料夾
     zipped = make_zip(tmp_path / "助教" / "下載" / "HK5.zip", {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD})
@@ -1742,7 +1722,7 @@ def test_batch_collects_when_hk_tk_is_higher_up(tmp_path, load):
 
 
 def test_roster_without_the_shell_does_not_crash(tmp_path, load):
-    hk = lone_hk_tk(tmp_path)  # 情境 G：--out 指到一個已經有帶殼學生的收件夾
+    hk = hk_tk_in(tmp_path / "只有hk_tk", shell=False)  # 情境 G：--out 指到一個已經有帶殼學生的收件夾
     out = tmp_path / "HK5_收件"
     (out / "B1").mkdir(parents=True)
     (out / "B1" / "iplot.py").write_text(NEW_HK, encoding="utf-8")

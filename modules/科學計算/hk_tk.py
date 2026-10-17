@@ -676,18 +676,11 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
     work = Path(tempfile.mkdtemp(prefix="hk-collect-"))
     try:
         got = gather([Path(p) for p in paths], work, zips_in_folders=True)
-        files, others = [], 0
-        for f in sorted(got.root.rglob("*")):
-            if f.is_file() and not _hidden(f, got.root):
-                if f.name.casefold() == "hk_page.py":  # 學生自己那份殼：用課程的正本，不當作業
-                    continue
-                if f.suffix.lower() in (".py", ".txt"):
-                    files.append(f)
-                else:
-                    others += 1
-        if not files:
+        if not _homework_files(got.root):
             app.log(NOTHING)
             return NOTHING
+        others = sum(1 for f in got.root.rglob("*")
+                     if f.is_file() and not _hidden(f, got.root) and f.suffix.lower() not in (".py", ".txt"))
         space = kit_space(hk_folder, hk)
         # 不能拿來當學生名字的：老師的東西與 HKn/ 裡其他不是學生資料夾的（不分大小寫比；學生資料夾可以覆蓋）
         taken = {KIT, f"{hk}Space", "iplot.py", "hk_page.py", LOG, ".history", "__pycache__"}
