@@ -1669,6 +1669,11 @@ def test_collect_hints_when_names_look_like_files(tmp_path, load):
     assert ("；多交的 3 個檔沒收（下載：李大華.txt、王小明.zip/HK1.txt、王小明.zip/HK1_threebody_backup.txt）"
             in said)
     assert said.endswith("；下載 直接放著一個 HK1.txt，所以整個資料夾被當成一個人：把它改成那個學生的名字再收一次")
+    flat = put(tmp_path / "交2", {"下載/HK1.txt": HK1, "下載/李大華.txt": HK1})  # 別人的檔就放在旁邊：只列名字，不提示
+    _, loose = course_with_hk(tmp_path / "c", "HK1")
+    said = hk.collect(HwApp(tmp_path, loose), [flat / "下載"], loose)
+    assert students_in(loose) == ["下載"] and "；多交的 1 個檔沒收（下載：李大華.txt）" in said
+    assert "直接放著" not in said
     _, again = course_with_hk(tmp_path / "b", "HK1")
     said = hk.collect(HwApp(tmp_path, again), [base / "下載" / "HK1.txt"], again)
     assert students_in(again) == ["HK1"]
