@@ -33,6 +33,7 @@ HK_RE = re.compile(r"^(HK\d+)\.txt$")
 NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # pip 名只接這些字元（設計第 6 節），不經 shell
 NO_INSTALL = "HK_NO_INSTALL"  # 設了就不建 venv、不跑 pip，缺了只報（測試用）
 FROM_IPLOT = "HK_FROM_IPLOT"  # 交給新格式子程序的記號（hk_page 那邊同名）：不問 case、不改檔、不裝進系統的 Python
+BATCH = "HK_BATCH"  # 批次名單另開的子程序多帶這個（hk_page 那邊同名）：明說是批次模式，句子不提「科學計算」那顆按鈕
 GLOBALS = ("LF", "LF_subWIN", "t2026fscHOMEDIR", "os", "sys", "tkinter")  # 老師的啟動器給 HKn.txt 的全域
 USAGE = ("用法：python hk_tk.py <資料夾> <HKn>    （跑 <資料夾>/t2026fscSpace/HKn.txt）\n"
          "　　　python hk_tk.py --batch <zip> [--kit 老師的t2026fscSpace] [--out 資料夾] [--venv 資料夾] [--hk HKn] [--yes]")
@@ -654,11 +655,12 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             hk: str | None = None, batch: bool = False) -> str:
     """收作業：拖進來（或選進來）的 zip、資料夾、檔，每份放成 hk_folder/<學生>/（迷你作業包，D95），
     再收同一個人＝覆蓋。用到的套件問一次、裝進 python 那個 venv（沒給就用課程的 .venv）。回訊息區那一句。
-    hk 沒給就是 hk_folder 的名字（批次模式的 hk_folder 是 HK5_收件，另外給 hk）；batch 是批次模式（句子不提課程的 .venv）。"""
+    hk 沒給就是 hk_folder 的名字（批次模式的 hk_folder 是 HK5_收件，另外給 hk）。batch 是批次模式（batch() 明說，不猜）：
+    hk_folder 是 --out 給的，不找課程資料夾（hk_tk.py 放哪裡都收得了）、不用課程的 .venv、句子不提它；給的 zip 是全班那一包。"""
     hk_folder = Path(hk_folder)
     hk = hk or hk_folder.name
-    course = course_root(hk_folder)
-    if course is not None and hk_folder.resolve().parent != course:
+    course = None if batch else course_root(hk_folder)
+    if course is not None and hk_folder.resolve().parent != course:  # 面板上把東西收到學生資料夾上
         said = f"這是學生的資料夾；作業要收進 {hk_folder.parent.name}（按「科學計算」底下的「收作業」）"
         app.log(said)
         return said
@@ -918,7 +920,7 @@ class Roster:
         folder = self.out / self.rows[picked[0]][0]
         if _is_new_folder(folder):  # 新格式：跑學生的 iplot.py（走 hk_page.main，一個 case 一個視窗、不問）
             self.popen([str(self.python), str(folder / "iplot.py"), "--all"], cwd=str(folder),
-                       env={**os.environ, FROM_IPLOT: "1"})
+                       env={**os.environ, FROM_IPLOT: "1", BATCH: "1"})
             return
         hk = hk_of(folder)
         if hk is not None:

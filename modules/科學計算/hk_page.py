@@ -22,6 +22,7 @@ NO_INSTALL = "HK_NO_INSTALL"  # 設了就不跑 pip，缺了只報（測試用�
 # iPLoT（面板、批次名單）另開的子程序都帶著：不自動補 REQUIRES（收進來的檔絕不被改），
 # 不在 venv 裡就不裝（不裝進 iPLoT 自己的、系統的 Python），也不問 case（--all，沒有終端機可答）
 FROM_IPLOT = "HK_FROM_IPLOT"
+BATCH = "HK_BATCH"  # 批次名單（hk_tk.py --batch）另開的多帶這個：明說是批次模式，缺套件時叫人建 venv，不提「科學計算」那顆按鈕
 NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # pip 名只接這些字元，不經 shell
 PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
              "pywt": "PyWavelets", "yaml": "PyYAML", "bs4": "beautifulsoup4", "skimage": "scikit-image",
@@ -219,7 +220,7 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
         raise RuntimeError(f"{'、'.join(only)} 只有 Apple Silicon 的 Mac 裝得了：這份作業要在 Apple Silicon 的 Mac 上跑")
     in_venv = sys.prefix != sys.base_prefix
     if os.environ.get(FROM_IPLOT) and not in_venv:
-        if _course(Path(file)) is None:  # 批次名單開的：沒有「科學計算」那顆按鈕
+        if os.environ.get(BATCH):  # 批次名單開的：沒有「科學計算」那顆按鈕（看記號，不看上面有沒有 hk_tk.py）
             raise RuntimeError(f"缺 {'、'.join(need)}：批次模式要先建好 venv（--venv，或 zip 旁邊的 科學計算-venv）")
         raise RuntimeError(f"缺 {'、'.join(need)}：先按「科學計算」裝課程套件（不裝進 iPLoT 自己的 Python）")
     print(f"在裝 {'、'.join(need)}（第一次要幾分鐘）…")

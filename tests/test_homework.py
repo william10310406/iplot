@@ -1375,6 +1375,7 @@ def test_roster_marks_and_opens_new_format(tmp_path, load, tk_root):
     [(argv, kw)] = popen.calls
     assert argv == ["/venv/bin/python", str(out / "B2" / "iplot.py"), "--all"]
     assert kw["cwd"] == str(out / "B2") and kw["env"]["HK_FROM_IPLOT"] == "1"
+    assert kw["env"]["HK_BATCH"] == "1"  # 批次名單開的：明說是批次模式（不靠上面有沒有 hk_tk.py 猜）
 
 
 def test_gather_keeps_both_loose_files_with_the_same_name(tmp_path, load):
@@ -1692,3 +1693,29 @@ def test_collect_keeps_the_exact_hk_file_over_backups(tmp_path, load):
         assert (folder / name / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1
     assert ("；多交的 3 個檔沒收（李大華：0舊/HK1.txt；王小明：HK1-backup.txt、HK1_threebody_backup.txt）"
             in said)
+
+
+# ── 再審 Task 2：批次模式明說，不猜 ──
+
+
+def hk_tk_in(folder, shell=True):
+    """把 hk_tk.py（shell 時連 hk_page.py）複製進 folder，從那裡載入一份（批次模式就是這樣用的）。"""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in ("hk_tk.py", "hk_page.py") if shell else ("hk_tk.py",):
+        (folder / name).write_bytes((COURSE / name).read_bytes())
+    spec = importlib.util.spec_from_file_location(f"_hk_tk_in_{folder.name}", folder / "hk_tk.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_batch_collects_when_hk_tk_is_higher_up(tmp_path, load):
+    hk = hk_tk_in(tmp_path / "助教")  # 情境 D：zip 放在 hk_tk.py 那個資料夾的子資料夾
+    zipped = make_zip(tmp_path / "助教" / "下載" / "HK5.zip", {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD})
+    said = []
+    out = hk.batch(zipped, kit=teacher_kit(tmp_path), say=said.append)
+    assert out == tmp_path / "助教" / "下載" / "HK5_收件"
+    assert students_in(out) == ["B1", "B2"]
+    assert said[-1].startswith("收了 2 份進 HK5（新 2、覆蓋 0）")
+    assert "科學計算" not in said[-1]  # 批次模式沒有那顆按鈕

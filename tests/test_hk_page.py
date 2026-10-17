@@ -582,7 +582,9 @@ def test_ensure_from_iplot_in_batch_mode_says_to_build_the_venv(tmp_path, load, 
     hp = load("hk_page")
     monkeypatch.delenv("HK_NO_INSTALL")
     monkeypatch.setenv("HK_FROM_IPLOT", "1")
-    file = str(homework(tmp_path / "HK13_收件" / "B1", name="iplot.py"))  # 批次名單開的：不在課程資料夾裡
+    monkeypatch.setenv("HK_BATCH", "1")  # 批次名單開的：明說
+    (tmp_path / "hk_tk.py").write_text("", encoding="utf-8")  # 批次模式的 hk_tk.py 在上面：不拿它猜
+    file = str(homework(tmp_path / "HK13_收件" / "B1", name="iplot.py"))
     monkeypatch.setattr(sys, "base_prefix", sys.prefix)  # venv 沒建好：名單用的是跑 hk_tk.py 的那個 Python
     popen = FakePopen()
     with pytest.raises(RuntimeError) as err:
@@ -691,3 +693,24 @@ def test_ensure_rejects_a_name_with_a_trailing_newline(tmp_path, load, standalon
     monkeypatch.delenv("HK_NO_INSTALL")
     with pytest.raises(RuntimeError, match="名字不合法"):
         hp.ensure(["numpy\n"], str(homework(tmp_path)), popen=FakePopen(), argv=["x"])
+
+
+def test_ensure_in_batch_mode_says_to_build_the_venv_even_next_to_hk_tk(tmp_path, load, standalone, monkeypatch):
+    hp = load("hk_page")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    monkeypatch.setenv("HK_FROM_IPLOT", "1")
+    down = tmp_path / "下載"  # 情境 E：zip 跟 hk_tk.py、hk_page.py 放同一個資料夾（docs/08 8.8 叫人進到那個資料夾打指令）
+    down.mkdir()
+    for name in ("hk_tk.py", "hk_page.py"):
+        (down / name).write_bytes((COURSE / name).read_bytes())
+    file = str(homework(down / "HK5_收件" / "B1", name="iplot.py"))
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)  # venv 沒建好
+    popen = FakePopen()
+    monkeypatch.setenv("HK_BATCH", "1")
+    with pytest.raises(RuntimeError) as err:
+        hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
+    assert str(err.value) == "缺 no-such-pkg-m6：批次模式要先建好 venv（--venv，或 zip 旁邊的 科學計算-venv）"
+    monkeypatch.delenv("HK_BATCH")  # 沒有記號就是面板另開的：句子看記號，不看上面有沒有 hk_tk.py
+    with pytest.raises(RuntimeError, match="先按「科學計算」裝課程套件"):
+        hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
+    assert popen.calls == []
