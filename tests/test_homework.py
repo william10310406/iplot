@@ -1526,6 +1526,15 @@ def test_batch_without_the_shell_leaves_new_format_files_out(tmp_path, load):
     assert [name for name, _ in hk.roster(out)] == ["B1", "B2", "B3"]
 
 
+def test_batch_without_the_shell_new_format_students_take_no_name(tmp_path, load):
+    hk = hk_tk_in(tmp_path / "只有hk_tk", shell=False)  # 沒收的不佔名字：同名的舊格式學生照樣叫 B1，不是 B1-2
+    zipped = make_zip(tmp_path / "下載" / "HK5.zip", {"B1/HK5.py": NEW_HK, "B1.txt": GOOD})
+    said = []
+    out = hk.batch(zipped, kit=teacher_kit(tmp_path), say=said.append)
+    assert students_in(out) == ["B1"] and (out / "B1" / "t2026fscSpace" / "HK5.txt").read_text(encoding="utf-8") == GOOD
+    assert "；1 份新格式沒收：hk_page.py 不在 hk_tk.py 旁邊（B1）" in said[-1]
+
+
 def test_collect_keeps_one_file_per_student_folder(tmp_path, load):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path)
@@ -1612,6 +1621,7 @@ def zip_bytes(members):
     ({"王小明/HK1.txt": HK1, "王小明/筆記.txt": "上課筆記\n"}, ["王小明"],  # 情境 C：不叫 HK1、筆記不另算一個人
      "多交的 1 個檔沒收（王小明：筆記.txt）"),
     ({"王小明/作業/HK1.txt": HK1}, ["王小明"], None),  # 作業放在子資料夾裡：還是叫王小明，不叫「作業」
+    ({"王小明/作業/HK1.txt": HK1, "王小明/圖/a.png": b"png"}, ["王小明"], None),  # 圖的資料夾不算候選，不拆開
     ({"王小明/HK1.txt": HK1, "王小明/圖/a.png": b"png"}, ["王小明"], None),  # 沒有 .py/.txt 的資料夾不算候選
     ({"下載/王小明.ZIP": ZIPPED, "下載/李大華.txt": HK1}, ["下載"],  # 副檔名大寫的 zip 也解（最終審查）
      "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
@@ -1619,7 +1629,8 @@ def zip_bytes(members):
      "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
     ({"遲交/王小明.zip": {"王小明/HK1.txt": HK1}}, ["遲交"], None),  # Finder 壓縮的：zip 裡包著同名的資料夾
 ], ids=["H-folder", "I-files", "zip-with-test", "zip", "zip-HK1-folder", "folder-backup", "C-notes", "folder-deeper",
-        "folder-pictures", "H-uppercase-zip", "one-zip-in-folder", "one-zip-wrapping-a-folder"])
+        "folder-deeper-with-pictures", "folder-pictures", "H-uppercase-zip", "one-zip-in-folder",
+        "one-zip-wrapping-a-folder"])
 def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path, "HK1")
@@ -1650,13 +1661,15 @@ def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras)
     ({"全班/B1/HK5.txt": GOOD, "全班/B2/HK5.txt": GOOD}, ["全班"], ["B1", "B2"], None),
     ({"全班/B1.txt": GOOD, "全班/B2.txt": GOOD}, ["全班"], ["B1", "B2"], None),  # 一人一個散檔的也是全班
     ({"全班/HK5/B1/HK5.txt": GOOD, "全班/HK5/B2/x/HK5.txt": GOOD}, ["全班"], ["B1", "B2"], None),  # 只包了一層：兩個人都在
+    ({"全班/HK5/B1/HK5.txt": GOOD}, ["全班"], ["B1"], None),  # 往下看走到名字像 HK5 的那一層：全班只是包裝
     ({"全班.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD}}, ["全班.zip"], ["B1", "B2"], None),
     ({"全班.zip": {"作業/B1/HK5.txt": GOOD, "作業/B2/筆記.txt": "x\n"}}, ["全班.zip"], ["B1", "B2"],  # 拿不準：一人一份
      "1 份不是 HK5 的作業檔（B2）"),
     ({"HK5.zip": {"王小明.ZIP": zip_bytes({"HK5.txt": GOOD}), "李大華.Zip": zip_bytes({"HK5.txt": GOOD})}}, ["HK5.zip"],
      ["李大華", "王小明"], None),  # 全班一包裡的 zip，副檔名大寫也解（最終審查）
 ], ids=["A", "A-loose-beside-wrapper", "B", "zip-folders", "zip-renamed-files", "downloads", "folder-of-folders",
-        "folder-of-files", "folder-wrapped-once", "zip-wrapped-once", "zip-wrapped-unsure", "zips-uppercase-in-zip"])
+        "folder-of-files", "folder-wrapped-once", "folder-wrapped-once-one-student", "zip-wrapped-once",
+        "zip-wrapped-unsure", "zips-uppercase-in-zip"])
 def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names, note):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path)
@@ -1697,7 +1710,8 @@ FOLD_HINT = "；下載 直接放著一個 HK1.txt，所以整個資料夾被當�
     ({"李大華/HK1.txt": HK1, "李大華/0舊/HK1.txt": BACKUP}, ["李大華"], None),  # 自己放在子資料夾的舊版
     ({"王小明.zip": {"HK1.txt": HK1, "old/HK1_v1.txt": BACKUP}}, ["王小明.zip"], None),  # zip 本來就是學生的名字
     ({"王小明.zip": {"HK1.txt": HK1, "舊.zip": zip_bytes({"HK1.txt": BACKUP})}}, ["王小明.zip"], None),
-], ids=["other-zip-in-folder", "own-old-version", "own-zip", "own-zip-with-old-zip"])
+    ({"下載/HK1.txt": HK1, "下載/資料.zip": {"a.txt": "1 2 3\n"}}, ["下載"], None),  # zip 裡的不是作業（classify 不認得）
+], ids=["other-zip-in-folder", "own-old-version", "own-zip", "own-zip-with-old-zip", "data-zip-in-folder"])
 def test_collect_fold_hint_only_when_a_folder_swallows_someone_elses_zip(tmp_path, load, files, picked, hint):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path, "HK1")
