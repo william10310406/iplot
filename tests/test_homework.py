@@ -1719,3 +1719,18 @@ def test_batch_collects_when_hk_tk_is_higher_up(tmp_path, load):
     assert students_in(out) == ["B1", "B2"]
     assert said[-1].startswith("收了 2 份進 HK5（新 2、覆蓋 0）")
     assert "科學計算" not in said[-1]  # 批次模式沒有那顆按鈕
+
+
+# ── 再審 Task 4：沒有殼（批次模式只複製了 hk_tk.py，或 hk_page.py 事後被刪）──
+
+
+def test_roster_without_the_shell_does_not_crash(tmp_path, load):
+    hk = lone_hk_tk(tmp_path)  # 情境 G：--out 指到一個已經有帶殼學生的收件夾
+    out = tmp_path / "HK5_收件"
+    (out / "B1").mkdir(parents=True)
+    (out / "B1" / "iplot.py").write_text(NEW_HK, encoding="utf-8")
+    (out / "B1" / "hk_page.py").write_bytes((COURSE / "hk_page.py").read_bytes())  # 以前帶殼收進來的
+    old_hk(out / "B2")
+    rows = hk.roster(out)
+    assert [name for name, _ in rows] == ["B1", "B2"]
+    assert all("檢查不過" not in mark for _, mark in rows)

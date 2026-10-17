@@ -618,9 +618,12 @@ def _requires_of(file: Path) -> set[str]:
 
 
 def _shell_check(file: Path) -> list[str]:
-    """新格式的檔跑一次 hk_page 的 --check（從課程資料夾的正本載入，不動 sys.path、不碰 sys.modules 裡的 hk_page）。"""
+    """新格式的檔跑一次 hk_page 的 --check（從課程資料夾的正本載入，不動 sys.path、不碰 sys.modules 裡的 hk_page）。
+    正本不在（批次模式只複製了 hk_tk.py，或 hk_page.py 事後被刪）就不查，回 []：名單照開，不載學生資料夾裡的那份。"""
     import importlib.util
 
+    if not SHELL.is_file():
+        return []
     spec = importlib.util.spec_from_file_location("_hk_page_for_check", SHELL)
     shell = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shell)
