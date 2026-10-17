@@ -296,7 +296,7 @@ python3 tools/publish.py --version 0.5.0 --ref HEAD --base-url "file://$(pwd)/�
 
 - **「科學計算」**：雙擊把課程套件裝進這個模組自己的 `.venv`，分兩批：先裝 HK1–HK8 要的（約 480 MB），裝好再雙擊一次才裝 HK9–HK12 要的 torch 那些（約 1.1 GB）。
 - **「匯入作業包」**（在「科學計算」的下一層）：選老師的 `t2026fscSpace` 資料夾，每個 `HKn.txt` 長成一格。
-- **「收作業」**（同一層）：選 TronClass 下載的 zip，可以多選；檔名裡看得出 HKn 就收進那一份，看不出來會問一次。
+- **「收作業」**（同一層）：選 TronClass 下載的檔（一人一個 `.zip` 或 `.txt`，或全班一包的 zip），可以多選；檔名裡看得出 HKn 就收進那一份，看不出來會問一次。
 - **批次模式（不開面板）**：在 `modules/科學計算/` 裡執行 `python3 hk_tk.py --batch ~/Downloads/HK5.zip --kit ~/Downloads/t2026fscSpace`，收進 zip 旁邊的 `HK5_收件/`（套件裝進 zip 旁邊的 `科學計算-venv/`），開一個全班名單的視窗，雙擊一個就開；Windows 未經實機驗證。
 - 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.5.1.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
 
