@@ -1584,6 +1584,15 @@ def students_in(folder):
 ZIPPED = {"HK1.txt": HK1, "HK1_threebody_backup.txt": BACKUP}  # 王小明.zip：正本加三體的舊版
 
 
+def zip_bytes(members):
+    """members 做成一個 zip，回它的 bytes（放進另一個 zip 當成員用）。"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return buffer.getvalue()
+
+
 @pytest.mark.parametrize("files, picked, extras", [
     ({"下載/王小明.zip": ZIPPED, "下載/李大華.txt": HK1}, ["下載"],  # 情境 H：選放 zip 與 .txt 的資料夾
      "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
@@ -1599,8 +1608,10 @@ ZIPPED = {"HK1.txt": HK1, "HK1_threebody_backup.txt": BACKUP}  # 王小明.zip�
      "多交的 1 個檔沒收（王小明：筆記.txt）"),
     ({"王小明/作業/HK1.txt": HK1}, ["王小明"], None),  # 作業放在子資料夾裡：還是叫王小明，不叫「作業」
     ({"王小明/HK1.txt": HK1, "王小明/圖/a.png": b"png"}, ["王小明"], None),  # 沒有 .py/.txt 的資料夾不算候選
+    ({"下載/王小明.ZIP": ZIPPED, "下載/李大華.txt": HK1}, ["下載"],  # 副檔名大寫的 zip 也解（最終審查）
+     "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
 ], ids=["H-folder", "I-files", "zip-with-test", "zip", "zip-HK1-folder", "folder-backup", "C-notes", "folder-deeper",
-        "folder-pictures"])
+        "folder-pictures", "H-uppercase-zip"])
 def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path, "HK1")
@@ -1632,8 +1643,10 @@ def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras)
     ({"全班/HK5/B1/HK5.txt": GOOD, "全班/HK5/B2/x/HK5.txt": GOOD}, ["全班"], ["B1", "B2"]),  # 只包了一層：兩個人都在
     ({"全班.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD}}, ["全班.zip"], ["B1", "B2"]),
     ({"全班.zip": {"作業/B1/HK5.txt": GOOD, "作業/B2/筆記.txt": "x\n"}}, ["全班.zip"], ["B1", "B2"]),  # 拿不準：一人一份
+    ({"HK5.zip": {"王小明.ZIP": zip_bytes({"HK5.txt": GOOD}), "李大華.Zip": zip_bytes({"HK5.txt": GOOD})}}, ["HK5.zip"],
+     ["李大華", "王小明"]),  # 全班一包裡的 zip，副檔名大寫也解（最終審查）
 ], ids=["A", "A-loose-beside-wrapper", "B", "zip-folders", "zip-renamed-files", "downloads", "folder-of-folders",
-        "folder-of-files", "folder-wrapped-once", "zip-wrapped-once", "zip-wrapped-unsure"])
+        "folder-of-files", "folder-wrapped-once", "zip-wrapped-once", "zip-wrapped-unsure", "zips-uppercase-in-zip"])
 def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path)

@@ -361,7 +361,8 @@ def _unzip_inside(folder: Path, levels: int, zips: dict[Path, str]) -> int:
     skipped = 0
     if levels <= 0:
         return skipped
-    for inner in sorted(folder.rglob("*.zip")):  # 先列好：這一輪解出來的 zip 交給下一層
+    # 先列好：這一輪解出來的 zip 交給下一層。副檔名不分大小寫（.ZIP），但只認 .zip（.docx 也是 zip）
+    for inner in sorted(p for p in folder.rglob("*") if p.suffix.lower() == ".zip"):
         if inner.is_file() and zipfile.is_zipfile(inner):
             dest = _unique(inner.with_name(inner.stem))
             try:
