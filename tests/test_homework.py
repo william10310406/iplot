@@ -1610,8 +1610,11 @@ def zip_bytes(members):
     ({"王小明/HK1.txt": HK1, "王小明/圖/a.png": b"png"}, ["王小明"], None),  # 沒有 .py/.txt 的資料夾不算候選
     ({"下載/王小明.ZIP": ZIPPED, "下載/李大華.txt": HK1}, ["下載"],  # 副檔名大寫的 zip 也解（最終審查）
      "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
+    ({"遲交/王小明.zip": ZIPPED}, ["遲交"],  # 資料夾裡只放一個 zip：那個 zip 就是學生，不叫「遲交」（最終審查）
+     "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
+    ({"遲交/王小明.zip": {"王小明/HK1.txt": HK1}}, ["遲交"], None),  # Finder 壓縮的：zip 裡包著同名的資料夾
 ], ids=["H-folder", "I-files", "zip-with-test", "zip", "zip-HK1-folder", "folder-backup", "C-notes", "folder-deeper",
-        "folder-pictures", "H-uppercase-zip"])
+        "folder-pictures", "H-uppercase-zip", "one-zip-in-folder", "one-zip-wrapping-a-folder"])
 def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path, "HK1")

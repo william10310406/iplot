@@ -515,7 +515,8 @@ def _name_of(thing: Path, zips: dict[Path, str]) -> str:
 def _is_wrapper(thing: Path, kids: list[Path], hk: str, zips: dict[Path, str]) -> bool:
     """thing 是全班一包（包裝），不是一個學生：名字像 HKn；或候選兩個以上、自己直接底下沒有 HKn.txt／HKn.py。
     只有一個候選的就往下走（只包了一層的全班）：走到的那一層直接有 HKn.txt 或只剩一個檔，thing 就是那個學生；
-    走到的那一層名字像 HKn、或候選兩個以上，thing 只是包裝（拿不準就一人一份，不把全班合成一個人）。"""
+    走到的那一層名字像 HKn、或候選兩個以上，thing 只是包裝（拿不準就一人一份，不把全班合成一個人）；
+    資料夾裡只放著一個 zip 時也是包裝：那個 zip 就是學生（TronClass 一人一個 zip）。"""
     if hk_in_name(_name_of(thing, zips)) == hk:
         return True
     level = thing
@@ -524,6 +525,8 @@ def _is_wrapper(thing: Path, kids: list[Path], hk: str, zips: dict[Path, str]) -
             return True
         if kids[0].is_file():
             return False
+        if kids[0] in zips and level not in zips:
+            return True
         level, kids = kids[0], _candidates(kids[0])
     return False
 
