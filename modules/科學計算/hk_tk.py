@@ -352,10 +352,10 @@ def _unzip(file: Path, dest: Path) -> int:
 class GatherResult:
     root: Path  # 收進來的東西都在這底下
     skipped: int  # 擋掉的 zip 成員（.. 或絕對路徑）與解不開的 zip
-    unzipped: set[Path] = dataclasses.field(default_factory=set)  # root 底下哪幾個是 zip 解開的（不是選進來的資料夾）
+    zips: dict[Path, str] = dataclasses.field(default_factory=dict)  # zip 解開的資料夾 → 那個 zip 的檔名
 
 
-def _unzip_inside(folder: Path, levels: int) -> int:
+def _unzip_inside(folder: Path, levels: int, zips: dict[Path, str]) -> int:
     """folder 底下的 zip 解在原地（解開的資料夾叫 zip 的名字，解完拿掉 zip）；levels 是還能往下解幾層。回擋掉幾個。"""
     skipped = 0
     if levels <= 0:
@@ -369,7 +369,8 @@ def _unzip_inside(folder: Path, levels: int) -> int:
             except (zipfile.BadZipFile, OSError):
                 skipped += 1
                 continue
-            skipped += _unzip_inside(dest, levels - 1)
+            zips[dest] = _nfc(inner.name)
+            skipped += _unzip_inside(dest, levels - 1, zips)
     return skipped
 
 
@@ -379,7 +380,7 @@ def gather(paths: list[Path], into: Path, zips_in_folders: bool = False) -> Gath
     解開的 zip 裡再有 zip 再解一次，第三層不解（TronClass 下載下來一個學生就是一個 .zip）。"""
     root = Path(into) / "原件"
     root.mkdir(parents=True, exist_ok=True)
-    skipped, unzipped = 0, set()
+    skipped, zips = 0, {}
     for path in map(Path, paths):
         if path.is_file() and zipfile.is_zipfile(path):
             dest = _unique(root / _nfc(path.stem))
@@ -388,15 +389,15 @@ def gather(paths: list[Path], into: Path, zips_in_folders: bool = False) -> Gath
             except (zipfile.BadZipFile, OSError):
                 skipped += 1
                 continue
-            unzipped.add(dest)
-            skipped += _unzip_inside(dest, 1)  # 只解一層：這裡解出來的 zip 不再往下找
+            zips[dest] = _nfc(path.name)
+            skipped += _unzip_inside(dest, 1, zips)  # 只解一層：這裡解出來的 zip 不再往下找
         elif path.is_dir():
             dest = _unique(root / _nfc(path.name))
             _copytree(path, dest)
-            skipped += _unzip_inside(dest, 2 if zips_in_folders else 0)
+            skipped += _unzip_inside(dest, 2 if zips_in_folders else 0, zips)
         elif path.is_file():
             shutil.copy2(path, _unique(root / _nfc(path.name), keep_suffix=True))
-    return GatherResult(root, skipped, unzipped)
+    return GatherResult(root, skipped, zips)
 
 
 def _hidden(file: Path, root: Path) -> bool:
@@ -463,11 +464,9 @@ BAD_CHARS = re.compile(r'[/\\:*?"<>|]')
 NOTHING = "收到的東西裡沒有 .py 或 .txt"
 
 
-def student_name(root: Path, file: Path, taken: set[str]) -> str:
-    """學生資料夾的名字：檔案在 root 那一層就用檔名（去副檔名），在子資料夾裡就用第一層子資料夾的名字；
-    NFC、去掉 / \\ : * ? " < > | 與開頭的 .；空了叫「未命名」；taken 裡有了就加 -2、-3…，再放進 taken。"""
-    rel = Path(file).relative_to(root)
-    raw = Path(file).stem if len(rel.parts) == 1 else rel.parts[0]
+def student_name(raw: str, taken: set[str]) -> str:
+    """學生資料夾的名字：raw（那一樣東西的名字，已去副檔名）NFC、去掉 / \\ : * ? " < > | 與開頭的 .；
+    空了叫「未命名」；taken 裡有了就加 -2、-3…，再放進 taken。"""
     name = BAD_CHARS.sub("", _nfc(raw)).lstrip(".").strip() or "未命名"
     folded = {t.casefold() for t in taken}  # macOS、Windows 的檔名不分大小寫：B1 和 b1 是同一個資料夾
     final, n = name, 2
@@ -481,43 +480,81 @@ def _visible(folder: Path) -> list[Path]:
     return [p for p in folder.iterdir() if not (p.name.startswith(".") or p.name == "__MACOSX")]
 
 
-def _homework_in(path: Path) -> bool:
-    """path 是一個 .py/.txt 檔，或底下有 .py/.txt 的資料夾（藏起來的、hk_page.py 不算）：算一個學生。"""
-    return any(f.suffix.lower() in (".py", ".txt") and f.name.casefold() != "hk_page.py" and f.is_file()
-               and not _hidden(f, path.parent) for f in ([path] if path.is_file() else path.rglob("*")))
+def _homework_file(file: Path) -> bool:
+    """收得進來的檔：.py、.txt（學生自己那份殼 hk_page.py 不算：用課程的正本）。"""
+    return file.is_file() and file.suffix.lower() in (".py", ".txt") and file.name.casefold() != "hk_page.py"
 
 
-def _naming_root(file: Path, root: Path, unzipped=frozenset()) -> Path:
-    """算學生名字時的「根」：收進來的每一樣東西各自算（不然 HK5.zip 裡的 50 個人都會叫 HK5）；
-    zip 裡只包了一層資料夾（例如 HK5/<學生>/…）就往下走到學生那一層的上面。
-    選進來的資料夾（不在 unzipped 裡）要在那一層底下有兩個以上的學生（資料夾或散檔）才是全班的包裝；
-    不然它自己就是那個學生，根是 root（王小明/作業/HK5.txt 叫王小明，不叫作業）。"""
-    rel = file.relative_to(root)
-    if len(rel.parts) == 1:
-        return root
-    top = level = root / rel.parts[0]
-    while True:
-        kids = _visible(level)
-        if len(kids) == 1 and kids[0].is_dir() and file.is_relative_to(kids[0]) \
-                and all(k.is_dir() for k in _visible(kids[0])):
-            level = kids[0]
-        else:
-            break
-    if top in unzipped or sum(map(_homework_in, _visible(level))) >= 2:
-        return level
-    return root
+def _homework_files(path: Path) -> list[Path]:
+    """path 自己（是收得進來的檔的話），或它底下所有收得進來的檔（藏起來的不算），照路徑排。"""
+    if path.is_file():
+        return [path] if _homework_file(path) else []
+    return sorted(f for f in path.rglob("*") if _homework_file(f) and not _hidden(f, path))
 
 
-def _one_per_student(files: list[Path], got: GatherResult, hk: str) -> list[tuple[Path, Path]]:
-    """每個學生留一份，回 [(算名字的根, 檔)]：同一個根底下同一個第一層資料夾是同一個學生，裡面好幾個 .py/.txt
-    （筆記、舊版）時留 classify 認得的那一份，都認得就取檔名像 HKn 的；根層的散檔一檔一人。"""
-    groups: dict[tuple[Path, str], list[tuple[Path, Path]]] = {}
-    for file in files:
-        base = _naming_root(file, got.root, got.unzipped)
-        rel = file.relative_to(base)
-        groups.setdefault((base, rel.parts[0]) if len(rel.parts) > 1 else (file, ""), []).append((base, file))
-    return [group[0] if len(group) == 1 else max(group, key=lambda pair: _homework_rank(pair[1], hk))
-            for group in groups.values()]
+def _candidates(folder: Path) -> list[Path]:
+    """folder 直接底下的候選：.py/.txt 散檔、底下有 .py/.txt 的資料夾（zip 解開的也是資料夾）。"""
+    return [k for k in sorted(_visible(folder), key=lambda p: _nfc(p.name)) if _homework_files(k)]
+
+
+def _exact(file: Path, hk: str) -> bool:
+    """檔名就是這份作業：HK1.txt、HK1.py（大小寫、補零跟 hk_in_name 一樣看）。"""
+    m = re.fullmatch(r"HK0*(\d+)", file.stem, re.IGNORECASE)
+    return file.suffix.lower() in (".py", ".txt") and m is not None and f"HK{int(m.group(1))}" == hk
+
+
+def _name_of(thing: Path, zips: dict[Path, str]) -> str:
+    """一樣東西的名字：檔去副檔名；zip 解開的資料夾是那個 zip 的名字去副檔名；資料夾就是它的名字。"""
+    if thing.is_file():
+        return thing.stem
+    return Path(zips[thing]).stem if thing in zips else thing.name
+
+
+def _is_wrapper(thing: Path, kids: list[Path], hk: str, zips: dict[Path, str]) -> bool:
+    """thing 是全班一包（包裝），不是一個學生：名字像 HKn；或候選兩個以上、自己直接底下沒有 HKn.txt／HKn.py。
+    只有一個候選的就往下走（只包了一層的全班）：走到的那一層直接有 HKn.txt 或只剩一個檔，thing 就是那個學生；
+    走到的那一層名字像 HKn、或候選兩個以上，thing 只是包裝（拿不準就一人一份，不把全班合成一個人）。"""
+    if hk_in_name(_name_of(thing, zips)) == hk:
+        return True
+    level = thing
+    while not any(k.is_file() and _exact(k, hk) for k in kids):
+        if len(kids) >= 2 or (level != thing and hk_in_name(_name_of(level, zips)) == hk):
+            return True
+        if kids[0].is_file():
+            return False
+        level, kids = kids[0], _candidates(kids[0])
+    return False
+
+
+@dataclasses.dataclass
+class Student:
+    thing: Path  # 選進來（或包裝裡）的那一樣東西：檔，或資料夾（zip 解開的也是）
+    name: str  # 它的名字（去副檔名）
+    files: list[Path]  # 它底下收得進來的檔，正本排第一，其他是多交的
+
+
+def _students_in(thing: Path, hk: str, zips: dict[Path, str], wrapper: bool = False) -> list[Student]:
+    """誰是一個學生（設計第 7 節）：一樣東西（檔、zip、資料夾）＝一個學生，名字是它的名字；全班一包是包裝，
+    裡面的每個候選各自再看一次。wrapper：thing 一定是包裝（批次模式給的 zip 就是全班那一包）。"""
+    if thing.is_file():
+        return [Student(thing, thing.stem, [thing])] if _homework_file(thing) else []
+    kids = _candidates(thing)
+    if not kids:
+        return []
+    if wrapper or _is_wrapper(thing, kids, hk, zips):
+        return [s for kid in kids for s in _students_in(kid, hk, zips)]
+    files = _homework_files(thing)
+    primary = max(files, key=lambda f: _homework_rank(f, hk))  # 一樣像取前面那個
+    return [Student(thing, _name_of(thing, zips), [primary, *(f for f in files if f != primary)])]
+
+
+def _shown(file: Path, thing: Path, zips: dict[Path, str]) -> str:
+    """file 在 thing 裡的路徑；zip 解開的資料夾寫回 zip 的檔名（王小明.zip/HK1.txt）。"""
+    parts, here = [], thing
+    for part in file.relative_to(thing).parts:
+        here = here / part
+        parts.append(zips.get(here, part))
+    return "/".join(parts)
 
 
 def _homework_rank(file: Path, hk: str) -> tuple[bool, bool, bool]:
@@ -650,9 +687,12 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         unsafe = got.skipped
         imports: set[str] = set()
         has_shell = SHELL.is_file()  # 批次模式只複製了 hk_tk.py：新格式照放，不放殼、不查
-        picked = _one_per_student(files, got, hk)
-        for base, file in picked:
-            name = student_name(base, file, taken)
+        students = [s for top in sorted(_visible(got.root), key=lambda p: _nfc(p.name))
+                    for s in _students_in(top, hk, got.zips, wrapper=batch)]  # 批次模式給的 zip 就是全班那一包
+        placed: list[tuple[str, Student]] = []
+        for student in students:
+            file = student.files[0]
+            name = student_name(student.name, taken)
             dest = hk_folder / name
             if (not _inside(dest, hk_folder) or dest.resolve() == hk_folder.resolve()
                     or (dest.exists() and not _is_student(dest, hk))):
@@ -699,6 +739,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
                 write_stub(dest)
             imports |= third_party(scan_imports(file), dest)
             imports |= requires
+            placed.append((name, student))
         notes = []
         for key, what in (("broken", "有語法錯誤"), ("not-utf8", "不是 UTF-8"), ("wrong", f"不是 {hk} 的作業檔"),
                           ("check", "新格式檢查不過")):
@@ -709,8 +750,10 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
                          f"（{'、'.join(lists['no-shell'])}）")
         if others:
             notes.append(f"略過 {others} 個不是 .py/.txt 的檔")
-        if len(files) > len(picked):
-            notes.append(f"略過 {len(files) - len(picked)} 個不是作業的檔")
+        extra = [(name, s) for name, s in placed if len(s.files) > 1]
+        if extra:  # 同一個學生多交的（備份、自測、筆記）：一個一個列，少收的東西一定看得到
+            listed = "；".join(f"{name}：{'、'.join(_shown(f, s.thing, got.zips) for f in s.files[1:])}" for name, s in extra)
+            notes.append(f"多交的 {sum(len(s.files) - 1 for _, s in extra)} 個檔沒收（{listed}）")
         if unsafe:
             notes.append(_skipped_note(unsafe)[1:])
         if space is None:
@@ -719,6 +762,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         package_note = _packages(app, python, pkgs, popen, batch)
         if package_note:
             notes.append(package_note)
+        notes += _hints(placed, got.zips)
         formats = f"舊格式 {kinds['old']}、新格式 {kinds['new']}；" if kinds["new"] else ""  # 這學期全是舊的：不多說
         said = f"收了 {new + over} 份進 {hk}（{formats}新 {new}、覆蓋 {over}）" + "".join(f"；{n}" for n in notes)
         app.log(said)
@@ -726,6 +770,23 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         return said
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _hints(placed: list[tuple[str, Student]], zips: dict[Path, str]) -> list[str]:
+    """句尾的提示（設計第 7 節「誰是一個學生」第 4 條：不猜，但看得到）：名字看起來是檔名的；
+    直接放著一個 HKn.txt、所以整個資料夾（或 zip）被當成一個人，而子資料夾、子 zip 裡另有作業被折進多交的。"""
+    hints = []
+    looks = [name for name, _ in placed if hk_in_name(name)]
+    if looks:
+        hints.append(f"這幾份的名字看起來是檔名不是學生（{'、'.join(looks)}）：把檔（或 zip）改成學生的名字再收一次")
+    for _, s in placed:
+        primary = s.files[0]
+        if primary.parent == s.thing and any(f.parent != s.thing and classify(f)[0] in ("old", "new")
+                                             for f in s.files[1:]):
+            what = "zip" if s.thing in zips else "資料夾"
+            hints.append(f"{zips.get(s.thing, s.thing.name)} 直接放著一個 {primary.name}，"
+                         f"所以整個{what}被當成一個人：把它改成那個學生的名字再收一次")
+    return hints
 
 
 def hk_in_name(name: str) -> str | None:

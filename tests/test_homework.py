@@ -752,16 +752,15 @@ GOOD = OLD_HK.replace("{hk}", "HK5")
 
 def test_student_name_rules(tmp_path, load):
     hk = load("hk_tk")
-    root, taken = tmp_path / "原件" / "HK5", set()
-    assert hk.student_name(root, root / "B11234567_王小明.txt", taken) == "B11234567_王小明"
-    assert hk.student_name(root, root / "李大華" / "作業" / "HK5.txt", taken) == "李大華"
+    taken = set()
+    assert hk.student_name("B11234567_王小明", taken) == "B11234567_王小明"
     decomposed = unicodedata.normalize("NFD", "café")
-    assert hk.student_name(root, root / decomposed / "x.txt", taken) == unicodedata.normalize("NFC", "café")
-    assert hk.student_name(root, root / 'a:b*c?"d<e>f|g.txt', taken) == "abcdefg"
-    assert hk.student_name(root, root / "..." / "x.txt", taken) == "未命名"
-    assert hk.student_name(root, root / ".hidden.txt", taken) == "hidden"
-    assert hk.student_name(root, root / "B11234567_王小明.py", taken) == "B11234567_王小明-2"
-    assert hk.student_name(root, root / "B11234567_王小明.py", taken) == "B11234567_王小明-3"
+    assert hk.student_name(decomposed, taken) == unicodedata.normalize("NFC", "café")
+    assert hk.student_name('a:b*c?"d<e>f|g', taken) == "abcdefg"
+    assert hk.student_name("...", taken) == "未命名"
+    assert hk.student_name(".hidden", taken) == "hidden"
+    assert hk.student_name("B11234567_王小明", taken) == "B11234567_王小明-2"
+    assert hk.student_name("b11234567_王小明", taken) == "b11234567_王小明-3"  # 不分大小寫
 
 
 def test_classify_old_broken_none_and_not_utf8(tmp_path, load):
@@ -810,14 +809,6 @@ def test_collect_names_by_student_folder_and_decodes_cp950(tmp_path, load):
     students = sorted(p.name for p in folder.iterdir() if (p / "iplot.py").exists())
     assert students == ["李大華", "王小明"]
     assert said.startswith("收了 2 份進 HK5（新 2、覆蓋 0）")
-
-
-def test_collect_names_through_a_single_top_folder(tmp_path, load):
-    hk = load("hk_tk")
-    _, folder = course_with_hk(tmp_path)
-    zipped = make_zip(tmp_path / "下載" / "全班.zip", {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD})
-    hk.collect(HwApp(tmp_path, folder), [zipped], folder)
-    assert (folder / "B1" / "iplot.py").exists() and (folder / "B2" / "iplot.py").exists()
 
 
 def test_collect_keeps_and_lists_broken_files(tmp_path, load):
@@ -944,7 +935,7 @@ def test_collect_refuses_paths_outside_hk_folder(tmp_path, load, monkeypatch):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path)
     _, files = handed_in(tmp_path, {"B1.txt": GOOD})
-    monkeypatch.setattr(hk, "student_name", lambda root, file, taken: "../../逃出去")
+    monkeypatch.setattr(hk, "student_name", lambda raw, taken: "../../逃出去")
     said = hk.collect(HwApp(tmp_path, folder), files, folder)
     assert not (tmp_path / "逃出去").exists() and not (folder.parent / "逃出去").exists()
     assert said.startswith("收了 0 份進 HK5")
@@ -1237,7 +1228,7 @@ def test_collect_button_finds_hk_in_the_zip_name(tmp_path, load):
 def test_collect_button_asks_when_the_name_says_nothing(tmp_path, load):
     course = course_with_buttons(tmp_path)
     app = HwApp(tmp_path, course / "收作業")
-    app.chosen_files = [make_zip(tmp_path / "全班.zip", {"B1/HK5.txt": GOOD})]
+    app.chosen_files = [make_zip(tmp_path / "全班.zip", {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD})]
     app.answers_ask = ["hk5"]
     press(course / "收作業", app, course)
     [(question, _)] = app.asks
@@ -1405,7 +1396,7 @@ def test_collect_never_deletes_teacher_entries_named_in_another_case(tmp_path, l
     _, folder = course_with_hk(tmp_path)  # 舊格式：HK5/iplot.py、t2026fscSpace/HK5.txt、HK5Space/a.pdf
     teacher = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
     zipped = make_zip(tmp_path / "HK5.zip", {"T2026FSCSPACE/HK5.py": NEW_HK, "IPLOT.PY/HK5.txt": GOOD,
-                                             "hk5space/HK5.py": NEW_HK})
+                                             "hk5space.py": NEW_HK})  # 名字像 HK5 的資料夾是包裝：用散檔撞名
     said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
     for path, data in teacher.items():  # macOS 不分大小寫：這幾個名字開到的是老師的東西，絕不能被砍、被蓋
         assert path.read_bytes() == data, path
@@ -1421,7 +1412,7 @@ def test_collect_into_a_new_format_homework_keeps_its_space(tmp_path, load):
     (hk13 / "HK13Space" / "data.csv").write_text("1,2\n", encoding="utf-8")
     (hk13 / "iplot.py").write_text(NEW_HK, encoding="utf-8")
     (hk13 / "hk_page.py").write_bytes((course / "hk_page.py").read_bytes())
-    zipped = make_zip(tmp_path / "HK13.zip", {"hk13space/HK13.py": NEW_HK, "B1/HK13.txt": GOOD})
+    zipped = make_zip(tmp_path / "HK13.zip", {"hk13space.py": NEW_HK, "B1/HK13.txt": GOOD})
     hk.collect(HwApp(tmp_path, hk13), [zipped], hk13)
     assert (hk13 / "HK13Space" / "data.csv").read_text(encoding="utf-8") == "1,2\n"
     assert (hk13 / "iplot.py").read_text(encoding="utf-8") == NEW_HK and not (hk13 / "HK13Space" / "iplot.py").exists()
@@ -1527,7 +1518,7 @@ def test_collect_keeps_one_file_per_student_folder(tmp_path, load):
                                              "B2/Answer.py": "x = 1\n", "B2/HK5.txt": GOOD})
     said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
     assert said.startswith("收了 2 份進 HK5（新 2、覆蓋 0）")
-    assert "；略過 2 個不是作業的檔" in said and "不是 HK5 的作業檔" not in said
+    assert "；多交的 2 個檔沒收（B1：2026筆記.txt；B2：Answer.py）" in said and "不是 HK5 的作業檔" not in said
     assert not (folder / "B1-2").exists() and not (folder / "B2-2").exists()
     assert (folder / "B1" / "t2026fscSpace" / "HK5.txt").read_text(encoding="utf-8") == GOOD
 
@@ -1538,7 +1529,7 @@ def test_collect_prefers_the_file_named_like_the_hk_when_both_are_homework(tmp_p
     zipped = make_zip(tmp_path / "HK5.zip", {"B1/A舊版.txt": GOOD, "B1/HK5.py": NEW_HK})
     said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
     assert (folder / "B1" / "iplot.py").read_text(encoding="utf-8") == NEW_HK
-    assert said.startswith("收了 1 份進 HK5（舊格式 0、新格式 1；新 1、覆蓋 0）") and "；略過 1 個不是作業的檔" in said
+    assert said.startswith("收了 1 份進 HK5（舊格式 0、新格式 1；新 1、覆蓋 0）") and "；多交的 1 個檔沒收（B1：A舊版.txt）" in said
 
 
 def test_gather_keeps_folders_that_differ_only_in_case_apart(tmp_path, load):
@@ -1548,24 +1539,6 @@ def test_gather_keeps_folders_that_differ_only_in_case_apart(tmp_path, load):
     files = sorted(root.rglob("*.txt"))
     assert sorted(f.read_text(encoding="utf-8") for f in files) == ["大寫", "小寫"]
     assert files[0].parent.name != files[1].parent.name  # macOS 不分大小寫：b1/ 另開，不跟 B1/ 混成一個學生
-
-
-@pytest.mark.parametrize("files, picked, names", [
-    ({"王小明/作業/HK5.txt": GOOD}, "王小明", ["王小明"]),  # 作業放在子資料夾裡：還是叫王小明，不叫「作業」
-    ({"王小明/HK5.txt": GOOD}, "王小明", ["王小明"]),  # 不叫 HK5
-    ({"王小明/HK5.txt": GOOD, "王小明/圖/a.png": "png"}, "王小明", ["王小明"]),  # 沒有作業的資料夾不算學生
-    ({"全班/B1/HK5.txt": GOOD, "全班/B2/HK5.txt": GOOD}, "全班", ["B1", "B2"]),  # 兩個以上：全班的包裝
-    ({"全班/HK5/B1/HK5.txt": GOOD, "全班/HK5/B2/x/HK5.txt": GOOD}, "全班", ["B1", "B2"]),  # 包了一層也一樣
-    ({"全班/B1.txt": GOOD, "全班/B2.txt": GOOD}, "全班", ["B1", "B2"]),  # 一人一個散檔的也是全班
-])
-def test_collect_names_a_selected_folder_after_itself_unless_it_holds_a_class(tmp_path, load, files, picked, names):
-    hk = load("hk_tk")
-    _, folder = course_with_hk(tmp_path)
-    base, _ = handed_in(tmp_path, files)
-    said = hk.collect(HwApp(tmp_path, folder), [base / picked], folder)
-    assert sorted(p.name for p in folder.iterdir() if (p / "t2026fscSpace" / "HK5.txt").exists()
-                  and p.name != "t2026fscSpace") == names
-    assert said.startswith(f"收了 {len(names)} 份進 HK5")
 
 
 # ── 再審（2026-10-17）：一樣東西＝一個學生（工作單 docs/plans/2026-10-17-M6-再審.md）──
@@ -1604,3 +1577,86 @@ def test_gather_unzips_zips_inside_a_selected_folder(tmp_path, load):
     assert (got.root / "下載" / "李大華.txt").read_bytes() == HK1
     kit = hk.gather([down], tmp_path / "kit-work")  # 匯入作業包照舊：選進來的資料夾整個照原樣複製（老師的 Space 裡的 zip 不動）
     assert (kit.root / "下載" / "王小明.zip").is_file()
+
+
+def students_in(folder):
+    """HKn/ 底下收進來的學生（有 iplot.py 的資料夾；t2026fscSpace、HKnSpace 不算）。"""
+    return sorted(p.name for p in Path(folder).iterdir() if p.is_dir() and (p / "iplot.py").is_file())
+
+
+ZIPPED = {"HK1.txt": HK1, "HK1_threebody_backup.txt": BACKUP}  # 王小明.zip：正本加三體的舊版
+
+
+@pytest.mark.parametrize("files, picked, extras", [
+    ({"下載/王小明.zip": ZIPPED, "下載/李大華.txt": HK1}, ["下載"],  # 情境 H：選放 zip 與 .txt 的資料夾
+     "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
+    ({"下載/王小明.zip": ZIPPED, "下載/李大華.txt": HK1}, ["下載/王小明.zip", "下載/李大華.txt"],  # 情境 I：多選兩個檔
+     "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
+    ({"王小明.zip": {**ZIPPED, "test_HK1_twobody.py": "import unittest\n"}}, ["王小明.zip"],  # 標準樣本的筆記提到的自測
+     "多交的 2 個檔沒收（王小明：HK1_threebody_backup.txt、test_HK1_twobody.py）"),
+    ({"王小明.zip": {"HK1.txt": HK1}}, ["王小明.zip"], None),
+    ({"王小明.zip": {"HK1/HK1.txt": HK1, "HK1/HK1Space/a.pdf": b"%PDF"}}, ["王小明.zip"], None),  # 包了一層 HK1/
+    ({"王小明/HK1.txt": HK1, "王小明/HK1_threebody_backup.txt": BACKUP}, ["王小明"],
+     "多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）"),
+    ({"王小明/HK1.txt": HK1, "王小明/筆記.txt": "上課筆記\n"}, ["王小明"],  # 情境 C：不叫 HK1、筆記不另算一個人
+     "多交的 1 個檔沒收（王小明：筆記.txt）"),
+    ({"王小明/作業/HK1.txt": HK1}, ["王小明"], None),  # 作業放在子資料夾裡：還是叫王小明，不叫「作業」
+    ({"王小明/HK1.txt": HK1, "王小明/圖/a.png": b"png"}, ["王小明"], None),  # 沒有 .py/.txt 的資料夾不算候選
+], ids=["H-folder", "I-files", "zip-with-test", "zip", "zip-HK1-folder", "folder-backup", "C-notes", "folder-deeper",
+        "folder-pictures"])
+def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", files)
+    said = hk.collect(HwApp(tmp_path, folder), [base / p for p in picked], folder)
+    names = ["李大華", "王小明"] if any(p.startswith("下載") for p in picked) else ["王小明"]
+    assert students_in(folder) == names
+    for name in names:
+        assert (folder / name / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1  # 正本是 HK1.txt，不是三體的舊版
+    assert said.startswith(f"收了 {len(names)} 份進 HK1（新 {len(names)}、覆蓋 0）")
+    if extras:
+        assert f"；{extras}" in said
+    assert "不是作業的檔" not in said and "不是 HK1 的作業檔" not in said
+
+
+@pytest.mark.parametrize("files, picked, names", [
+    ({"HK5.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD,
+                  "HK5/名單.txt": "王小明\n李大華\n"}}, ["HK5.zip"], ["B1", "B2", "B3", "名單"]),  # 情境 A
+    ({"HK5.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD, "說明.txt": "x\n"}},
+     ["HK5.zip"], ["B1", "B2", "B3", "說明"]),  # 包裝層旁邊多一個散檔
+    ({"HK5/B1/HK5.txt": GOOD}, ["HK5"], ["B1"]),  # 情境 B：名字像 HK5 的資料夾是包裝，不是學生
+    ({"HK5.zip": {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD}}, ["HK5.zip"], ["B1", "B2"]),
+    ({"HK5.zip": {"B11234567_王小明.txt": GOOD, "B11234568_李大華.txt": GOOD}}, ["HK5.zip"],
+     ["B11234567_王小明", "B11234568_李大華"]),  # TronClass 改過名的散檔
+    ({"下載/王小明.zip": {"HK5.txt": GOOD}, "下載/李大華.zip": {"HK5.txt": GOOD}, "下載/張三.zip": {"作業/HK5.txt": GOOD},
+      "下載/陳四.txt": GOOD, "下載/林五.py": GOOD}, ["下載"], ["張三", "李大華", "林五", "王小明", "陳四"]),
+    ({"全班/B1/HK5.txt": GOOD, "全班/B2/HK5.txt": GOOD}, ["全班"], ["B1", "B2"]),
+    ({"全班/B1.txt": GOOD, "全班/B2.txt": GOOD}, ["全班"], ["B1", "B2"]),  # 一人一個散檔的也是全班
+    ({"全班/HK5/B1/HK5.txt": GOOD, "全班/HK5/B2/x/HK5.txt": GOOD}, ["全班"], ["B1", "B2"]),  # 只包了一層：兩個人都在
+    ({"全班.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD}}, ["全班.zip"], ["B1", "B2"]),
+    ({"全班.zip": {"作業/B1/HK5.txt": GOOD, "作業/B2/筆記.txt": "x\n"}}, ["全班.zip"], ["B1", "B2"]),  # 拿不準：一人一份
+], ids=["A", "A-loose-beside-wrapper", "B", "zip-folders", "zip-renamed-files", "downloads", "folder-of-folders",
+        "folder-of-files", "folder-wrapped-once", "zip-wrapped-once", "zip-wrapped-unsure"])
+def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    base = put(tmp_path / "交", files)
+    said = hk.collect(HwApp(tmp_path, folder), [base / p for p in picked], folder)
+    assert students_in(folder) == sorted(names)
+    assert said.startswith(f"收了 {len(names)} 份進 HK5（新 {len(names)}、覆蓋 0）")
+    assert "多交的" not in said
+
+
+def test_collect_hints_when_names_look_like_files(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", {"下載/HK1.txt": HK1, "下載/李大華.txt": HK1, "下載/王小明.zip": ZIPPED})
+    said = hk.collect(HwApp(tmp_path, folder), [base / "下載"], folder)
+    assert students_in(folder) == ["下載"]  # 直接放著一個 HK1.txt：整個資料夾是一個人（不猜），但說出來
+    assert ("；多交的 3 個檔沒收（下載：李大華.txt、王小明.zip/HK1.txt、王小明.zip/HK1_threebody_backup.txt）"
+            in said)
+    assert said.endswith("；下載 直接放著一個 HK1.txt，所以整個資料夾被當成一個人：把它改成那個學生的名字再收一次")
+    _, again = course_with_hk(tmp_path / "b", "HK1")
+    said = hk.collect(HwApp(tmp_path, again), [base / "下載" / "HK1.txt"], again)
+    assert students_in(again) == ["HK1"]
+    assert said.endswith("；這幾份的名字看起來是檔名不是學生（HK1）：把檔（或 zip）改成學生的名字再收一次")
