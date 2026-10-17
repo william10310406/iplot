@@ -25,6 +25,7 @@ import time
 import traceback
 import unicodedata
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 KIT = "t2026fscSpace"
@@ -349,57 +350,78 @@ def _unzip(file: Path, dest: Path) -> int:
     return skipped
 
 
+UNOPENED, TOO_DEEP = "解不開", "第三層的 zip 沒解"  # 留在原地沒解的 zip 為什麼沒解（收作業那一句照這個寫）
+UNZIP_ERRORS = (zipfile.BadZipFile, OSError, EOFError, RuntimeError, NotImplementedError, zlib.error)  # 壞了、要密碼、不支援的壓縮法
+
+
 @dataclasses.dataclass
 class GatherResult:
     root: Path  # 收進來的東西都在這底下
-    skipped: int  # 擋掉的 zip 成員（.. 或絕對路徑）與解不開的 zip
+    skipped: int  # 擋掉的 zip 成員（.. 或絕對路徑）
     zips: dict[Path, str] = dataclasses.field(default_factory=dict)  # zip 解開的資料夾 → 那個 zip 的檔名
+    left: dict[Path, str] = dataclasses.field(default_factory=dict)  # 留在原地沒解的 .zip → UNOPENED 或 TOO_DEEP
 
 
-def _unzip_inside(folder: Path, levels: int, zips: dict[Path, str]) -> int:
-    """folder 底下的 zip 解在原地（解開的資料夾叫 zip 的名字，解完拿掉 zip）；levels 是還能往下解幾層。回擋掉幾個。"""
+def _try_unzip(file: Path, dest: Path) -> int | None:
+    """_unzip；解不開（不是 zip、壞了、要密碼、不支援的壓縮法）回 None，解了一半的拿掉：一個 zip 要嘛全解，要嘛整個列名字。"""
+    if not zipfile.is_zipfile(file):
+        return None
+    try:
+        return _unzip(file, dest)
+    except UNZIP_ERRORS:
+        shutil.rmtree(dest, ignore_errors=True)
+        return None
+
+
+def _unzip_inside(folder: Path, levels: int, zips: dict[Path, str], left: dict[Path, str]) -> int:
+    """folder 底下的 zip 解在原地（解開的資料夾叫 zip 的名字，解完拿掉 zip）；levels 是還能往下解幾層。
+    解不開的、解到第三層沒解的留在原地，記在 left。回擋掉幾個。"""
     skipped = 0
-    if levels <= 0:
-        return skipped
-    # 先列好：這一輪解出來的 zip 交給下一層。副檔名不分大小寫（.ZIP），但只認 .zip（.docx 也是 zip）
-    for inner in sorted(p for p in folder.rglob("*") if p.suffix.lower() == ".zip"):
-        if inner.is_file() and zipfile.is_zipfile(inner):
-            dest = _unique(inner.with_name(inner.stem))
-            try:
-                skipped += _unzip(inner, dest)
-                inner.unlink()
-            except (zipfile.BadZipFile, OSError):
-                skipped += 1
-                continue
-            zips[dest] = _nfc(inner.name)
-            skipped += _unzip_inside(dest, levels - 1, zips)
+    # 先列好：這一輪解出來的 zip 交給下一層。副檔名不分大小寫（.ZIP），但只認 .zip（.docx 也是 zip）；
+    # __MACOSX/、. 開頭的不碰（Finder 壓縮帶的 ._王小明.zip 不是 zip，也不是作業）
+    for inner in sorted(p for p in folder.rglob("*")
+                        if p.suffix.lower() == ".zip" and p.is_file() and not _hidden(p, folder)):
+        if levels <= 0:
+            left[inner] = TOO_DEEP
+            continue
+        dest = _unique(inner.with_name(inner.stem))
+        got = _try_unzip(inner, dest)
+        if got is None:
+            left[inner] = UNOPENED
+            continue
+        inner.unlink()
+        zips[dest] = _nfc(inner.name)
+        skipped += got + _unzip_inside(dest, levels - 1, zips, left)
     return skipped
 
 
 def gather(paths: list[Path], into: Path, zips_in_folders: bool = False) -> GatherResult:
     """把拖進來（或選進來）的東西都放進 into/原件/：zip 解開到 原件/<zip 名>/（裡面的 zip 再解一層），
     資料夾整個複製進 原件/<名>/，檔案複製進 原件/。zips_in_folders（收作業）：選進來的資料夾裡的 zip 也解，
-    解開的 zip 裡再有 zip 再解一次，第三層不解（TronClass 下載下來一個學生就是一個 .zip）。"""
+    解開的 zip 裡再有 zip 再解一次，第三層不解（TronClass 下載下來一個學生就是一個 .zip）。
+    只解副檔名是 .zip 的；解不開的、第三層沒解的照原樣留著，記在 GatherResult.left。"""
     root = Path(into) / "原件"
     root.mkdir(parents=True, exist_ok=True)
-    skipped, zips = 0, {}
+    skipped, zips, left = 0, {}, {}
     for path in map(Path, paths):
-        if path.is_file() and zipfile.is_zipfile(path):
+        if path.is_file() and path.suffix.lower() == ".zip":
             dest = _unique(root / _nfc(path.stem))
-            try:
-                skipped += _unzip(path, dest)
-            except (zipfile.BadZipFile, OSError):
-                skipped += 1
+            got = _try_unzip(path, dest)
+            if got is None:  # 照原樣放進來，記著：收作業那一句列它的名字
+                copy = _unique(root / _nfc(path.name), keep_suffix=True)
+                shutil.copy2(path, copy)
+                left[copy] = UNOPENED
                 continue
             zips[dest] = _nfc(path.name)
-            skipped += _unzip_inside(dest, 1, zips)  # 只解一層：這裡解出來的 zip 不再往下找
+            skipped += got + _unzip_inside(dest, 1, zips, left)  # 只解一層：這裡解出來的 zip 不再往下找
         elif path.is_dir():
             dest = _unique(root / _nfc(path.name))
             _copytree(path, dest)
-            skipped += _unzip_inside(dest, 2 if zips_in_folders else 0, zips)
+            if zips_in_folders:
+                skipped += _unzip_inside(dest, 2, zips, left)
         elif path.is_file():
             shutil.copy2(path, _unique(root / _nfc(path.name), keep_suffix=True))
-    return GatherResult(root, skipped, zips)
+    return GatherResult(root, skipped, zips, left)
 
 
 def _hidden(file: Path, root: Path) -> bool:
@@ -452,7 +474,8 @@ def import_kit(app, paths: list[Path], course: Path) -> str:
             else:
                 (target.parent / f"{hk}Space").mkdir(exist_ok=True)
             write_stub(course / hk)
-        said = f"匯入了 {_hk_list(found)}（新 {new}、更新 {updated}）{_skipped_note(got.skipped)}"
+        broken = sum(1 for why in got.left.values() if why == UNOPENED)
+        said = f"匯入了 {_hk_list(found)}（新 {new}、更新 {updated}）{_skipped_note(got.skipped + broken)}"
         app.log(said)
         app.rescan()
         return said
@@ -538,16 +561,22 @@ class Student:
     files: list[Path]  # 它底下收得進來的檔，正本排第一，其他是多交的
 
 
-def _students_in(thing: Path, hk: str, zips: dict[Path, str], wrapper: bool = False) -> list[Student]:
+def _students_in(thing: Path, hk: str, zips: dict[Path, str], left: list[Path], wrapper: bool = False) -> list[Student]:
     """誰是一個學生（設計第 7 節）：一樣東西（檔、zip、資料夾）＝一個學生，名字是它的名字；全班一包是包裝，
-    裡面的每個候選各自再看一次。wrapper：thing 一定是包裝（批次模式給的 zip 就是全班那一包）。"""
+    裡面的每個候選各自再看一次。wrapper：thing 一定是包裝（批次模式給的 zip 就是全班那一包）。
+    學生那一層收不到東西的（選進來的、包裝直接底下的：不是 .py/.txt 的檔、裡面沒有 .py/.txt 的）放進 left。"""
     if thing.is_file():
-        return [Student(thing, thing.stem, [thing])] if _homework_file(thing) else []
+        if _homework_file(thing):
+            return [Student(thing, thing.stem, [thing])]
+        left.append(thing)
+        return []
     kids = _candidates(thing)
     if not kids:
+        left.append(thing)
         return []
     if wrapper or _is_wrapper(thing, kids, hk, zips):
-        return [s for kid in kids for s in _students_in(kid, hk, zips)]
+        left += [k for k in _visible(thing) if k not in kids]
+        return [s for kid in kids for s in _students_in(kid, hk, zips, left)]
     files = _homework_files(thing)
     primary = min(files, key=lambda f: (-_homework_rank(f, hk), len(f.relative_to(thing).parts)))  # 同一層：淺的、排前面的
     return [Student(thing, _name_of(thing, zips), [primary, *(f for f in files if f != primary)])]
@@ -560,6 +589,29 @@ def _shown(file: Path, thing: Path, zips: dict[Path, str]) -> str:
         here = here / part
         parts.append(zips.get(here, part))
     return "/".join(parts)
+
+
+def _not_collected(things: list[Path], got: GatherResult) -> tuple[list[str], list[Path]]:
+    """學生那一層沒收的東西寫成那一句的幾項（少收的東西一定看得到）；回（那幾項, 列了名字的檔與資料夾）。
+    資料夾（或解開的 zip）裡有沒解的 zip 就列那幾個 zip，不然列它自己；學生自己那份殼 hk_page.py 不列。"""
+    groups: dict[str, list[Path]] = {"file": [], "empty": [], UNOPENED: [], TOO_DEEP: []}
+    for thing in things:
+        if thing.is_file():
+            if thing.suffix.lower() not in (".py", ".txt"):
+                groups[got.left.get(thing, "file")].append(thing)
+            continue
+        inner = [z for z in got.left if z.is_relative_to(thing)]
+        for z in inner:
+            groups[got.left[z]].append(z)
+        if not inner:
+            groups["empty"].append(thing)
+    notes = []
+    for key, what in (("file", "個檔不是 .py/.txt"), ("empty", "個資料夾或 zip 裡沒有 .py/.txt"),
+                      (UNOPENED, "個 zip 解不開"), (TOO_DEEP, f"個{TOO_DEEP}")):
+        if groups[key]:
+            shown = sorted(_shown(p, got.root, got.zips) for p in groups[key])
+            notes.append(f"{len(shown)} {what}，沒收（{'、'.join(shown)}）")
+    return notes, [p for paths in groups.values() for p in paths]
 
 
 def _homework_rank(file: Path, hk: str) -> int:
@@ -679,8 +731,6 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         if not _homework_files(got.root):
             app.log(NOTHING)
             return NOTHING
-        others = sum(1 for f in got.root.rglob("*")
-                     if f.is_file() and not _hidden(f, got.root) and f.suffix.lower() not in (".py", ".txt"))
         space = kit_space(hk_folder, hk)
         # 不能拿來當學生名字的：老師的東西與 HKn/ 裡其他不是學生資料夾的（不分大小寫比；學生資料夾可以覆蓋）
         taken = {KIT, f"{hk}Space", "iplot.py", "hk_page.py", LOG, ".history", "__pycache__"}
@@ -692,8 +742,13 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         unsafe = got.skipped
         imports: set[str] = set()
         has_shell = SHELL.is_file()  # 批次模式只複製了 hk_tk.py：新格式不收（補上殼再跑就對了，不用刪東西）
+        left: list[Path] = []
         students = [s for top in sorted(_visible(got.root), key=lambda p: _nfc(p.name))
-                    for s in _students_in(top, hk, got.zips, wrapper=batch)]  # 批次模式給的 zip 就是全班那一包
+                    for s in _students_in(top, hk, got.zips, left, wrapper=batch)]  # 批次模式給的 zip 就是全班那一包
+        not_collected, named = _not_collected(left, got)
+        others = sum(1 for f in got.root.rglob("*")  # 學生交的 zip、資料夾裡更深的（pdf、圖）只計數
+                     if f.is_file() and not _hidden(f, got.root) and f.suffix.lower() not in (".py", ".txt")
+                     and not any(f.is_relative_to(p) for p in named))
         placed: list[tuple[str, Student]] = []
         for student in students:
             file = student.files[0]
@@ -753,6 +808,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         if lists["no-shell"]:
             notes.append(f"{len(lists['no-shell'])} 份新格式沒收：hk_page.py 不在 hk_tk.py 旁邊"
                          f"（{'、'.join(lists['no-shell'])}）")
+        notes += not_collected
         if others:
             notes.append(f"略過 {others} 個不是 .py/.txt 的檔")
         extra = [(name, s) for name, s in placed if len(s.files) > 1]
@@ -760,7 +816,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
             listed = "；".join(f"{name}：{'、'.join(_shown(f, s.thing, got.zips) for f in s.files[1:])}" for name, s in extra)
             notes.append(f"多交的 {sum(len(s.files) - 1 for _, s in extra)} 個檔沒收（{listed}）")
         if unsafe:
-            notes.append(_skipped_note(unsafe)[1:])
+            notes.append(f"擋掉 {unsafe} 個路徑不安全（.. 或絕對路徑）的東西")  # 解不開的 zip 在上面列了名字
         if space is None:
             notes.append(f"老師的 {hk}Space 還沒匯入，要用資料檔的 case 會缺檔")
         pkgs = sorted({pip_name(n) for n in imports}, key=str.lower)

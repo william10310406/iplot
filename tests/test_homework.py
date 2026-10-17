@@ -848,8 +848,9 @@ def test_collect_counts_files_it_skips(tmp_path, load):
                                              "__MACOSX/B1/._HK5.txt": "x", "../逃.txt": "x"})
     said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
     assert said.startswith("收了 1 份進 HK5（新 1、覆蓋 0）")
-    assert "；略過 2 個不是 .py/.txt 的檔" in said
-    assert "；擋掉 1 個路徑不安全" in said
+    assert "；1 個資料夾或 zip 裡沒有 .py/.txt，沒收（HK5.zip/B2）" in said  # 學生那一層的列名字
+    assert "；略過 1 個不是 .py/.txt 的檔" in said  # B1 交的 zip 裡的 pdf 只計數
+    assert "；擋掉 1 個路徑不安全（.. 或絕對路徑）的東西" in said  # 解不開的 zip 另外列名字，不在這一句
 
 
 def test_collect_says_when_the_teachers_space_is_missing(tmp_path, load):
@@ -1702,6 +1703,60 @@ def test_collect_keeps_the_exact_hk_file_over_backups(tmp_path, load):
         assert (folder / name / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1
     assert ("；多交的 3 個檔沒收（李大華：0舊/HK1.txt；王小明：HK1-backup.txt、HK1_threebody_backup.txt）"
             in said)
+
+
+# ── 再審延後的第 2 條：學生那一層沒收的東西列名字 ──
+
+
+def encrypted(data):
+    """把 zip 的每個成員標成加密（內容沒加密，但 zipfile 讀的時候就要密碼）。"""
+    data = bytearray(data)
+    for sig, flag_at in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        at = data.find(sig)
+        while at != -1:
+            data[at + flag_at] |= 1
+            at = data.find(sig, at + 4)
+    return bytes(data)
+
+
+@pytest.mark.parametrize("files, picked, names, notes", [
+    ({"王小明.rar": b"Rar!", "陳四.docx": zip_bytes({"word/document.xml": "<w/>"}), "李大華.txt": HK1, "張三.txt": HK1},
+     ["王小明.rar", "陳四.docx", "李大華.txt", "張三.txt"], ["張三", "李大華"],  # 面板上多選；.docx 也是 zip，但不解
+     ["2 個檔不是 .py/.txt，沒收（王小明.rar、陳四.docx）"]),
+    ({"下載/王小明.zip": b"PK\x03\x04garbage", "下載/李大華.txt": HK1, "下載/張三.txt": HK1}, ["下載"], ["張三", "李大華"],
+     ["1 個 zip 解不開，沒收（下載/王小明.zip）"]),
+    ({"王小明.zip": encrypted(zip_bytes({"HK1.txt": HK1})), "李大華.txt": HK1}, ["王小明.zip", "李大華.txt"], ["李大華"],
+     ["1 個 zip 解不開，沒收（王小明.zip）"]),  # 要密碼的 zip：不中斷整批
+    ({"下載/全班.zip": {"組A.zip": zip_bytes({"王小明.zip": zip_bytes({"HK1.txt": HK1}),
+                                              "__MACOSX/._王小明.zip": b"\x00\x05\x16\x07"})},  # Finder 壓縮帶的
+      "下載/李大華.txt": HK1, "下載/張三.txt": HK1}, ["下載"], ["張三", "李大華"],
+     ["1 個第三層的 zip 沒解，沒收（下載/全班.zip/組A.zip/王小明.zip）"]),
+    ({"HK1.zip": {"B1/HK1.txt": HK1, "B2/報告.pdf": b"%PDF", "B3.docx": b"docx", "B4/": b""}}, ["HK1.zip"], ["B1"],
+     ["1 個檔不是 .py/.txt，沒收（HK1.zip/B3.docx）",  # 全班一包裡：包裝直接底下的
+      "2 個資料夾或 zip 裡沒有 .py/.txt，沒收（HK1.zip/B2、HK1.zip/B4）"]),
+], ids=["files", "corrupt-zip-in-folder", "encrypted-zip", "third-level-zip", "class-zip"])
+def test_collect_names_what_it_could_not_collect(tmp_path, load, files, picked, names, notes):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", files)
+    said = hk.collect(HwApp(tmp_path, folder), [base / p for p in picked], folder)
+    assert students_in(folder) == sorted(names)
+    assert said.startswith(f"收了 {len(names)} 份進 HK1（新 {len(names)}、覆蓋 0）")
+    for note in notes:
+        assert f"；{note}" in said
+    assert said.count("沒收") == len(notes)
+    assert "略過" not in said and "擋掉" not in said  # 列了名字的不再算進數字裡
+
+
+def test_collect_only_counts_what_is_deeper_inside_a_student(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", {"王小明.zip": {"HK1.txt": HK1, "報告.pdf": b"%PDF",
+                                                 "舊.zip": zip_bytes({"a.zip": zip_bytes({"HK1.txt": HK1})})}})
+    said = hk.collect(HwApp(tmp_path, folder), [base / "王小明.zip"], folder)
+    assert students_in(folder) == ["王小明"]
+    assert "；略過 2 個不是 .py/.txt 的檔" in said  # 學生 zip 裡的 pdf、第三層的 zip：只計數
+    assert "沒收" not in said
 
 
 # ── 再審 Task 2：批次模式明說，不猜 ──
