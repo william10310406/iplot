@@ -1689,6 +1689,27 @@ def test_collect_hints_when_names_look_like_files(tmp_path, load):
     assert said.endswith("；這幾份的名字看起來是檔名不是學生（HK1）：把檔（或 zip）改成學生的名字再收一次")
 
 
+FOLD_HINT = "；下載 直接放著一個 HK1.txt，所以整個資料夾被當成一個人：把它改成那個學生的名字再收一次"
+
+
+@pytest.mark.parametrize("files, picked, hint", [
+    ({"下載/HK1.txt": HK1, "下載/王小明.zip": ZIPPED}, ["下載"], FOLD_HINT),  # 別人的 zip 被折進來：提示
+    ({"李大華/HK1.txt": HK1, "李大華/0舊/HK1.txt": BACKUP}, ["李大華"], None),  # 自己放在子資料夾的舊版
+    ({"王小明.zip": {"HK1.txt": HK1, "old/HK1_v1.txt": BACKUP}}, ["王小明.zip"], None),  # zip 本來就是學生的名字
+    ({"王小明.zip": {"HK1.txt": HK1, "舊.zip": zip_bytes({"HK1.txt": BACKUP})}}, ["王小明.zip"], None),
+], ids=["other-zip-in-folder", "own-old-version", "own-zip", "own-zip-with-old-zip"])
+def test_collect_fold_hint_only_when_a_folder_swallows_someone_elses_zip(tmp_path, load, files, picked, hint):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", files)
+    said = hk.collect(HwApp(tmp_path, folder), [base / p for p in picked], folder)
+    assert len(students_in(folder)) == 1 and "；多交的 " in said
+    if hint:
+        assert said.endswith(hint)
+    else:
+        assert "直接放著" not in said
+
+
 # ── 再審 Task 1：正本先看檔名（情境 A 在 test_collect_unwraps_a_class_bundle）──
 
 

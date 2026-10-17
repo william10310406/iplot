@@ -835,18 +835,20 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
 
 def _hints(placed: list[tuple[str, Student]], zips: dict[Path, str]) -> list[str]:
     """句尾的提示（設計第 7 節「誰是一個學生」第 4 條：不猜，但看得到）：名字看起來是檔名的；
-    直接放著一個 HKn.txt、所以整個資料夾（或 zip）被當成一個人，而子資料夾、子 zip 裡另有作業被折進多交的。"""
+    資料夾直接放著一個 HKn.txt、所以整個資料夾被當成一個人，而它裡面的 zip 裡另有作業被折進多交的
+    （別人的 zip）。子資料夾裡的（自己放的舊版）不提示；zip 本來就是一個學生（TronClass 一人一個 zip），不提示。"""
     hints = []
     looks = [name for name, _ in placed if hk_in_name(name)]
     if looks:
         hints.append(f"這幾份的名字看起來是檔名不是學生（{'、'.join(looks)}）：把檔（或 zip）改成學生的名字再收一次")
     for _, s in placed:
         primary = s.files[0]
-        if primary.parent == s.thing and any(f.parent != s.thing and classify(f)[0] in ("old", "new")
-                                             for f in s.files[1:]):
-            what = "zip" if s.thing in zips else "資料夾"
-            hints.append(f"{zips.get(s.thing, s.thing.name)} 直接放著一個 {primary.name}，"
-                         f"所以整個{what}被當成一個人：把它改成那個學生的名字再收一次")
+        if s.thing in zips or primary.parent != s.thing:
+            continue
+        if any(classify(f)[0] in ("old", "new") and any(p in zips for p in f.parents if p.is_relative_to(s.thing))
+               for f in s.files[1:]):
+            hints.append(f"{s.thing.name} 直接放著一個 {primary.name}，所以整個資料夾被當成一個人："
+                         "把它改成那個學生的名字再收一次")
     return hints
 
 
