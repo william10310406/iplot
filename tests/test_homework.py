@@ -1710,6 +1710,24 @@ def test_collect_fold_hint_only_when_a_folder_swallows_someone_elses_zip(tmp_pat
         assert "直接放著" not in said
 
 
+@pytest.mark.parametrize("files, picked, names, batch", [
+    ({"全班/B1/HK1.txt": HK1}, ["全班"], ["全班"], False),  # 跟 王小明/作業/HK1.txt 長得一樣
+    ({"全班.zip": {"B1/": b"", "B2/HK1.txt": HK1, "B3/": b""}}, ["全班.zip"], ["全班"], False),  # 別人是空資料夾
+    ({"HK1.zip": {"全班/B1/": b"", "全班/B2/HK1.txt": HK1}}, ["HK1.zip"], ["全班"], True),  # 批次模式多包一層
+    ({"王小明/v1/HK1.txt": BACKUP, "王小明/v2/HK1.txt": HK1}, ["王小明"], ["v1", "v2"], False),  # 跟 全班/{B1,B2} 一樣
+    ({"王小明.zip": {"main.txt": HK1, "backup.txt": BACKUP}}, ["王小明.zip"], ["backup", "main"], False),  # 沒有 HK1.txt
+    ({"王小明.zip": {"HK1.zip": zip_bytes({"sub/HK1.txt": HK1})}}, ["王小明.zip"], ["sub"], False),  # 跟 全班.zip/HK1/B1
+], ids=["class-folder-one-student", "class-zip-one-real-student", "batch-class-folder-one-student", "v1-v2",
+        "zip-without-exact-name", "hk-zip-inside-student-zip"])
+def test_collect_known_wrong_names_are_the_ones_docs_list(tmp_path, load, files, picked, names, batch):
+    hk = load("hk_tk")  # docs/08 8.4「收不對、不修的」：跟對的收法長得一樣，名字裡又沒有 HK，所以沒有提示
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", files)
+    said = hk.collect(HwApp(tmp_path, folder), [base / p for p in picked], folder, hk="HK1", batch=batch)
+    assert students_in(folder) == names  # 沒有人少收：每份作業都在某一格裡
+    assert "看起來是檔名" not in said and "直接放著" not in said
+
+
 # ── 再審 Task 1：正本先看檔名（情境 A 在 test_collect_unwraps_a_class_bundle）──
 
 
