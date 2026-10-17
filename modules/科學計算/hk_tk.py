@@ -1044,7 +1044,7 @@ def _batch_args(argv: list[str]):
     import argparse
 
     p = argparse.ArgumentParser(prog="hk_tk.py", description="批次模式：收一份作業的 zip，開全班名單")
-    p.add_argument("--batch", required=True, type=Path, help="TronClass 下載的 zip")
+    p.add_argument("--batch", required=True, type=Path, help="TronClass 下載的 zip（或放一人一個 .zip、.txt 的資料夾）")
     p.add_argument("--kit", type=Path, help="老師的 t2026fscSpace 資料夾（HKnSpace/ 從這裡拿）")
     p.add_argument("--out", type=Path, help="收進哪裡（預設：zip 旁邊的 <zip 名>_收件）")
     p.add_argument("--venv", type=Path, help="套件裝進哪個 venv（預設：zip 旁邊的 科學計算-venv）")

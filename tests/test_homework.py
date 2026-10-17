@@ -1751,3 +1751,14 @@ def test_roster_without_the_shell_does_not_crash(tmp_path, load):
     rows = hk.roster(out)
     assert [name for name, _ in rows] == ["B1", "B2"]
     assert all("檢查不過" not in mark for _, mark in rows)
+
+
+def test_batch_collects_a_folder_of_student_files(tmp_path, load):
+    hk = load("hk_tk")
+    down = put(tmp_path / "下載", {"王小明.zip": ZIPPED, "李大華.txt": HK1})  # TronClass：一人一個 .zip 或 .txt
+    said = []
+    out = hk.batch(down, hk="HK1", kit=teacher_kit(tmp_path, hks=("HK1",)), say=said.append)
+    assert out == tmp_path / "下載_收件"
+    assert students_in(out) == ["李大華", "王小明"]
+    assert (out / "王小明" / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1
+    assert said[-1].startswith("收了 2 份進 HK1（新 2、覆蓋 0）；多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）")
