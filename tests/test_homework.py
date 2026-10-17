@@ -1566,3 +1566,41 @@ def test_collect_names_a_selected_folder_after_itself_unless_it_holds_a_class(tm
     assert sorted(p.name for p in folder.iterdir() if (p / "t2026fscSpace" / "HK5.txt").exists()
                   and p.name != "t2026fscSpace") == names
     assert said.startswith(f"收了 {len(names)} 份進 HK5")
+
+
+# ── 再審（2026-10-17）：一樣東西＝一個學生（工作單 docs/plans/2026-10-17-M6-再審.md）──
+
+SAMPLES = Path(__file__).resolve().parent / "fixtures" / "科學計算"  # 研究助理給的標準樣本：學生交的不會比這複雜
+HK1 = (SAMPLES / "HK1.txt").read_bytes()  # 二體，舊格式的 HK1
+BACKUP = (SAMPLES / "HK1_threebody_backup.txt").read_bytes()  # 三體舊版：classify 一樣認得是 HK1
+
+
+def put(base, files):
+    """{相對路徑: bytes 或 str}；名字以 .zip 結尾、值是 dict 的，做成那個 zip（值是它的成員）。回 base。"""
+    base = Path(base)
+    for rel, data in files.items():
+        target = base / rel
+        if isinstance(data, dict):
+            make_zip(target, data)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
+    return base
+
+
+def test_gather_unzips_zips_inside_a_selected_folder(tmp_path, load):
+    hk = load("hk_tk")
+    third = make_zip(tmp_path / "src" / "c.zip", {"c.txt": "第三層"})
+    second = make_zip(tmp_path / "src" / "b.zip", {"b.txt": "第二層", "c.zip": third.read_bytes()})
+    down = put(tmp_path / "下載", {"王小明.zip": {"HK1.txt": HK1, "HK1_threebody_backup.txt": BACKUP,
+                                                  "b.zip": second.read_bytes()},
+                                    "李大華.txt": HK1})
+    got = hk.gather([down], tmp_path / "work", zips_in_folders=True)
+    me = got.root / "下載" / "王小明"
+    assert (me / "HK1.txt").read_bytes() == HK1 and (me / "HK1_threebody_backup.txt").read_bytes() == BACKUP
+    assert not (got.root / "下載" / "王小明.zip").exists()  # 解開了就不留 zip
+    assert (me / "b" / "b.txt").read_text(encoding="utf-8") == "第二層"  # 解開的 zip 裡再有 zip：再解一次
+    assert (me / "b" / "c.zip").is_file() and not (me / "b" / "c").exists()  # 第三層不解
+    assert (got.root / "下載" / "李大華.txt").read_bytes() == HK1
+    kit = hk.gather([down], tmp_path / "kit-work")  # 匯入作業包照舊：選進來的資料夾整個照原樣複製（老師的 Space 裡的 zip 不動）
+    assert (kit.root / "下載" / "王小明.zip").is_file()

@@ -355,9 +355,28 @@ class GatherResult:
     unzipped: set[Path] = dataclasses.field(default_factory=set)  # root 底下哪幾個是 zip 解開的（不是選進來的資料夾）
 
 
-def gather(paths: list[Path], into: Path) -> GatherResult:
+def _unzip_inside(folder: Path, levels: int) -> int:
+    """folder 底下的 zip 解在原地（解開的資料夾叫 zip 的名字，解完拿掉 zip）；levels 是還能往下解幾層。回擋掉幾個。"""
+    skipped = 0
+    if levels <= 0:
+        return skipped
+    for inner in sorted(folder.rglob("*.zip")):  # 先列好：這一輪解出來的 zip 交給下一層
+        if inner.is_file() and zipfile.is_zipfile(inner):
+            dest = _unique(inner.with_name(inner.stem))
+            try:
+                skipped += _unzip(inner, dest)
+                inner.unlink()
+            except (zipfile.BadZipFile, OSError):
+                skipped += 1
+                continue
+            skipped += _unzip_inside(dest, levels - 1)
+    return skipped
+
+
+def gather(paths: list[Path], into: Path, zips_in_folders: bool = False) -> GatherResult:
     """把拖進來（或選進來）的東西都放進 into/原件/：zip 解開到 原件/<zip 名>/（裡面的 zip 再解一層），
-    資料夾整個複製進 原件/<名>/，檔案複製進 原件/。"""
+    資料夾整個複製進 原件/<名>/，檔案複製進 原件/。zips_in_folders（收作業）：選進來的資料夾裡的 zip 也解，
+    解開的 zip 裡再有 zip 再解一次，第三層不解（TronClass 下載下來一個學生就是一個 .zip）。"""
     root = Path(into) / "原件"
     root.mkdir(parents=True, exist_ok=True)
     skipped, unzipped = 0, set()
@@ -370,15 +389,11 @@ def gather(paths: list[Path], into: Path) -> GatherResult:
                 skipped += 1
                 continue
             unzipped.add(dest)
-            for inner in sorted(dest.rglob("*.zip")):  # 只解一層：這裡解出來的 zip 不再往下找
-                if inner.is_file() and zipfile.is_zipfile(inner):
-                    try:
-                        skipped += _unzip(inner, _unique(inner.with_name(inner.stem)))
-                        inner.unlink()
-                    except (zipfile.BadZipFile, OSError):
-                        skipped += 1
+            skipped += _unzip_inside(dest, 1)  # 只解一層：這裡解出來的 zip 不再往下找
         elif path.is_dir():
-            _copytree(path, _unique(root / _nfc(path.name)))
+            dest = _unique(root / _nfc(path.name))
+            _copytree(path, dest)
+            skipped += _unzip_inside(dest, 2 if zips_in_folders else 0)
         elif path.is_file():
             shutil.copy2(path, _unique(root / _nfc(path.name), keep_suffix=True))
     return GatherResult(root, skipped, unzipped)
@@ -611,7 +626,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         python = venv_python(course)
     work = Path(tempfile.mkdtemp(prefix="hk-collect-"))
     try:
-        got = gather([Path(p) for p in paths], work)
+        got = gather([Path(p) for p in paths], work, zips_in_folders=True)
         files, others = [], 0
         for f in sorted(got.root.rglob("*")):
             if f.is_file() and not _hidden(f, got.root):
