@@ -1660,3 +1660,35 @@ def test_collect_hints_when_names_look_like_files(tmp_path, load):
     said = hk.collect(HwApp(tmp_path, again), [base / "下載" / "HK1.txt"], again)
     assert students_in(again) == ["HK1"]
     assert said.endswith("；這幾份的名字看起來是檔名不是學生（HK1）：把檔（或 zip）改成學生的名字再收一次")
+
+
+# ── 再審 Task 1：合併只在確定同一個學生時做；正本先看檔名 ──
+
+
+@pytest.mark.parametrize("members, names", [
+    ({"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD, "HK5/名單.txt": "王小明\n李大華\n"},
+     ["B1", "B2", "B3", "名單"]),  # 情境 A：zip 裡包一層、包裝層多一個散檔
+    ({"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD, "HK5/B3/HK5.txt": GOOD, "說明.txt": "收作業說明\n"},
+     ["B1", "B2", "B3", "說明"]),  # 包裝層旁邊多一個散檔
+])
+def test_collect_never_merges_students_when_the_wrapper_has_a_loose_file(tmp_path, load, members, names):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    said = hk.collect(HwApp(tmp_path, folder), [make_zip(tmp_path / "下載" / "HK5.zip", members)], folder)
+    assert students_in(folder) == sorted(names)
+    assert said.startswith("收了 4 份進 HK5（新 4、覆蓋 0）")
+    assert f"；1 份不是 HK5 的作業檔（{names[-1]}）" in said  # 散檔照舊一檔一人、照收、列出來
+    assert "多交的" not in said and "不是作業的檔" not in said
+
+
+def test_collect_keeps_the_exact_hk_file_over_backups(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", {"王小明/HK1.txt": HK1, "王小明/HK1_threebody_backup.txt": BACKUP,
+                                 "王小明/HK1-backup.txt": BACKUP,  # 排在 HK1.txt 前面，classify 一樣認得
+                                 "李大華/0舊/HK1.txt": BACKUP, "李大華/HK1.txt": HK1})  # 一樣叫 HK1.txt：淺的那個
+    said = hk.collect(HwApp(tmp_path, folder), [base / "王小明", base / "李大華"], folder)
+    for name in ("王小明", "李大華"):
+        assert (folder / name / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1
+    assert ("；多交的 3 個檔沒收（李大華：0舊/HK1.txt；王小明：HK1-backup.txt、HK1_threebody_backup.txt）"
+            in said)

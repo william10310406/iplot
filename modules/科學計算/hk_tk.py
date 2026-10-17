@@ -544,7 +544,7 @@ def _students_in(thing: Path, hk: str, zips: dict[Path, str], wrapper: bool = Fa
     if wrapper or _is_wrapper(thing, kids, hk, zips):
         return [s for kid in kids for s in _students_in(kid, hk, zips)]
     files = _homework_files(thing)
-    primary = max(files, key=lambda f: _homework_rank(f, hk))  # 一樣像取前面那個
+    primary = min(files, key=lambda f: (-_homework_rank(f, hk), len(f.relative_to(thing).parts)))  # 同一層：淺的、排前面的
     return [Student(thing, _name_of(thing, zips), [primary, *(f for f in files if f != primary)])]
 
 
@@ -557,10 +557,13 @@ def _shown(file: Path, thing: Path, zips: dict[Path, str]) -> str:
     return "/".join(parts)
 
 
-def _homework_rank(file: Path, hk: str) -> tuple[bool, bool, bool]:
-    """越大越像這份作業：classify 認得、檔名像 HKn、內容就是 HKn（新格式不寫 HKn，算是）。一樣大取前面那個。"""
-    kind, found = classify(file)
-    return kind in ("old", "new"), hk_in_name(file.stem) == hk, kind == "new" or found == hk
+def _homework_rank(file: Path, hk: str) -> int:
+    """越大越像這份作業的正本（四層）：3 檔名就是 HKn（HK1.txt、HK1.py）；2 classify 認得、檔名含 HKn；
+    1 classify 認得；0 其他。標準樣本的備份 HK1_threebody_backup.txt 也是完整的舊格式 HK1，只能靠檔名分。"""
+    if _exact(file, hk):
+        return 3
+    known = classify(file)[0] in ("old", "new")
+    return (2 if hk_in_name(file.stem) == hk else 1) if known else 0
 
 
 def kit_space(hk_folder: Path, hk: str) -> Path | None:
