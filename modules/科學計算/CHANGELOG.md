@@ -18,7 +18,7 @@
 - 收作業兩種格式都收（D99）：用 ast 分辨、不執行（頂層有 `HOMEWORK = dict(…)` 是新格式，有 `def HKn(` 又用到 `LF_subWIN` 是舊格式），同一個 `HKn/` 底下兩種並存。新格式的學生資料夾裡是他的檔（存成 `iplot.py`）、課程的 `hk_page.py` 與老師的 `HKnSpace/` 複本，沒有墊片；學生 zip 裡自己帶的 `hk_page.py` 不收。同一個人上次舊、這次新（或反過來）就整個資料夾重建，只動真的學生資料夾（名字不分大小寫比，老師的東西不會被蓋掉或砍掉）。套件另外讀 `REQUIRES` 那一行；`--check` 不過的照收、列名字與第一條；有新格式時，總結那句多「舊格式 a、新格式 b」。批次名單也開得了新格式的學生，標「檢查不過」。
 - `examples/`：HK2（靜態圖：電偶極、有限差分解 Poisson 方程）、HK6（動畫：淺水波 1D、2D）、HK8（純文字：n-gram）從舊格式搬成新格式，各兩個 case，`--check` 都過。物理照抄、只換殼；舊格式 `ich==1` 那段畫出來空白或畫壞的地方，`draw` 照 `ich==0` 要畫的畫。是規範的對照物，也是下一份作業的起點；這個資料夾沒有 `iplot.py`，面板上不會出現。
 - 作業規範 v0（repo 的 `docs/09_作業規範.md`）：一份作業＝一個 Python 檔；上半是作業（六個名字 `REQUIRES`、`NAME`、`DOCS`、`NOTE`、`DATA`、`CASES`，三個函式 `compute`、`draw`、`stats`），下半六行固定、不改；學生 `python3 HKn.py`、助教在 iPLoT 裡按、批次名單跑的都是同一個檔。附舊格式→新格式的對照表與發作業前的檢查；下學期畫面換成網頁時約定不變。
-- 量出來的數字：`tests/test_homework.py` 102 個測試、`tests/test_hk_page.py` 60 個；`hk_tk.py` 927 行、`hk_page.py` 461 行；`examples/` 的 HK2、HK6、HK8 各 181、252、127 行。
+- 量出來的數字：`tests/test_homework.py` 112 個測試、`tests/test_hk_page.py` 61 個；`hk_tk.py` 985 行、`hk_page.py` 463 行；`examples/` 的 HK2、HK6、HK8 各 181、252、127 行。
 
 ### 這一版沒有做
 - 新格式的網頁畫面：殼 v0 的畫面是 matplotlib 自己的視窗，網頁是下學期的殼 v1。舊格式的檔不會自動轉成新格式。
