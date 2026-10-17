@@ -973,7 +973,7 @@ def test_batch_collects_next_to_the_zip_with_kit_space(tmp_path, load):
     assert (out / "B1" / "t2026fscSpace" / "HK5Space" / "a.pdf").read_bytes() == b"%PDF"
     assert (out / "B1" / "iplot.py").exists()
     assert said[-1].startswith("收了 1 份進 HK5（新 1、覆蓋 0）")
-    assert said[-1].endswith("；.venv 還沒建，套件沒掃")  # HK_NO_INSTALL：不建 venv，只報
+    assert said[-1].endswith("；venv 沒建好，套件沒掃")  # HK_NO_INSTALL：不建 venv，只報；批次模式沒有課程的 .venv
     assert any("HK_NO_INSTALL" in line for line in said)
 
 

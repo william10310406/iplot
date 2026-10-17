@@ -564,7 +564,10 @@ def test_ensure_from_iplot_never_installs_outside_a_venv(tmp_path, load, standal
     hp = load("hk_page")
     monkeypatch.delenv("HK_NO_INSTALL")
     monkeypatch.setenv("HK_FROM_IPLOT", "1")
-    file = str(homework(tmp_path))
+    course = tmp_path / "科學計算"
+    (course / "HK13" / "B1").mkdir(parents=True)
+    (course / "hk_tk.py").write_text("", encoding="utf-8")
+    file = str(homework(course / "HK13" / "B1", name="iplot.py"))  # 面板按的：在課程資料夾裡
     monkeypatch.setattr(sys, "base_prefix", sys.prefix)  # 不在 venv 裡：iPLoT 自己的（系統的）Python
     popen = FakePopen()
     with pytest.raises(RuntimeError, match="先按「科學計算」裝課程套件"):
@@ -573,6 +576,19 @@ def test_ensure_from_iplot_never_installs_outside_a_venv(tmp_path, load, standal
     monkeypatch.setattr(sys, "base_prefix", "/某個/別的/prefix")  # 課程的 .venv：照裝，不加 --user
     hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
     assert popen.argvs[0][-1] == "no-such-pkg-m6" and "--user" not in popen.argvs[0]
+
+
+def test_ensure_from_iplot_in_batch_mode_says_to_build_the_venv(tmp_path, load, standalone, monkeypatch):
+    hp = load("hk_page")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    monkeypatch.setenv("HK_FROM_IPLOT", "1")
+    file = str(homework(tmp_path / "HK13_收件" / "B1", name="iplot.py"))  # 批次名單開的：不在課程資料夾裡
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)  # venv 沒建好：名單用的是跑 hk_tk.py 的那個 Python
+    popen = FakePopen()
+    with pytest.raises(RuntimeError) as err:
+        hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
+    assert str(err.value) == "缺 no-such-pkg-m6：批次模式要先建好 venv（--venv，或 zip 旁邊的 科學計算-venv）"
+    assert popen.calls == []
 
 
 # ── Task 10：examples/ 的 HK2、HK6、HK8（舊格式搬成新格式；規範的對照物）──

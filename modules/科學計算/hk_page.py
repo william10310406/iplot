@@ -219,6 +219,8 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
         raise RuntimeError(f"{'、'.join(only)} 只有 Apple Silicon 的 Mac 裝得了：這份作業要在 Apple Silicon 的 Mac 上跑")
     in_venv = sys.prefix != sys.base_prefix
     if os.environ.get(FROM_IPLOT) and not in_venv:
+        if _course(Path(file)) is None:  # 批次名單開的：沒有「科學計算」那顆按鈕
+            raise RuntimeError(f"缺 {'、'.join(need)}：批次模式要先建好 venv（--venv，或 zip 旁邊的 科學計算-venv）")
         raise RuntimeError(f"缺 {'、'.join(need)}：先按「科學計算」裝課程套件（不裝進 iPLoT 自己的 Python）")
     print(f"在裝 {'、'.join(need)}（第一次要幾分鐘）…")
     argv_pip = [sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check",

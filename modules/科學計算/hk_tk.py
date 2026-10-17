@@ -582,10 +582,10 @@ def _is_student(folder: Path, hk: str) -> bool:
             and ((folder / KIT / f"{hk}.txt").is_file() or _is_new_folder(folder)))
 
 
-def _packages(app, python: Path | None, pkgs: list[str], popen) -> str:
+def _packages(app, python: Path | None, pkgs: list[str], popen, batch: bool = False) -> str:
     """這批用到、還沒裝的套件：問一次，一個一個裝；回總結那句後面要接的話。"""
     if python is None:
-        return ".venv 還沒建，套件沒掃"
+        return "venv 沒建好，套件沒掃" if batch else ".venv 還沒建，套件沒掃"
     need = missing(python, pkgs, popen=popen) if pkgs else []
     if not need:
         return ""
@@ -596,10 +596,10 @@ def _packages(app, python: Path | None, pkgs: list[str], popen) -> str:
 
 
 def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None, popen=subprocess.Popen,
-            hk: str | None = None) -> str:
+            hk: str | None = None, batch: bool = False) -> str:
     """收作業：拖進來（或選進來）的 zip、資料夾、檔，每份放成 hk_folder/<學生>/（迷你作業包，D95），
     再收同一個人＝覆蓋。用到的套件問一次、裝進 python 那個 venv（沒給就用課程的 .venv）。回訊息區那一句。
-    hk 沒給就是 hk_folder 的名字（批次模式的 hk_folder 是 HK5_收件，另外給 hk）。"""
+    hk 沒給就是 hk_folder 的名字（批次模式的 hk_folder 是 HK5_收件，另外給 hk）；batch 是批次模式（句子不提課程的 .venv）。"""
     hk_folder = Path(hk_folder)
     hk = hk or hk_folder.name
     course = course_root(hk_folder)
@@ -701,7 +701,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         if space is None:
             notes.append(f"老師的 {hk}Space 還沒匯入，要用資料檔的 case 會缺檔")
         pkgs = sorted({pip_name(n) for n in imports}, key=str.lower)
-        package_note = _packages(app, python, pkgs, popen)
+        package_note = _packages(app, python, pkgs, popen, batch)
         if package_note:
             notes.append(package_note)
         formats = f"舊格式 {kinds['old']}、新格式 {kinds['new']}；" if kinds["new"] else ""  # 這學期全是舊的：不多說
@@ -778,7 +778,7 @@ def batch(source: Path, kit: Path | None = None, out: Path | None = None, venv: 
     except RuntimeError as exc:  # 建不了（或 HK_NO_INSTALL）：照收，只是套件不裝
         say(str(exc))
         python = None
-    collect(CliApp(say, yes, ask), [source], out, python=python, popen=popen, hk=hk)
+    collect(CliApp(say, yes, ask), [source], out, python=python, popen=popen, hk=hk, batch=True)
     return out
 
 
