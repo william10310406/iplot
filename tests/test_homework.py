@@ -1548,3 +1548,21 @@ def test_gather_keeps_folders_that_differ_only_in_case_apart(tmp_path, load):
     files = sorted(root.rglob("*.txt"))
     assert sorted(f.read_text(encoding="utf-8") for f in files) == ["大寫", "小寫"]
     assert files[0].parent.name != files[1].parent.name  # macOS 不分大小寫：b1/ 另開，不跟 B1/ 混成一個學生
+
+
+@pytest.mark.parametrize("files, picked, names", [
+    ({"王小明/作業/HK5.txt": GOOD}, "王小明", ["王小明"]),  # 作業放在子資料夾裡：還是叫王小明，不叫「作業」
+    ({"王小明/HK5.txt": GOOD}, "王小明", ["王小明"]),  # 不叫 HK5
+    ({"王小明/HK5.txt": GOOD, "王小明/圖/a.png": "png"}, "王小明", ["王小明"]),  # 沒有作業的資料夾不算學生
+    ({"全班/B1/HK5.txt": GOOD, "全班/B2/HK5.txt": GOOD}, "全班", ["B1", "B2"]),  # 兩個以上：全班的包裝
+    ({"全班/HK5/B1/HK5.txt": GOOD, "全班/HK5/B2/x/HK5.txt": GOOD}, "全班", ["B1", "B2"]),  # 包了一層也一樣
+    ({"全班/B1.txt": GOOD, "全班/B2.txt": GOOD}, "全班", ["B1", "B2"]),  # 一人一個散檔的也是全班
+])
+def test_collect_names_a_selected_folder_after_itself_unless_it_holds_a_class(tmp_path, load, files, picked, names):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    base, _ = handed_in(tmp_path, files)
+    said = hk.collect(HwApp(tmp_path, folder), [base / picked], folder)
+    assert sorted(p.name for p in folder.iterdir() if (p / "t2026fscSpace" / "HK5.txt").exists()
+                  and p.name != "t2026fscSpace") == names
+    assert said.startswith(f"收了 {len(names)} 份進 HK5")

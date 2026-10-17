@@ -352,6 +352,7 @@ def _unzip(file: Path, dest: Path) -> int:
 class GatherResult:
     root: Path  # 收進來的東西都在這底下
     skipped: int  # 擋掉的 zip 成員（.. 或絕對路徑）與解不開的 zip
+    unzipped: set[Path] = dataclasses.field(default_factory=set)  # root 底下哪幾個是 zip 解開的（不是選進來的資料夾）
 
 
 def gather(paths: list[Path], into: Path) -> GatherResult:
@@ -359,7 +360,7 @@ def gather(paths: list[Path], into: Path) -> GatherResult:
     資料夾整個複製進 原件/<名>/，檔案複製進 原件/。"""
     root = Path(into) / "原件"
     root.mkdir(parents=True, exist_ok=True)
-    skipped = 0
+    skipped, unzipped = 0, set()
     for path in map(Path, paths):
         if path.is_file() and zipfile.is_zipfile(path):
             dest = _unique(root / _nfc(path.stem))
@@ -368,6 +369,7 @@ def gather(paths: list[Path], into: Path) -> GatherResult:
             except (zipfile.BadZipFile, OSError):
                 skipped += 1
                 continue
+            unzipped.add(dest)
             for inner in sorted(dest.rglob("*.zip")):  # 只解一層：這裡解出來的 zip 不再往下找
                 if inner.is_file() and zipfile.is_zipfile(inner):
                     try:
@@ -379,7 +381,7 @@ def gather(paths: list[Path], into: Path) -> GatherResult:
             _copytree(path, _unique(root / _nfc(path.name)))
         elif path.is_file():
             shutil.copy2(path, _unique(root / _nfc(path.name), keep_suffix=True))
-    return GatherResult(root, skipped)
+    return GatherResult(root, skipped, unzipped)
 
 
 def _hidden(file: Path, root: Path) -> bool:
@@ -464,28 +466,39 @@ def _visible(folder: Path) -> list[Path]:
     return [p for p in folder.iterdir() if not (p.name.startswith(".") or p.name == "__MACOSX")]
 
 
-def _naming_root(file: Path, root: Path) -> Path:
+def _homework_in(path: Path) -> bool:
+    """path 是一個 .py/.txt 檔，或底下有 .py/.txt 的資料夾（藏起來的、hk_page.py 不算）：算一個學生。"""
+    return any(f.suffix.lower() in (".py", ".txt") and f.name.casefold() != "hk_page.py" and f.is_file()
+               and not _hidden(f, path.parent) for f in ([path] if path.is_file() else path.rglob("*")))
+
+
+def _naming_root(file: Path, root: Path, unzipped=frozenset()) -> Path:
     """算學生名字時的「根」：收進來的每一樣東西各自算（不然 HK5.zip 裡的 50 個人都會叫 HK5）；
-    zip 裡只包了一層資料夾（例如 HK5/<學生>/…）就往下走到學生那一層的上面。"""
+    zip 裡只包了一層資料夾（例如 HK5/<學生>/…）就往下走到學生那一層的上面。
+    選進來的資料夾（不在 unzipped 裡）要在那一層底下有兩個以上的學生（資料夾或散檔）才是全班的包裝；
+    不然它自己就是那個學生，根是 root（王小明/作業/HK5.txt 叫王小明，不叫作業）。"""
     rel = file.relative_to(root)
     if len(rel.parts) == 1:
         return root
-    top = root / rel.parts[0]
+    top = level = root / rel.parts[0]
     while True:
-        kids = _visible(top)
+        kids = _visible(level)
         if len(kids) == 1 and kids[0].is_dir() and file.is_relative_to(kids[0]) \
                 and all(k.is_dir() for k in _visible(kids[0])):
-            top = kids[0]
+            level = kids[0]
         else:
-            return top
+            break
+    if top in unzipped or sum(map(_homework_in, _visible(level))) >= 2:
+        return level
+    return root
 
 
-def _one_per_student(files: list[Path], root: Path, hk: str) -> list[tuple[Path, Path]]:
+def _one_per_student(files: list[Path], got: GatherResult, hk: str) -> list[tuple[Path, Path]]:
     """每個學生留一份，回 [(算名字的根, 檔)]：同一個根底下同一個第一層資料夾是同一個學生，裡面好幾個 .py/.txt
     （筆記、舊版）時留 classify 認得的那一份，都認得就取檔名像 HKn 的；根層的散檔一檔一人。"""
     groups: dict[tuple[Path, str], list[tuple[Path, Path]]] = {}
     for file in files:
-        base = _naming_root(file, root)
+        base = _naming_root(file, got.root, got.unzipped)
         rel = file.relative_to(base)
         groups.setdefault((base, rel.parts[0]) if len(rel.parts) > 1 else (file, ""), []).append((base, file))
     return [group[0] if len(group) == 1 else max(group, key=lambda pair: _homework_rank(pair[1], hk))
@@ -622,7 +635,7 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         unsafe = got.skipped
         imports: set[str] = set()
         has_shell = SHELL.is_file()  # 批次模式只複製了 hk_tk.py：新格式照放，不放殼、不查
-        picked = _one_per_student(files, got.root, hk)
+        picked = _one_per_student(files, got, hk)
         for base, file in picked:
             name = student_name(base, file, taken)
             dest = hk_folder / name
