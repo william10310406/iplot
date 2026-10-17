@@ -900,7 +900,7 @@ def test_recollect_overwrites_and_counts_separately(tmp_path, load):
     zipped = make_zip(tmp_path / "HK5.zip", {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD})
     app = HwApp(tmp_path, folder)
     hk.collect(app, [zipped], folder)
-    again = make_zip(tmp_path / "HK5-重交.zip", {"B1/HK5.txt": GOOD + "# 改過\n"})
+    again = make_zip(tmp_path / "重交" / "HK5.zip", {"B1/HK5.txt": GOOD + "# 改過\n"})  # 名字就是 HK5：包裝
     said = hk.collect(app, [again], folder)
     assert said.startswith("收了 1 份進 HK5（新 0、覆蓋 1）")
     assert (folder / "B1" / "t2026fscSpace" / "HK5.txt").read_text(encoding="utf-8").endswith("# 改過\n")
@@ -1648,8 +1648,13 @@ def test_collect_one_thing_is_one_student(tmp_path, load, files, picked, extras)
     ({"全班.zip": {"作業/B1/HK5.txt": GOOD, "作業/B2/筆記.txt": "x\n"}}, ["全班.zip"], ["B1", "B2"]),  # 拿不準：一人一份
     ({"HK5.zip": {"王小明.ZIP": zip_bytes({"HK5.txt": GOOD}), "李大華.Zip": zip_bytes({"HK5.txt": GOOD})}}, ["HK5.zip"],
      ["李大華", "王小明"]),  # 全班一包裡的 zip，副檔名大寫也解（最終審查）
+    ({"hk05/B1/HK5.txt": GOOD}, ["hk05"], ["B1"]),  # 名字就是 HK5：大小寫、補零都算
+    ({"科學計算_HK5_全班.zip": {"B1/HK5.txt": GOOD, "B2/HK5.txt": GOOD}}, ["科學計算_HK5_全班.zip"], ["B1", "B2"]),  # 兩個以上
+    ({"科學計算_HK5_全班.zip": {"HK5/B1/HK5.txt": GOOD, "HK5/B2/HK5.txt": GOOD}}, ["科學計算_HK5_全班.zip"],
+     ["B1", "B2"]),  # 只包了一層 HK5/
 ], ids=["A", "A-loose-beside-wrapper", "B", "zip-folders", "zip-renamed-files", "downloads", "folder-of-folders",
-        "folder-of-files", "folder-wrapped-once", "zip-wrapped-once", "zip-wrapped-unsure", "zips-uppercase-in-zip"])
+        "folder-of-files", "folder-wrapped-once", "zip-wrapped-once", "zip-wrapped-unsure", "zips-uppercase-in-zip",
+        "B-hk05", "class-zip-named-with-hk", "class-zip-named-with-hk-wrapped"])
 def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names):
     hk = load("hk_tk")
     _, folder = course_with_hk(tmp_path)
@@ -1658,6 +1663,28 @@ def test_collect_unwraps_a_class_bundle(tmp_path, load, files, picked, names):
     assert students_in(folder) == sorted(names)
     assert said.startswith(f"收了 {len(names)} 份進 HK5（新 {len(names)}、覆蓋 0）")
     assert "多交的" not in said
+
+
+@pytest.mark.parametrize("files, picked, names, extras", [
+    ({"HK1_王小明.zip": ZIPPED}, ["HK1_王小明.zip"], ["HK1_王小明"],
+     "多交的 1 個檔沒收（HK1_王小明：HK1_threebody_backup.txt）"),
+    ({"B11234567_HK1.zip": {"HK1.txt": HK1}}, ["B11234567_HK1.zip"], ["B11234567_HK1"], None),
+    ({"下載/HK1_王小明.zip": ZIPPED, "下載/HK1_李大華.zip": ZIPPED}, ["下載"], ["HK1_李大華", "HK1_王小明"],
+     "多交的 2 個檔沒收（HK1_李大華：HK1_threebody_backup.txt；HK1_王小明：HK1_threebody_backup.txt）"),
+    ({"下載/B11234567_HK1/HK1.txt": HK1, "下載/B11234568_HK1/HK1.txt": HK1}, ["下載"],
+     ["B11234567_HK1", "B11234568_HK1"], None),
+], ids=["zip", "zip-id", "folder-of-zips", "folder-of-folders"])
+def test_collect_names_holding_hk_are_still_one_student(tmp_path, load, files, picked, names, extras):
+    hk = load("hk_tk")  # 只有名字「就是」HKn 的才一律是包裝（2026-10-17 最終審查後定的）；只是含著 HKn 的照第 1 條是一個學生
+    _, folder = course_with_hk(tmp_path, "HK1")
+    base = put(tmp_path / "交", files)
+    said = hk.collect(HwApp(tmp_path, folder), [base / p for p in picked], folder)
+    assert students_in(folder) == names
+    for name in names:
+        assert (folder / name / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1
+    assert said.startswith(f"收了 {len(names)} 份進 HK1（新 {len(names)}、覆蓋 0）")
+    if extras:
+        assert f"；{extras}" in said
 
 
 def test_collect_hints_when_names_look_like_files(tmp_path, load):

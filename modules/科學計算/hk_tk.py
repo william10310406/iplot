@@ -499,10 +499,15 @@ def _candidates(folder: Path) -> list[Path]:
     return [k for k in sorted(_visible(folder), key=lambda p: _nfc(p.name)) if _homework_files(k)]
 
 
+def _is_hk(name: str, hk: str) -> bool:
+    """名字就是這份作業的 HKn（HK5、hk05；大小寫、補零跟 hk_in_name 一樣看），不是只含著它（HK5_王小明 不算）。"""
+    m = re.fullmatch(r"HK0*(\d+)", name, re.IGNORECASE)
+    return m is not None and f"HK{int(m.group(1))}" == hk
+
+
 def _exact(file: Path, hk: str) -> bool:
-    """檔名就是這份作業：HK1.txt、HK1.py（大小寫、補零跟 hk_in_name 一樣看）。"""
-    m = re.fullmatch(r"HK0*(\d+)", file.stem, re.IGNORECASE)
-    return file.suffix.lower() in (".py", ".txt") and m is not None and f"HK{int(m.group(1))}" == hk
+    """檔名就是這份作業：HK1.txt、HK1.py。"""
+    return file.suffix.lower() in (".py", ".txt") and _is_hk(file.stem, hk)
 
 
 def _name_of(thing: Path, zips: dict[Path, str]) -> str:
@@ -513,15 +518,16 @@ def _name_of(thing: Path, zips: dict[Path, str]) -> str:
 
 
 def _is_wrapper(thing: Path, kids: list[Path], hk: str, zips: dict[Path, str]) -> bool:
-    """thing 是全班一包（包裝），不是一個學生：名字像 HKn；或候選兩個以上、自己直接底下沒有 HKn.txt／HKn.py。
+    """thing 是全班一包（包裝），不是一個學生：名字就是 HKn（HK5.zip、資料夾 HK5；只是含著 HKn 的 HK5_王小明.zip 是學生）；
+    或候選兩個以上、自己直接底下沒有 HKn.txt／HKn.py。
     只有一個候選的就往下走（只包了一層的全班）：走到的那一層直接有 HKn.txt 或只剩一個檔，thing 就是那個學生；
-    走到的那一層名字像 HKn、或候選兩個以上，thing 只是包裝（拿不準就一人一份，不把全班合成一個人）；
+    走到的那一層名字就是 HKn、或候選兩個以上，thing 只是包裝（拿不準就一人一份，不把全班合成一個人）；
     資料夾裡只放著一個 zip 時也是包裝：那個 zip 就是學生（TronClass 一人一個 zip）。"""
-    if hk_in_name(_name_of(thing, zips)) == hk:
+    if _is_hk(_name_of(thing, zips), hk):
         return True
     level = thing
     while not any(k.is_file() and _exact(k, hk) for k in kids):
-        if len(kids) >= 2 or (level != thing and hk_in_name(_name_of(level, zips)) == hk):
+        if len(kids) >= 2 or (level != thing and _is_hk(_name_of(level, zips), hk)):
             return True
         if kids[0].is_file():
             return False
