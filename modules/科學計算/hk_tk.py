@@ -306,10 +306,28 @@ def _decode_member(info: zipfile.ZipInfo) -> str:
     return info.filename
 
 
+def _folder(dest: Path, parts: list[str], folders: dict[tuple[str, ...], Path]) -> Path:
+    """zip 裡 parts 那個資料夾解在 dest 底下的哪裡（順便建好；folders 記著同一個 zip 解過的）。
+    只差大小寫的另一個資料夾已經在了（B1/ 之後又來 b1/），macOS 會開到同一個：另開 b1-2/，兩個學生不混在一起。"""
+    where = dest
+    for i, part in enumerate(parts):
+        key = tuple(parts[: i + 1])
+        if key not in folders:
+            here = where / part
+            if any(n != part and n.casefold() == part.casefold() for n in os.listdir(where)):
+                here = _unique(here)
+            here.mkdir(parents=True, exist_ok=True)
+            folders[key] = here
+        where = folders[key]
+    return where
+
+
 def _unzip(file: Path, dest: Path) -> int:
     """把 file 解到 dest；名字含 .. 或是絕對路徑的成員不解、計數；回擋掉幾個。"""
     skipped = 0
+    folders: dict[tuple[str, ...], Path] = {}
     with zipfile.ZipFile(file) as zf:
+        dest.mkdir(parents=True, exist_ok=True)
         for info in zf.infolist():
             name = _nfc(_decode_member(info).replace("\\", "/"))
             parts = [p for p in name.split("/") if p not in ("", ".")]
@@ -319,12 +337,11 @@ def _unzip(file: Path, dest: Path) -> int:
                 continue
             if not parts:
                 continue
-            target = dest.joinpath(*parts)
             if name.endswith("/"):
-                target.mkdir(parents=True, exist_ok=True)
+                _folder(dest, parts, folders)
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists():  # 只差大小寫的兩個成員（B1/HK5.txt、b1/HK5.txt）在 macOS 是同一個檔：兩份都留
+            target = _folder(dest, parts[:-1], folders) / parts[-1]
+            if target.exists():  # 同一個資料夾裡只差大小寫的兩個檔（HK5.txt、hk5.txt）在 macOS 是同一個檔：兩份都留
                 target = _unique(target, keep_suffix=True)
             with zf.open(info) as src, open(target, "wb") as out:
                 shutil.copyfileobj(src, out)
@@ -463,6 +480,24 @@ def _naming_root(file: Path, root: Path) -> Path:
             return top
 
 
+def _one_per_student(files: list[Path], root: Path, hk: str) -> list[tuple[Path, Path]]:
+    """每個學生留一份，回 [(算名字的根, 檔)]：同一個根底下同一個第一層資料夾是同一個學生，裡面好幾個 .py/.txt
+    （筆記、舊版）時留 classify 認得的那一份，都認得就取檔名像 HKn 的；根層的散檔一檔一人。"""
+    groups: dict[tuple[Path, str], list[tuple[Path, Path]]] = {}
+    for file in files:
+        base = _naming_root(file, root)
+        rel = file.relative_to(base)
+        groups.setdefault((base, rel.parts[0]) if len(rel.parts) > 1 else (file, ""), []).append((base, file))
+    return [group[0] if len(group) == 1 else max(group, key=lambda pair: _homework_rank(pair[1], hk))
+            for group in groups.values()]
+
+
+def _homework_rank(file: Path, hk: str) -> tuple[bool, bool, bool]:
+    """越大越像這份作業：classify 認得、檔名像 HKn、內容就是 HKn（新格式不寫 HKn，算是）。一樣大取前面那個。"""
+    kind, found = classify(file)
+    return kind in ("old", "new"), hk_in_name(file.stem) == hk, kind == "new" or found == hk
+
+
 def kit_space(hk_folder: Path, hk: str) -> Path | None:
     """老師那份的 HKnSpace/：舊格式在 t2026fscSpace/ 底下，新格式就在 HKn/ 底下；還沒匯入回 None。"""
     for space in (Path(hk_folder) / KIT / f"{hk}Space", Path(hk_folder) / f"{hk}Space"):
@@ -587,8 +622,9 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         unsafe = got.skipped
         imports: set[str] = set()
         has_shell = SHELL.is_file()  # 批次模式只複製了 hk_tk.py：新格式照放，不放殼、不查
-        for file in files:
-            name = student_name(_naming_root(file, got.root), file, taken)
+        picked = _one_per_student(files, got.root, hk)
+        for base, file in picked:
+            name = student_name(base, file, taken)
             dest = hk_folder / name
             if (not _inside(dest, hk_folder) or dest.resolve() == hk_folder.resolve()
                     or (dest.exists() and not _is_student(dest, hk))):
@@ -645,6 +681,8 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
                          f"（{'、'.join(lists['no-shell'])}）")
         if others:
             notes.append(f"略過 {others} 個不是 .py/.txt 的檔")
+        if len(files) > len(picked):
+            notes.append(f"略過 {len(files) - len(picked)} 個不是作業的檔")
         if unsafe:
             notes.append(_skipped_note(unsafe)[1:])
         if space is None:

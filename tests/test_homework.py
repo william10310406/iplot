@@ -1518,3 +1518,33 @@ def test_batch_without_the_shell_places_new_format_files_without_it(tmp_path, lo
     hk.batch(zipped, kit=teacher_kit(tmp_path), say=said.append)
     assert (out / "B1" / "hk_page.py").read_bytes() == hk.SHELL.read_bytes()
     assert said[-1].startswith("收了 3 份進 HK5（舊格式 1、新格式 2；新 2、覆蓋 1）") and "沒放殼" not in said[-1]
+
+
+def test_collect_keeps_one_file_per_student_folder(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/2026筆記.txt": "上課筆記\n", "B1/HK5.txt": GOOD,
+                                             "B2/Answer.py": "x = 1\n", "B2/HK5.txt": GOOD})
+    said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    assert said.startswith("收了 2 份進 HK5（新 2、覆蓋 0）")
+    assert "；略過 2 個不是作業的檔" in said and "不是 HK5 的作業檔" not in said
+    assert not (folder / "B1-2").exists() and not (folder / "B2-2").exists()
+    assert (folder / "B1" / "t2026fscSpace" / "HK5.txt").read_text(encoding="utf-8") == GOOD
+
+
+def test_collect_prefers_the_file_named_like_the_hk_when_both_are_homework(tmp_path, load):
+    hk = load("hk_tk")
+    _, folder = course_with_hk(tmp_path)
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/A舊版.txt": GOOD, "B1/HK5.py": NEW_HK})
+    said = hk.collect(HwApp(tmp_path, folder), [zipped], folder)
+    assert (folder / "B1" / "iplot.py").read_text(encoding="utf-8") == NEW_HK
+    assert said.startswith("收了 1 份進 HK5（舊格式 0、新格式 1；新 1、覆蓋 0）") and "；略過 1 個不是作業的檔" in said
+
+
+def test_gather_keeps_folders_that_differ_only_in_case_apart(tmp_path, load):
+    hk = load("hk_tk")
+    zipped = make_zip(tmp_path / "HK5.zip", {"B1/HK5.txt": "大寫", "b1/HK5.txt": "小寫"})
+    root = hk.gather([zipped], tmp_path / "work").root
+    files = sorted(root.rglob("*.txt"))
+    assert sorted(f.read_text(encoding="utf-8") for f in files) == ["大寫", "小寫"]
+    assert files[0].parent.name != files[1].parent.name  # macOS 不分大小寫：b1/ 另開，不跟 B1/ 混成一個學生
