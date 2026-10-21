@@ -122,80 +122,95 @@ print("你的年齡是" + x + "歲")
 - **更新**（⬆️）：把 iPLoT 的核心換成新版，不動到自己做的東西。
 - **工作坊**（🧰）：從一份清單安裝、更新別人做的模組。
 
-平常不連網。只有按下去的那一次才連，iPLoT 不會自己去看有沒有新版。隨附的 `config.py` 已經填好來源（GitHub Pages 上的 `iplot-workshop`，見「怎麼設定」），剛拿到的 iPLoT 按下去就有東西。把來源改成 `None` 就不連網：按了只會在訊息區說一句怎麼設定——不連網；除了每個模組執行前照例存進自己 `.history/` 的那一份 `iplot.py` 快照，不寫任何檔案；其他功能不受影響。
+兩個模組讀的是兩個不同的地方（D100、D101）：「更新」讀 GitHub Pages 上的 `iplot-workshop`，只有研究助理能寫；「工作坊」讀 GitHub Pages 上的 `iplot-modules`，有 GitHub 帳號的人都能上傳自己的模組，**沒有人審查**（見下面「上傳自己的模組」）。
 
-這兩個功能只在 macOS 上驗過：自動測試與在真的視窗裡走的大部分用本機的 `file://` 網址；從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，2026-10-06 在 macOS 上用 `tests/acceptance_workshop.py` 走過一次（全部通過；確認框的長相、用瀏覽器看那一頁、沒有網路時的那一句，要人眼看的部分還沒做）。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與後備面板（所以 Linux 也是）沒有工作坊的清單頁。
+平常不連網。只有按下去的那一次才連，iPLoT 不會自己去看有沒有新版。隨附的 `config.py` 已經填好這兩個來源（見「怎麼設定」），剛拿到的 iPLoT 按下去就有東西。把來源改成 `None` 就不連網：按了只會在訊息區說一句怎麼設定——不連網；除了每個模組執行前照例存進自己 `.history/` 的那一份 `iplot.py` 快照，不寫任何檔案；其他功能不受影響。
+
+這兩個功能只在 macOS 上驗過：自動測試與在真的視窗裡走的大部分用本機的 `file://` 網址；從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，2026-10-06 在 macOS 上用 `tests/acceptance_workshop.py` 走過一次（全部通過；確認框的長相、用瀏覽器看那一頁、沒有網路時的那一句，要人眼看的部分還沒做）。那一次的清單是 `iplot-workshop` 的舊清單；從 `iplot-modules` 的新清單讀、裝，還沒有對真的網址走過（要等種子收完，見「怎麼發佈」最後的驗收）。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與後備面板（所以 Linux 也是）沒有工作坊的清單頁。
 
 ### 怎麼設定
 
-`config.py` 裡的兩行，隨附的已經填好 iPLoT 自己放檔案的地方：
+`config.py` 裡的兩行，隨附的已經填好 iPLoT 自己放檔案的兩個地方：
 
 ```python
 # 「更新」從哪裡看有沒有新版、「工作坊」的模組清單。按了才連網；改成 None 就不連網
 UPDATE_URL = "https://william10310406.github.io/iplot-workshop/update.json"
-WORKSHOP_URL = "https://william10310406.github.io/iplot-workshop/index.json"
+WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"
 ```
+
+從 0.5.1 換上來的，照 CHANGELOG 0.5.2 的兩件事做（換掉 `modules/工作坊`、把 `WORKSHOP_URL` 換成上面那一行；`docs/08_操作說明-0.5.2.md` 第 1.2 節）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
 
 不想連網：把網址換成 `None`（不加引號），存檔，執行「重新啟動」；按下去只會說一句怎麼設定。要用別人放檔案的地方：換成那個人給的網址（字串，要加引號）。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，照上面那三行自己加上去；不加等於沒設定（`None`）。
 
 ### 怎麼發佈
 
-這是放檔案的人做的事；只是拿「更新」「工作坊」來用的人不用做，隨附的 `config.py` 就指到 iPLoT 自己放檔案的地方。`tools/publish.py` 把一個版本變成這兩個模組讀得懂的檔案。它用 `git archive` 打包核心，所以要在有 git 紀錄的 iPLoT 資料夾裡執行：
+這是放檔案的人做的事；只是拿「更新」「工作坊」來用的人不用做，隨附的 `config.py` 就指到 iPLoT 自己放檔案的地方。`tools/publish.py` 把一個版本變成「更新」讀得懂的檔案。它用 `git archive` 打包核心，所以這一段要在 `git clone` 下來的 repo 裡做：0.5.2 起下載的包裡沒有 `tools/`、`tests/`（`.gitattributes` 的 `export-ignore`）。
+
+iPLoT 自己只發核心。完整的指令，在 iPLoT 資料夾裡（設計第 9.1 節）：
 
 ```
-python3 tools/publish.py --version 0.5.0 --base-url <放檔案的地方> --modules 整理桌面 開工
+python3 tools/publish.py --version 0.5.2 --base-url https://william10310406.github.io/iplot-workshop --out ../iplot-workshop --modules-site https://william10310406.github.io/iplot-modules/
 ```
 
-`--modules` 後面是要放進工作坊的模組，寫 `modules/` 裡的資料夾名稱（「整理桌面」是舉例；`modules/` 裡沒有的名稱，工具會說是哪幾個，不產生任何檔）。沒給 `--modules` 時只發佈核心：不打模組的包，`交付/發佈/` 裡原本的 `index.json` 也不動。它在 `--out` 指的資料夾（沒給就是 `交付/發佈/`）產生下面這些檔，最後印出要填進 `config.py` 的那兩行：
+還沒打 `v0.5.2` 這個 tag 時加 `--ref HEAD`。`--out` 是 `iplot-workshop` 的本機 clone，放在 iPLoT 資料夾隔壁；沒給 `--out` 就是 `交付/發佈/`。給了 `--modules-site`，它在 `--out` 產生下面這些檔：
 
 | 產生的檔 | 誰用 | 內容 |
 |---|---|---|
-| `iPLoT-v0.5.0.zip` | 「更新」下載 | 核心的包，也就是交付用的那一整包（最上層是 `iPLoT-v0.5.0/`；「更新」只取裡面的四樣）：`git archive` 打出 `v0.5.0` 這個 tag 的內容。還沒打 tag 時加 `--ref HEAD`，照最後一次 commit 打。打包的那一版裡 `core/__init__.py` 寫的版本要等於 `--version`，不一樣工具就停下來說一句，不產生任何檔 |
-| `update.json` | 「更新」讀 | 版本、zip 的網址、zip 的 sha256、這一版改了什麼（取自 `CHANGELOG.md` 那一版那一節的第一段，也就是摘要；它會整段顯示在「要更新嗎」的對話框裡） |
-| `模組/<名稱>.zip` | 「工作坊」下載 | 每個模組一包，最上層是 `<名稱>/`。各台電腦自己的東西不帶（名字不分大小寫）：`.history/`、`.origin`、`.unconfirmed`、`__pycache__`、`.DS_Store` |
-| `index.json` | 「工作坊」讀 | 每個模組的名稱、版本、zip 的網址、zip 的 sha256、說明、圖示（說明與圖示取自模組的 `iplot.py`）、這一版改了什麼（`notes`，取自模組的 `CHANGELOG.md`） |
-| `index.html` | 用瀏覽器看的人 | 一頁：核心的版本、下載連結、sha256、怎麼開始用；每個模組的圖示、名稱、版本、說明、這一版改了什麼、zip 連結、sha256。資料跟上面兩個 JSON 是同一份；沒有 JS、沒有外部資源 |
+| `iPLoT-v0.5.2.zip` | 「更新」下載 | 核心的包，也就是交付用的那一整包（最上層是 `iPLoT-v0.5.2/`；「更新」只取裡面的四樣）：`git archive` 打出 `v0.5.2` 這個 tag 的內容，`.gitattributes` 裡標了 `export-ignore` 的不帶（`tests/`、`tools/`、`docs/plans/` 這些）。還沒打 tag 時加 `--ref HEAD`，照最後一次 commit 打。打包的那一版裡 `core/__init__.py` 寫的版本要等於 `--version`，不一樣工具就停下來說一句，不產生任何檔 |
+| `update.json` | 「更新」讀 | 版本、zip 的網址、zip 的 sha256、這一版改了什麼（取自 `CHANGELOG.md` 那一版那一節的第一段，也就是摘要；它會整段顯示在「要更新嗎」的對話框裡，所以那一段中間不能有空行） |
+| `index.html` | 用瀏覽器看的人 | 一頁：核心的版本、下載連結、sha256、怎麼開始用；模組那一段只有一句話＋連結：「模組在 <`--modules-site` 的網址>，誰都能上傳。」沒有 JS、沒有外部資源 |
 | `.nojekyll` | GitHub Pages | 空檔：讓 Pages 照原樣放出每個檔 |
 
-模組的版本寫在模組資料夾裡的 `CHANGELOG.md`，格式跟 iPLoT 自己的 `CHANGELOG.md` 一樣：一版一節，`## [1.2.0] - 2026-10-06`，最新的在最上面，標題底下第一段說這一版改了什麼。工具取最上面那一節的版本號當模組的版本（`[Unreleased]` 不算），取那一段當 `index.json` 的 `notes`。沒有 `CHANGELOG.md` 的模組，版本跟 `--version` 一樣、`notes` 是空的：每發一版，它的版本都跟著變，裝過的人會看到「可更新」。也可以在指令列寫「名稱=版本」，例如 `--modules 整理桌面=1.2.0`；跟 `CHANGELOG.md` 寫的不一樣時，工具說一句就停，不產生任何檔；`CHANGELOG.md` 讀不出最上面那一版（版本要寫成 `1.2.0` 這種只有數字與點的樣子，不能是 `1.2.0-beta`、`v1.2.0`）也一樣。隨附的「開工」「作業系統」「打開核心原始碼」各有一份 `CHANGELOG.md`。
+沒有 `模組/`；`--out` 裡原本的 `index.json`（`iplot-workshop` 凍結的舊清單）不動、不重寫。
 
-模組的包直接從 `modules/` 裡的資料夾打，不經過 git：還沒 commit 的檔會放進去；指到檔案的符號連結，放進去的是它指到的內容（指到資料夾的連結不放）；zip 裡記著每個檔的修改時間，所以內容一樣、檔案時間不一樣時，重打出來的 sha256 也不一樣。git 追蹤的檔有還沒 commit 的改動時（還沒 `git add` 過的新檔不算），工具會多印一句提醒：核心的包是從那個 tag（或 `--ref`）打的，不含那些改動；模組的包含。
+三條規矩：
 
-`--base-url` 是 `交付/發佈/` 這個資料夾放上去之後對應的網址。兩個 JSON 裡的下載網址都是照它寫的，所以要先決定放哪裡，再跑工具。產生的檔要一起放上去：JSON 裡記著 zip 的 sha256，只換其中一邊就對不上，「更新」「工作坊」會拒絕。
+- **`--modules-site` 跟 `--modules` 互斥**：兩個一起給，工具說「argument --modules-site: not allowed with argument --modules」就停，一個檔都不產生（`--modules` 會整份重寫凍結的 `index.json`）。
+- **給了 `--modules-site`，最後只印 `UPDATE_URL` 那一行**，接著一句「WORKSHOP_URL 照 config.py，不改（模組在 <網址>）。」`WORKSHOP_URL` 不跟著 `--base-url` 走。
+- **兩個都沒給、而 `<ref>:config.py`（打包的那一版裡的，不是工作樹的）的 `WORKSHOP_URL` 不在 `--base-url` 底下，就停**：說一句「…不在 --base-url 底下：模組不從這裡發了，加 --modules-site <模組網站的網址>…」，一個檔都不產生。不然以後只發核心時忘了這個旗標，那一頁就又把凍結的模組列回去。
 
-**放在 GitHub Pages：iPLoT 自己就是這樣發佈的（D79）。** 另一個公開 repo `iplot-workshop`，GitHub Pages 從它 `main` 分支的根目錄出，網址是 `https://<帳號>.github.io/iplot-workshop/`。它的本機 clone 放在 iPLoT 資料夾隔壁（`../iplot-workshop`），`--out` 直接寫進去，然後 commit、push。完整的指令，在 iPLoT 資料夾裡：
+發佈的順序：
 
-```
-python3 tools/publish.py --version 0.5.0 --base-url https://<帳號>.github.io/iplot-workshop --out ../iplot-workshop --modules 開工 作業系統 打開核心原始碼
-```
-
-還沒打 `v0.5.0` 這個 tag 時加 `--ref HEAD`。再到 `../iplot-workshop`：
+1. commit `.gitattributes`、版本號（`core/__init__.py`）、`config.py`、`modules/工作坊`、`CHANGELOG.md`，和這一版其他的改動。
+2. 打 tag（`v0.5.2`）。
+3. 跑上面那一行 `publish.py`。它會印「核心的包最上層：」接著那一層的檔與資料夾；工作樹的 `.gitattributes` 跟 tag 裡的不一樣時（改了還沒 commit，或還沒追蹤），多印一句「注意：工作樹的 .gitattributes 跟 v0.5.2 裡的不一樣…」：`git archive` 只認 tag 裡已經 commit 的那一份，要照新的排，先 commit、重打 tag 再發佈。
+4. 解開核心的包檢查：最上層跟上一步印的一樣，`tests/`、`tools/`、`docs/plans/` 不在裡面，留下的檔沒有個人路徑與開發用電腦的帳號名。
+5. 到 `../iplot-workshop` commit、push：
 
 ```
 git add -A
-git commit -m "0.5.0（<iPLoT 的短 sha>）"
+git commit -m "0.5.2（<iPLoT 的短 sha>）"
 git push
 ```
 
-推上去之後 Pages 要一兩分鐘才換成新的（`https://<帳號>.github.io/iplot-workshop/update.json` 打開來是新的版本就好了）；那之前按「更新」，拿到的可能還是上一版。第一次推的 repo，要在 GitHub 上那個 repo 的 Settings → Pages 選「Deploy from a branch」、`main`、`/ (root)`。repo 要是公開的：iPLoT 取檔時不帶任何帳號密碼。
+推上去之後 Pages 要一兩分鐘才換成新的（`https://william10310406.github.io/iplot-workshop/update.json` 打開來是新的版本就好了）；那之前按「更新」，拿到的可能還是上一版。repo 要是公開的：iPLoT 取檔時不帶任何帳號密碼。第一次推的 repo，要在 GitHub 上那個 repo 的 Settings → Pages 選「Deploy from a branch」、`main`、`/ (root)`。`--base-url` 是 `--out` 這個資料夾放上去之後對應的網址：`update.json` 裡的下載網址是照它寫的，所以要先決定放哪裡，再跑工具；產生的檔要一起放上去，`update.json` 記著 zip 的 sha256，只換其中一邊就對不上，「更新」會拒絕。
 
-用的人在 `config.py` 填 `UPDATE_URL = "<base-url>/update.json"`、`WORKSHOP_URL = "<base-url>/index.json"`，也就是工具最後印出來的那兩行（網址裡的中文會寫成 `%XX`，是同一個網址）；那兩行前面沒有空白，整行從行首貼進 `config.py` 就好。隨附的 `config.py` 填的是 `https://william10310406.github.io/iplot-workshop/` 底下那兩個。`index.html` 是給還沒裝 iPLoT 的人看的那一頁，網址就是 `https://<帳號>.github.io/iplot-workshop/`。從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，2026-10-06 在 macOS 上用 `tests/acceptance_workshop.py` 走過一次（全部通過；確認框的長相、用瀏覽器看那一頁、沒有網路時的那一句，要人眼看的部分還沒做）。
+用的人在 `config.py` 填的是工具最後印出來的那一行 `UPDATE_URL = "<base-url>/update.json"`（網址裡的中文會寫成 `%XX`，是同一個網址；那一行前面沒有空白，整行從行首貼進 `config.py` 就好）；`WORKSHOP_URL` 照隨附的，指到 `iplot-modules`。`index.html` 是給還沒裝 iPLoT 的人看的那一頁，網址就是 `https://william10310406.github.io/iplot-workshop/`。
 
-**推上去之後：對真的網址驗一遍。** 在 iPLoT 資料夾裡執行：
+**推上去之後：對真的網址驗一遍。** 要等 iplot-modules 的種子（設計第 9.3 節：開工、打開核心原始碼、互通、主控面板、行事曆各傳一次）收完、網站更新之後才跑：它要從新的清單裝「打開核心原始碼」。在 iPLoT 資料夾裡執行：
 
 ```
 python3 tests/acceptance_workshop.py
 ```
 
-它跟 `tests/smoke.py` 一樣是自己跑的腳本（pytest 不收），要 macOS、裝好的 `lib/` 和網路，會開出 iPLoT 的視窗，約一分鐘。照 `config.py` 的兩個網址做兩件事：一、等網路上的 `update.json`、`index.json` 跟 `../iplot-workshop` 裡的一樣（Pages 還沒換好就每 10 秒再試一次，最多 10 分鐘），再下載 `index.html`、核心 zip、每個模組 zip，sha256 要跟 json 寫的一樣；二、把 iPLoT 資料夾複製到暫存處（真的工作樹不動），版本改成 0.4.9、刪掉複本的「打開核心原始碼」，開複本真的視窗，用程式代替滑鼠：按「更新」從網路換成新版、按「重新啟動」、打開「工作坊」看清單上的每一列與「這一版」、從網路裝「打開核心原始碼」。每一項印出證據（訊息區的句子、sha256、pid），全部通過結束碼是 0。`--keep <資料夾>` 把複本留在那裡，人工驗收可以接著用（要給一個還不存在、或空的資料夾：裡面已經有東西的話，它說一句就停，什麼都不刪）；`--published <資料夾>` 換掉拿來比的那個資料夾。確認框的長相、用瀏覽器看那一頁、關掉 Wi-Fi 之後按「工作坊」只有一句話，這些要人眼看，不在腳本裡。
+它跟 `tests/smoke.py` 一樣是自己跑的腳本（pytest 不收），要 macOS、裝好的 `lib/` 和網路，會開出 iPLoT 的視窗，約一分鐘。照 `config.py` 的兩個網址分開做：一、照 `UPDATE_URL` 等網路上的 `update.json` 跟 `../iplot-workshop` 裡的一樣（只比這一個；Pages 還沒換好就每 10 秒再試一次，最多 10 分鐘）；`WORKSHOP_URL` 的 `index.json` 用這一版的工作坊讀，`modules` 要是空的、最上面要有 `notice`；核心那一頁從 `UPDATE_URL` 那一層拿；核心 zip 與清單上每個模組的 zip，sha256 要跟 json 寫的一樣。二、把 iPLoT 資料夾複製到暫存處（真的工作樹不動），版本改成 0.4.9、刪掉複本的「打開核心原始碼」，開複本真的視窗，用程式代替滑鼠：按「更新」從網路換成新版、按「重新啟動」、打開「工作坊」看清單上的每一列、`notice`、每一列的上傳者與「這一版」、從網路裝「打開核心原始碼」。每一項印出證據（訊息區的句子、sha256、pid），全部通過結束碼是 0。`--keep <資料夾>` 把複本留在那裡，人工驗收可以接著用（要給一個還不存在、或空的資料夾：裡面已經有東西的話，它說一句就停，什麼都不刪）；`--published <資料夾>` 換掉拿來比的那個資料夾。確認框的長相、用瀏覽器看那一頁、關掉 Wi-Fi 之後按「工作坊」只有一句話，這些要人眼看，不在腳本裡。
 
-**在本機試，用 `file://`。** 不用上傳、不用網路：`--base-url file:///<絕對路徑>/交付/發佈`。在 iPLoT 資料夾裡可以直接這樣寫：
+**`--modules`：本機 `file://` 試與測試用。** iPLoT 自己的模組不再從這裡發，到 iplot-modules 的上傳表單（見下面「上傳自己的模組」）。不用上傳、不用網路：`--base-url file:///<絕對路徑>/交付/發佈`。在 iPLoT 資料夾裡可以直接這樣寫：
 
 ```
-python3 tools/publish.py --version 0.5.0 --ref HEAD --base-url "file://$(pwd)/交付/發佈" --modules 開工
+python3 tools/publish.py --version 0.5.2 --ref HEAD --base-url "file://$(pwd)/交付/發佈" --modules 開工
 ```
 
-一步一步的試法在 [docs/06_架構說明與試用.md](docs/06_架構說明與試用.md) 第五節。
+`--modules` 後面寫 `modules/` 裡的資料夾名稱（`modules/` 裡沒有的名稱，工具會說是哪幾個，不產生任何檔）。給了 `--modules`，除了上面那張表的檔，還多兩樣，最後印出 `UPDATE_URL`、`WORKSHOP_URL` 兩行（都在 `--base-url` 底下）：
+
+| 產生的檔 | 誰用 | 內容 |
+|---|---|---|
+| `模組/<名稱>.zip` | 「工作坊」下載 | 每個模組一包，最上層是 `<名稱>/`。只收那個模組資料夾裡 git 追蹤的檔（在磁碟上的樣子：追蹤的檔還沒 commit 的改動會放進去，還沒 `git add` 過的新檔不放；一個追蹤的檔都沒有就停）。各台電腦自己的東西不帶（名字不分大小寫）：`.history/`、`.origin`、`.unconfirmed`、`__pycache__`、`.DS_Store` |
+| `index.json` | 「工作坊」讀 | 整份重寫：每個模組的名稱、版本、zip 的網址、zip 的 sha256、說明、圖示（說明與圖示取自模組的 `iplot.py`）、這一版改了什麼（`notes`，取自模組的 `CHANGELOG.md`） |
+
+這時 `index.html` 的模組那一段照舊列出每個模組。模組的版本寫在模組資料夾裡的 `CHANGELOG.md`，格式跟 iPLoT 自己的 `CHANGELOG.md` 一樣：一版一節，`## [1.2.0] - 2026-10-06`，最新的在最上面，標題底下第一段說這一版改了什麼。工具取最上面那一節的版本號當模組的版本（`[Unreleased]` 不算），取那一段當 `notes`。沒有 `CHANGELOG.md` 的模組，版本跟 `--version` 一樣、`notes` 是空的。也可以寫「名稱=版本」，例如 `--modules 開工=1.2.0`；跟 `CHANGELOG.md` 寫的不一樣時，工具說一句就停，不產生任何檔；`CHANGELOG.md` 讀不出最上面那一版（版本要寫成 `1.2.0` 這種只有數字與點的樣子，不能是 `1.2.0-beta`、`v1.2.0`）也一樣。zip 裡記著每個檔的修改時間，所以內容一樣、檔案時間不一樣時，重打出來的 sha256 也不一樣。git 追蹤的檔有還沒 commit 的改動時，工具會多印一句提醒：核心的包是從那個 tag（或 `--ref`）打的，不含那些改動；模組的包含。
+
+兩個都沒給、`--base-url` 是 `file://` 的話，隨附的 `config.py` 的 `WORKSHOP_URL`（`iplot-modules`）不在它底下，工具會照上面第三條停下來：只試核心就加 `--modules-site <任何網址>`。一步一步的試法在 [docs/06_架構說明與試用.md](docs/06_架構說明與試用.md) 第五節。
 
 其他能用 `https://` 直接取到檔案的地方照理也行（例如 GitHub 的 raw 網址），沒有試過。Google Drive 的分享連結不是直接取檔，不行。
 
@@ -235,7 +250,7 @@ python3 tools/publish.py --version 0.5.0 --ref HEAD --base-url "file://$(pwd)/�
 
 ### 按「工作坊」會發生什麼
 
-讀 `WORKSHOP_URL` 指的 `index.json`，開一個視窗列出清單。每個模組一列：圖示、名稱、說明（作者寫了這一版改了什麼的，底下多一行「這一版：…」）、清單上的版本、在這台電腦上的狀態、一顆按鈕。狀態有六種：
+讀 `WORKSHOP_URL` 指的 `index.json`（有 `uploads` 就讀它，沒有才讀 `modules`），開一個視窗列出清單。清單最上面一行是清單給的 `notice`（新清單上是「這裡的模組是大家上傳的，沒有人審查。…」；舊的清單沒有這一行）。每個模組一列：圖示、名稱，名稱底下一行「上傳者：@<帳號>」（舊的清單沒有這一行；上傳的帳號刪掉了是「上傳者：帳號已刪除」）、說明（作者寫了這一版改了什麼的，底下多一行「這一版：…」）、被研究助理標了的那一列多一行紅字「⚠ …」、清單上的版本、在這台電腦上的狀態、一顆按鈕。清單上的字一律當文字顯示，不當 HTML。狀態有六種：
 
 | 狀態 | 意思 | 按鈕 |
 |---|---|---|
@@ -252,10 +267,14 @@ python3 tools/publish.py --version 0.5.0 --ref HEAD --base-url "file://$(pwd)/�
 - **裝進來的模組第一次執行前會問**：「『<名稱>』是從外面裝進來的，第一次執行前確認：要執行嗎？」按取消就不執行，下次還問；按確定才執行，之後不再問。包裡與磁碟上那個模組資料夾裡每一個有 `iplot.py` 的資料夾都一樣（新的包只帶了下一層模組旁邊的檔、沒帶它的 `iplot.py` 也算）：按 ▸ 進去執行下一層的模組，也會先問。更新或覆蓋之後算重新裝了一次，會再問一次。這一問是提醒，不是檢查：sha256 只保證下載到的跟清單寫的是同一個檔，模組做什麼沒有人把關——它跟自己寫的模組一樣，是用這個使用者的權限執行的 Python 程式（[docs/07_接口與邊界.md](docs/07_接口與邊界.md) 第 7 節）。
 - **關掉清單的視窗**，面板重掃一次，新裝的那一格就出現。
 - **什麼算「已修改」**：當初裝進來的那些檔（`.origin` 裡記著是哪些）有改過或被刪掉。執行過不算；模組自己另外存的設定、資料（不在那份清單裡的檔）也不算，所以會在自己的資料夾存東西的模組，用過之後不會因此變成「已修改」。模組要是把資料寫回包裡本來就有的檔，那就算改過。已修改的照樣可以覆蓋：舊資料夾先整個存進 `.history/`，包裡沒有的檔案也不會被刪。
-- **不裝、資料夾不動、那一列改成「無法安裝：…」的情況**：連不上，或下載到一半斷了；sha256 對不上；zip 的最上層不是 `<名稱>/`；包裡沒有 `iplot.py`；包裡的路徑有 `..`；清單上的名稱不是單純的資料夾名（含 `/`、`\`，或以 `.` 開頭）；`modules/<名稱>` 本身是符號連結。蓋檔蓋到一半出錯也是「無法安裝：」開頭，接著是那個錯，再照實說放回去了沒有（見上面）。
-- **「作業系統」「更新」「工作坊」不從工作坊換**：這三個是 iPLoT 自己要用的隨附模組。清單上有它們時，狀態是「隨附模組」、沒有按鈕，那一列多一句「這是 iPLoT 自己要用的隨附模組，工作坊不覆蓋它；要換新版，自己把新的資料夾複製進 modules/。」名稱寫法不同（大小寫、Unicode 的另一種寫法）也算同一個；這三個資料夾被刪掉了，也不從工作坊裝回來。要換新版，只能自己把新的資料夾複製進 `modules/`（「更新」不碰 `modules/`）；自己複製進來的資料夾不帶第一次執行前的確認。不讓工作坊覆蓋，是因為從工作坊裝進來的「作業系統」會帶著那一問：在面板上按過一次確定之前，右鍵的動作、「打開檔案」每次先問；啟動時剛好要安裝介面的話，終端機那一頭沒辦法回答這一問。其他隨附模組（「開工」這些）照舊是「版本未知」，可以覆蓋。
+- **不裝、資料夾不動、那一列改成「無法安裝：…」的情況**：連不上，或下載到一半斷了；下載的檔跟清單對不上（sha256 不同）：「無法安裝：下載的檔案跟清單對不上。清單可能剛更新過，關掉工作坊再開一次；再不行就是檔案有問題」（清單頁開著的時候，上傳的人可能剛傳了新版）；zip 的最上層不是 `<名稱>/`；包裡沒有 `iplot.py`；包裡的路徑有 `..`；清單上的名稱不是單純的資料夾名（含 `/`、`\`，或以 `.` 開頭）；`modules/<名稱>` 本身是符號連結。蓋檔蓋到一半出錯也是「無法安裝：」開頭，接著是那個錯，再照實說放回去了沒有（見上面）。
+- **「作業系統」「更新」「工作坊」不從工作坊換**：這三個是 iPLoT 自己要用的隨附模組。新清單上不會有這三列（這三個名字誰都不能傳）；舊的清單或別人的清單上有它們時，狀態是「隨附模組」、沒有按鈕，那一列多一句「這是 iPLoT 自己要用的隨附模組，工作坊不覆蓋它；要換新版，自己把新的資料夾複製進 modules/。」名稱寫法不同（大小寫、Unicode 的另一種寫法）也算同一個；這三個資料夾被刪掉了，也不從工作坊裝回來。要換新版，只能自己把新的資料夾複製進 `modules/`（「更新」不碰 `modules/`）；自己複製進來的資料夾不帶第一次執行前的確認。不讓工作坊覆蓋，是因為從工作坊裝進來的「作業系統」會帶著那一問：在面板上按過一次確定之前，右鍵的動作、「打開檔案」每次先問；啟動時剛好要安裝介面的話，終端機那一頭沒辦法回答這一問。其他隨附模組（「開工」這些）照舊是「版本未知」，可以覆蓋。
 - **沒有清單頁的地方**：安全模式與後備的 tkinter 面板，所以 Linux 也是。在那裡按「工作坊」，訊息區只有一句「這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用」。
-- **沒有做的**：移除模組（要移除，把那個資料夾丟進垃圾桶）、降回舊版、評分、留言、自動更新、一次看多份清單。
+- **沒有做的**：移除模組（要移除，把那個資料夾丟進垃圾桶）、降回舊版、評分、留言、自動更新、一次看多份清單、審查。
+
+### 上傳自己的模組
+
+要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.5.2.md](docs/08_操作說明-0.5.2.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
 
 ## 在面板外打開模組
 
