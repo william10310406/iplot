@@ -2,15 +2,17 @@
 
     python3 tests/acceptance_workshop.py [--published ../iplot-workshop] [--keep <資料夾>]
 
-一、網路上的檔：照 config.py 的 UPDATE_URL、WORKSHOP_URL，用工作坊自己的 _context() 經 urllib 下載 update.json、
-    index.json、index.html、核心 zip、每個模組 zip。Pages 剛推完要等一兩分鐘：輪詢到 update.json、index.json 跟
-    --published（publish.py --out 的那個資料夾）裡的一樣為止，最多 10 分鐘。每個 zip 的 sha256 要跟 json 寫的一樣。
+一、網路上的檔：照 config.py 的 UPDATE_URL、WORKSHOP_URL，用工作坊自己的 _context() 經 urllib 下載。Pages 剛推完要等
+    一兩分鐘：照 UPDATE_URL 輪詢到 update.json 跟 --published（publish.py --out 的那個資料夾）裡的一樣為止（只比這一個），
+    最多 10 分鐘。index.json 用這一版的 workshop.read_listing 讀，modules 要是空的、要有 notice；核心那一頁從 UPDATE_URL
+    那一層拿；核心 zip 與每個上傳的 zip，sha256 要跟 json 寫的一樣。
 二、真的視窗：把這個 iPLoT 資料夾整個複製到暫存處（真的工作樹不動），core/__init__.py 改成 0.4.9，config.py 用隨附的
     （也就是真的網址），刪掉複本的「打開核心原始碼」，PATH 最前面放空的 open、code（不在桌面上彈出 Finder、編輯器），
     跑複本的 main.py，用 evaluate_js 代替滑鼠：按「更新」從網路換成新版、.backup/ 長出來、按「重新啟動」（真的 os.execv）
-    之後標題是新版；打開「工作坊」：清單上的每一列、「作業系統」是隨附模組沒有按鈕、有 notes 的列有「這一版」；
+    之後標題是新版；打開「工作坊」：清單上的每一列、notice、每一列的上傳者、有 notes 的列有「這一版」；
     從網路裝「打開核心原始碼」：裝好的資料夾裡有 .origin、.unconfirmed、CHANGELOG.md，關掉清單頁格子出現。
 每一項印出證據（句子、sha256、pid）。全部通過結束碼 0。要人眼看的（確認框長相、Safari 開那一頁、Wi-Fi 關掉）不在這裡。
+要等設計第 9.3 節的種子收完、網站更新之後才跑（要從清單裝「打開核心原始碼」）。
 
 同一個檔也是驅動：複本的 Python 由 sitecustomize 把這個檔載進去，在背景執行緒裡呼叫 drive()。"""
 
@@ -33,7 +35,8 @@ TILE = "[...document.querySelectorAll('.tile')].find(t => t.querySelector('.labe
 LOGS = "[...document.querySelectorAll('.entry .t')].map(e => e.firstChild ? e.firstChild.textContent : '')"
 ROWS = ("[...document.querySelectorAll('#list tr')].map(r => [r.querySelector('b').textContent, "
         "r.querySelector('.state').textContent, [...r.querySelectorAll('button')].map(b => b.textContent), "
-        "r.querySelector('.notes') ? r.querySelector('.notes').textContent : null])")
+        "r.querySelector('.notes') ? r.querySelector('.notes').textContent : null, "
+        "r.querySelector('.author') ? r.querySelector('.author').textContent : null])")
 HOOK = """import os, threading, importlib.util
 if os.environ.get("IPLOT_ACCEPT_DIR"):
     spec = importlib.util.spec_from_file_location("acceptance_workshop", os.environ["IPLOT_ACCEPT_SCRIPT"])
@@ -134,7 +137,8 @@ def workshop(acc, home, webview, js, logs):
     version = os.environ["IPLOT_ACCEPT_VERSION"]
     record("重新啟動之後是新版", title == f"iPLoT v{version}" and str(os.getpid()) == old_pid,
            {"標題": title, "重新啟動前的 pid": old_pid, "現在的 pid（一樣表示是 os.execv 換掉的同一個程序）": os.getpid()})
-    index = json.loads((acc / "index.json").read_text(encoding="utf-8"))["modules"]
+    data = json.loads((acc / "index.json").read_text(encoding="utf-8"))
+    index = data["modules"]
     js(f"{DBL}({TILE % '工作坊'})")
     if not until(lambda: len(webview.windows) >= 2, 30):
         return record("打開工作坊", False, {"訊息區": logs()[-3:]})
@@ -143,8 +147,12 @@ def workshop(acc, home, webview, js, logs):
     rows = lambda: page.evaluate_js(ROWS)  # noqa: E731
     listing = rows()
     record("清單上的每一列", [r[0] for r in listing] == [e["name"] for e in index], {"清單頁": listing})
-    bundled = next((r for r in listing if r[0] == "作業系統"), None)
-    record("「作業系統」是隨附模組、沒有按鈕", bundled is not None and bundled[1:3] == ["隨附模組", []], {"那一列": bundled})
+    notice = page.evaluate_js("document.querySelector('.notice') ? document.querySelector('.notice').textContent : null")
+    record("清單最上面那一行是 notice", notice == data["notice"], {"頁面上": notice, "index.json 的 notice": data["notice"]})
+    ws = load_workshop()
+    shown_by = {r[0]: r[4] for r in listing}
+    record("每一列有上傳者", all(shown_by[e["name"]] == ws.uploader(e.get("author")) for e in index) and all(r[4] for r in listing),
+           {"上傳者": shown_by})
     shown = {r[0]: r[3] for r in listing}
     record("有 notes 的列有「這一版」", all(shown[e["name"]] == (f"這一版：{e['notes']}" if e.get("notes") else None) for e in index),
            {"這一版": shown})
@@ -179,33 +187,43 @@ def fetch(workshop, url):
         return r.read()
 
 
-def check_site(update_url, index_url, published, results):
-    """一、網路上的檔。回 (update.json, index.json)；對不上就是 None。"""
+def check_site(update_url, index_url, published, results, wait=600):
+    """一、網路上的檔。回 (update.json, 清單, notice)；對不上或讀不懂就是 (None, None, "")。"""
     workshop = load_workshop()
-    want = {name: (published / name).read_bytes() for name in ("update.json", "index.json")} if published else {}
+    want = (published / "update.json").read_bytes() if published else None
     got = {}
 
     def ready():
-        got["update.json"], got["index.json"] = fetch(workshop, update_url), fetch(workshop, index_url)
-        return all(got[k] == v for k, v in want.items())
+        got["update.json"] = fetch(workshop, update_url)
+        return want is None or got["update.json"] == want
 
     start = time.monotonic()
-    fresh = until(ready, 600, 10)
+    fresh = until(ready, wait, 10 if wait > 60 else 0.1)
     waited = round(time.monotonic() - start)
-    results.append(("網路上的 update.json、index.json 是剛發佈的那一份", fresh,
+    results.append(("網路上的 update.json 是剛發佈的那一份", fresh,
                     {"等了幾秒": waited, "比對的資料夾": str(published) if published else "（沒有給，不比）"}))
     if not fresh:
-        return None, None
-    update, index = json.loads(got["update.json"]), json.loads(got["index.json"])["modules"]
-    base = index_url.rpartition("/")[0]
-    page = fetch(workshop, base + "/").decode("utf-8")
-    results.append(("index.html", "iPLoT 工作坊" in page and update["sha256"] in page and all(e["sha256"] in page for e in index),
-                    {"網址": base + "/", "大小": len(page)}))
+        return None, None, ""
+    update = json.loads(got["update.json"])
+    try:
+        entries, notice = workshop.read_listing(index_url)
+    except (ValueError, *workshop.NETWORK) as e:
+        results.append(("index.json 用這一版的工作坊讀得懂", False, {"網址": index_url, "錯誤": repr(e)}))
+        return None, None, ""
+    results.append(("index.json 用這一版的工作坊讀得懂", True, {"網址": index_url, "幾筆": len(entries), "notice": notice}))
+    raw = json.loads(fetch(workshop, index_url))
+    results.append(("index.json 的 modules 是空的（0.5.1 的工作坊看到空清單）", raw.get("modules") == [],
+                    {"modules": raw.get("modules")}))
+    results.append(("清單最上面有 notice", bool(notice.strip()), {"notice": notice}))
+    base = update_url.rpartition("/")[0]
+    page = fetch(workshop, base + "/index.html").decode("utf-8")
+    results.append(("核心那一頁（index.html）", "iPLoT 工作坊" in page and update["sha256"] in page and "誰都能上傳" in page,
+                    {"網址": base + "/index.html", "大小": len(page)}))
     for label, url, expected in [(f"核心 zip（{update['version']}）", update["zip_url"], update["sha256"])] + [
-            (f"模組 zip「{e['name']}」", e["zip_url"], e["sha256"]) for e in index]:
+            (f"模組 zip「{e['name']}」", e["zip_url"], e["sha256"]) for e in entries]:
         data = fetch(workshop, url)
         results.append((label, sha(data) == expected, {"網址": url, "sha256": sha(data), "json 寫的": expected, "大小": len(data)}))
-    return update, index
+    return update, entries, notice
 
 
 def run_copy(acc, home, version, stubs):
@@ -227,7 +245,7 @@ def main(argv):
     import argparse
     parser = argparse.ArgumentParser(description="0.5.0 驗收的自動部分，對 config.py 裡真的網址跑")
     parser.add_argument("--published", default=str(SRC.parent / "iplot-workshop"),
-                        help="publish.py --out 的那個資料夾：等網路上的 json 跟它一樣才開始（沒有這個資料夾就不比）")
+                        help="publish.py --out 的那個資料夾：等網路上的 update.json 跟它一樣才開始（沒有這個資料夾就不比）")
     parser.add_argument("--keep", help="複本放在這個新的（或空的）資料夾；跑完留著，人工驗收可以接著用。預設是暫存資料夾")
     args = parser.parse_args(argv)
     keep = Path(args.keep).resolve() if args.keep else None
@@ -242,7 +260,7 @@ def main(argv):
         return 1
     published = Path(args.published) if Path(args.published, "update.json").is_file() else None
     results = []
-    update, index = check_site(config.update_url, config.workshop_url, published, results)
+    update, index, notice = check_site(config.update_url, config.workshop_url, published, results)
     if update:
         acc = keep or Path(tempfile.mkdtemp(prefix="iplot-acceptance-")).resolve()
         acc.mkdir(parents=True, exist_ok=True)
@@ -259,7 +277,7 @@ def main(argv):
         for name in ("open", "code"):
             (stubs / name).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             (stubs / name).chmod(0o755)
-        (acc / "index.json").write_text(json.dumps({"modules": index}, ensure_ascii=False), encoding="utf-8")
+        (acc / "index.json").write_text(json.dumps({"modules": index, "notice": notice}, ensure_ascii=False), encoding="utf-8")
         (acc / "stage").write_text("update", encoding="utf-8")
         finished = run_copy(acc, home, update["version"], stubs)
         for line in (acc / "results.jsonl").read_text(encoding="utf-8").splitlines() if (acc / "results.jsonl").exists() else []:
