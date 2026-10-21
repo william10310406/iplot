@@ -189,6 +189,45 @@ def _url(base: str, *parts: str) -> str:
     return "/".join([urllib.parse.quote(base.rstrip("/"), safe=":/%"), *(urllib.parse.quote(p) for p in parts)])
 
 
+FORGOT = ("{ref} 的 config.py 的 WORKSHOP_URL（{url}）不在 --base-url 底下：模組不從這裡發了，"
+          "加 --modules-site <模組網站的網址>（那一頁就不會把舊的 index.json 列回去）；真的要從這裡發模組才用 --modules")
+ATTRS = ("注意：工作樹的 .gitattributes 跟 {ref} 裡的不一樣（改了還沒 commit，或還沒追蹤）；"
+         "核心的包照 {ref} 裡的那一份排除檔案（export-ignore）。要照新的排，先 commit、重打 tag 再發佈。")
+TOP = "核心的包最上層："
+
+
+def workshop_url_at(root: Path, ref: str) -> str | None:
+    """<ref>:config.py 的 WORKSHOP_URL；那個 ref 沒有 config.py、或不是一個字串（例如 None）回 None。位元組讀、自己解碼。"""
+    shown = subprocess.run(["git", "show", f"{ref}:config.py"], cwd=root, capture_output=True)
+    if shown.returncode != 0:
+        return None
+    found = re.search(r'^WORKSHOP_URL\s*=\s*(["\'])(.*?)\1', shown.stdout.decode("utf-8", "replace"), re.M)
+    return found.group(2) if found else None
+
+
+def under(url: str, base: str) -> bool:
+    return urllib.parse.quote(url, safe=":/%").startswith(_url(base, ""))
+
+
+def attributes_differ(root: Path, ref: str) -> bool:
+    """工作樹的 .gitattributes 跟 ref 裡的不一樣（比 git 的 blob，不比位元組：Windows 的 autocrlf 會把工作樹改成 CRLF）。"""
+    run = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)  # noqa: E731
+    here = run("hash-object", "--", ".gitattributes") if (root / ".gitattributes").is_file() else None
+    there = run("rev-parse", f"{ref}:.gitattributes")
+    return (here.stdout.strip() if here and here.returncode == 0 else None) != (there.stdout.strip() if there.returncode == 0 else None)
+
+
+def top_level(zip_path: Path) -> list[str]:
+    """核心 zip 最上層（iPLoT-vX.Y.Z/ 底下的第一段）；資料夾後面加 /。"""
+    names = set()
+    with zipfile.ZipFile(zip_path) as z:
+        for entry in z.namelist():
+            parts = [p for p in entry.split("/")[1:] if p]
+            if parts:
+                names.add(parts[0] + ("/" if len(parts) > 1 or entry.endswith("/") else ""))
+    return sorted(names)
+
+
 def main(argv: list[str], root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description="產生核心 zip、update.json、模組 zip、index.json、index.html、.nojekyll")
     parser.add_argument("--version", required=True, help="核心版本，例如 0.5.0")
@@ -223,8 +262,13 @@ def main(argv: list[str], root: Path = ROOT) -> int:
             print(f"「{name}」沒有任何 git 追蹤的檔：模組的包只收 git 追蹤的檔，先 commit 再發佈")
             return 1
         wanted.append((name, ver or logged or version, notes, files))
-    out.mkdir(parents=True, exist_ok=True)
     ref, core_zip = args.ref or f"v{version}", out / f"iPLoT-v{version}.zip"
+    if not args.modules and args.modules_site is None:  # 忘了 --modules-site：照 <ref>:config.py，不是工作樹的
+        url = workshop_url_at(root, ref)
+        if url is not None and not under(url, args.base_url):
+            print(FORGOT.format(ref=ref, url=url))
+            return 1
+    out.mkdir(parents=True, exist_ok=True)
     git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)  # noqa: E731
     shown = git("show", f"{ref}:core/__init__.py")
     if shown.returncode != 0:
@@ -260,9 +304,12 @@ def main(argv: list[str], root: Path = ROOT) -> int:
     (out / ".nojekyll").write_bytes(b"")
     made += [write_html(update, entries, out, args.modules_site), out / ".nojekyll"]
     print(f"產生在 {out}：\n" + "\n".join(f"  {p.relative_to(out)}" for p in made))
+    print(TOP + "  ".join(top_level(core_zip)))
     if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
         print(f"注意：工作目錄有還沒 commit 的改動；核心的包是從 {ref} 打的，不含那些改動"
               "（模組的包含：模組收的是 git 追蹤的檔在磁碟上的樣子）。")
+    if attributes_differ(root, ref):
+        print(ATTRS.format(ref=ref))
     update_line = f'UPDATE_URL = "{_url(args.base_url, "update.json")}"'
     if args.modules_site is not None:
         print(f"把 {out} 放上 --base-url 那個網址之後，在 config.py 填這一行（從行首貼上，前面不要留空白）：\n"

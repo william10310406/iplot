@@ -442,3 +442,62 @@ def test_modules_site_is_escaped_in_the_page(publish, repo):
     page = (repo / "交付" / "發佈" / "index.html").read_text(encoding="utf-8")
     assert "&amp;" in page and "&quot;" in page and '"x"' not in page
     assert site in [a["href"] for tag, a in parsed(page).opened if tag == "a"]
+
+
+def commit_config(repo, line):
+    """repo/config.py 寫 line 一行、add、commit、git tag -f v9.9.9（tag 跟著新的 commit）。"""
+    (repo / "config.py").write_text(line + "\n", encoding="utf-8")
+    git(repo, "add", "config.py")
+    git(repo, "commit", "-q", "-m", "config")
+    git(repo, "tag", "-f", "v9.9.9")
+
+
+FORGOT_ARGS = ["--version", "9.9.9", "--base-url", "https://example.invalid/x"]
+
+
+def test_forgetting_modules_site_stops_before_writing_anything(publish, repo, capsys):
+    commit_config(repo, 'WORKSHOP_URL = "https://example.invalid/modules/index.json"')
+    assert publish.main(FORGOT_ARGS, root=repo) == 1
+    said = capsys.readouterr().out
+    assert len(said.strip().splitlines()) == 1 and "--modules-site" in said and "v9.9.9" in said
+    assert not (repo / "交付").exists(), "一個檔都不產生"
+
+
+def test_forgetting_modules_site_reads_config_from_the_ref(publish, repo, capsys):
+    commit_config(repo, 'WORKSHOP_URL = "https://example.invalid/modules/index.json"')
+    (repo / "config.py").write_text('WORKSHOP_URL = "https://example.invalid/x/index.json"\n', encoding="utf-8")
+    assert publish.main(FORGOT_ARGS, root=repo) == 1
+
+
+@pytest.mark.parametrize("line", ['WORKSHOP_URL = "https://example.invalid/x/index.json"', "WORKSHOP_URL = None"])
+def test_workshop_url_under_the_base_url_needs_no_flag(publish, repo, line):
+    commit_config(repo, line)
+    assert publish.main(FORGOT_ARGS, root=repo) == 0
+
+
+def test_modules_or_modules_site_skips_the_check(publish, repo):
+    commit_config(repo, 'WORKSHOP_URL = "https://example.invalid/modules/index.json"')
+    assert publish.main([*FORGOT_ARGS, "--modules", "整理桌面"], root=repo) == 0
+    assert publish.main([*FORGOT_ARGS, "--modules-site", "https://example.invalid/modules/"], root=repo) == 0
+
+
+def test_uncommitted_gitattributes_is_mentioned(publish, repo, capsys):
+    (repo / ".gitattributes").write_bytes(b"tests/ export-ignore\n")
+    assert publish.main(FORGOT_ARGS, root=repo) == 0
+    assert "工作樹的 .gitattributes 跟 v9.9.9 裡的不一樣" in capsys.readouterr().out
+
+
+def test_committed_gitattributes_is_not_mentioned(publish, repo, capsys):
+    assert publish.main(FORGOT_ARGS, root=repo) == 0
+    assert "工作樹的 .gitattributes" not in capsys.readouterr().out
+    (repo / ".gitattributes").write_bytes(b"tests/ export-ignore\n")
+    git(repo, "add", ".gitattributes")
+    git(repo, "commit", "-q", "-m", "attrs")
+    git(repo, "tag", "-f", "v9.9.9")
+    assert publish.main(FORGOT_ARGS, root=repo) == 0
+    assert "工作樹的 .gitattributes" not in capsys.readouterr().out
+
+
+def test_core_zip_top_level_is_printed(publish, repo, capsys):
+    assert publish.main(FORGOT_ARGS, root=repo) == 0
+    assert "核心的包最上層：CHANGELOG.md  core/  main.py  modules/" in capsys.readouterr().out.splitlines()
