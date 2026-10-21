@@ -1,0 +1,15 @@
+# 核心的包（git archive）不帶的東西：開發用的、有個人路徑的文件、還沒驗收的「科學計算」（設計第 9.1 節、D108）。
+# 只管以後的包，已經公開的 0.5.0、0.5.1 不變；git archive 只認 tag 裡已經 commit 的這一份。docs/02、docs/03 要留著：「開工」會開 docs/02。
+tests/ export-ignore
+docs/plans/ export-ignore
+docs/original/ export-ignore
+docs/00_* export-ignore
+docs/01_* export-ignore
+docs/04_* export-ignore
+tools/ export-ignore
+.github/ export-ignore
+requirements-dev.txt export-ignore
+pyproject.toml export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+modules/科學計算/ export-ignore

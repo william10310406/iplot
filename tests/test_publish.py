@@ -501,3 +501,37 @@ def test_committed_gitattributes_is_not_mentioned(publish, repo, capsys):
 def test_core_zip_top_level_is_printed(publish, repo, capsys):
     assert publish.main(FORGOT_ARGS, root=repo) == 0
     assert "核心的包最上層：CHANGELOG.md  core/  main.py  modules/" in capsys.readouterr().out.splitlines()
+
+
+EXPORT_IGNORE = ["tests/", "docs/plans/", "docs/original/", "docs/00_*", "docs/01_*", "docs/04_*", "tools/", ".github/",
+                 "requirements-dev.txt", "pyproject.toml", ".gitignore", ".gitattributes", "modules/科學計算/"]
+
+
+def test_gitattributes_lists_exactly_the_design_paths():
+    """設計第 9.1 節：核心的包不帶的東西，一樣不多、一樣不少。"""
+    lines = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert [x for x in lines if x.strip() and not x.startswith("#")] == [f"{p} export-ignore" for p in EXPORT_IGNORE]
+
+
+def test_real_gitattributes_keeps_the_ignored_paths_out_of_the_core_zip(publish, repo):
+    """用 repo 真的 .gitattributes 跑一次 git archive：該擋的擋掉，docs/02、03、05 與核心留著。"""
+    files = ["tests/a.py", "tools/p.py", "docs/plans/x.md", "docs/original/o.py", "docs/00_現況分析.md", "docs/01_從零啟動.md",
+             "docs/02_重構設計.md", "docs/03_設計決定.md", "docs/04_M1驗收.md", "docs/05_使用紀錄.md",
+             ".github/workflows/ci.yml", "requirements-dev.txt", "pyproject.toml", "modules/科學計算/iplot.py"]
+    for name in files:
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text("x\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("logs/\n", encoding="utf-8")
+    (repo / ".gitattributes").write_bytes((ROOT / ".gitattributes").read_bytes())
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "files")
+    git(repo, "tag", "-f", "v9.9.9")
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
+    with zipfile.ZipFile(repo / "交付" / "發佈" / "iPLoT-v9.9.9.zip") as z:
+        names = [n.removeprefix("iPLoT-v9.9.9/") for n in z.namelist()]
+    for pattern in EXPORT_IGNORE:
+        prefix = pattern.rstrip("*")
+        assert not [n for n in names if n.startswith(prefix)], pattern
+    for kept in ["docs/02_重構設計.md", "docs/03_設計決定.md", "docs/05_使用紀錄.md", "modules/整理桌面/iplot.py",
+                 "main.py", "CHANGELOG.md"]:
+        assert kept in names, kept
