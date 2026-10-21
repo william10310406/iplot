@@ -282,14 +282,13 @@ def test_update_and_workshop_do_nothing_until_a_url_is_set(name, setting, home, 
 
 
 def test_shipped_config_points_at_the_workshop_site():
-    """D71 修訂（D-d）：隨附的 config.py 直接帶正式網址（GitHub Pages 上的 iplot-workshop），剛拿到的 iPLoT 按「更新」
-    「工作坊」就有東西；Config 的預設值仍是 None（上面那個測試），改回 None 就不連網。"""
+    """D101：「更新」照舊讀 iplot-workshop（只有研究助理能寫），「工作坊」讀 iplot-modules（誰都能上傳）。"""
     from core.core import load_config
 
     config, err = load_config(MODULES.parent / "config.py")
-    base = "https://william10310406.github.io/iplot-workshop/"
     assert err is None
-    assert (config.update_url, config.workshop_url) == (base + "update.json", base + "index.json")
+    assert config.update_url == "https://william10310406.github.io/iplot-workshop/update.json"
+    assert config.workshop_url == "https://william10310406.github.io/iplot-modules/index.json"
 
 
 def test_update_and_workshop_keep_their_logic_beside_iplot_py():
