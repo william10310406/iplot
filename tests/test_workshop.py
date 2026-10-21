@@ -906,3 +906,93 @@ def test_page_shows_the_notes_as_text(workshop, mods, entry):
     assert "這一版" not in rows[1] and "這一版" not in rows[2]
     page = (MODULE / "page.html").read_text(encoding="utf-8")
     assert ".notes" in page.split("</style>")[0], "page.html 的 CSS 有 .notes"
+
+
+# 清單頁：notice、上傳者、warning（D107）
+
+def _page():
+    return (MODULE / "page.html").read_text(encoding="utf-8")
+
+
+def test_render_shows_uploader_between_name_and_description(workshop, mods, entry):
+    html = workshop.render([{**entry, "author": "someone"}], mods, "{rows}")
+    assert '<b>整理桌面</b><div class="author">上傳者：@someone</div><div class="desc">' in html
+
+
+def test_render_without_author_has_no_uploader_line(workshop, mods, entry):
+    for bad in ({}, {"author": 5}, {"author": None}, {"author": ""}, {"author": "  "}):
+        html = workshop.render([{**entry, **bad}], mods, "{rows}")
+        assert 'class="author"' not in html and "上傳者" not in html
+
+
+def test_uploader_drops_the_at_for_a_deleted_account(workshop):
+    assert workshop.uploader("someone") == "上傳者：@someone"
+    assert workshop.uploader("a-b9") == "上傳者：@a-b9"
+    assert workshop.uploader("帳號已刪除") == "上傳者：帳號已刪除"
+    assert workshop.uploader(None) == "" and workshop.uploader(5) == "" and workshop.uploader("") == ""
+
+
+def test_render_shows_the_warning_in_red(workshop, mods, entry):
+    html = workshop.render([{**entry, "notes": "n", "warning": "被檢舉，還在查"}], mods, "{rows}")
+    shown = '<div class="warning">⚠ 被檢舉，還在查</div>'
+    assert shown in html and html.index('class="notes"') < html.index(shown)
+
+
+def test_warning_that_is_not_a_string_is_not_shown(workshop, mods, entry):
+    for bad in (5, None, ["x"], "", "  "):
+        assert "⚠" not in workshop.render([{**entry, "warning": bad}], mods, "{rows}")
+
+
+def test_render_escapes_author_warning_and_notice(workshop, mods, entry):
+    html = workshop.render([{**entry, "author": "<script>x</script>", "warning": "<img src=x onerror=alert(1)>"}], mods,
+                           "{notice}<table>{rows}</table>", "</p><script>alert(3)</script>")
+    for raw in ("<script>x</script>", "<img src=x onerror=alert(1)>", "</p><script>alert(3)</script>"):
+        assert raw not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_render_puts_the_notice_after_the_hint_and_before_the_table(workshop, mods, entry):
+    html = workshop.render([entry], mods, _page(), "沒有人審查")
+    assert '<p class="notice">沒有人審查</p>' in html and "{notice}" not in html
+    assert html.index('class="hint"') < html.index('class="notice"') < html.index("<table")
+
+
+def test_empty_notice_leaves_no_mark(workshop, mods, entry):
+    for html in (workshop.render([entry], mods, _page(), ""), workshop.render([entry], mods, _page())):
+        assert 'class="notice"' not in html and "{notice}" not in html
+
+
+def test_a_description_that_says_notice_is_left_alone(workshop, mods, entry):
+    html = workshop.render([{**entry, "description": "{notice} 與 {rows}"}], mods, "{rows}", "N")
+    assert "{notice} 與 {rows}" in html
+
+
+def test_page_has_one_notice_mark():
+    page = _page()
+    assert page.count("{notice}") == 1
+    assert page.index('class="hint"') < page.index("{notice}") < page.index("<table")
+    style = page.split("</style>")[0]
+    assert ".notice" in style and ".author" in style and ".warning" in style
+    assert "var(--danger)" in style[style.index(".warning"):]
+
+
+def test_run_shows_the_notice_and_the_uploaders(mods, src, entry):
+    url = listing(src, {"notice": "沒有人審查", "modules": [], "uploads": [{**entry, "author": "someone"}]})
+    app = FakeApp(mods.parent, workshop_url=url)
+    run(app)
+    [(_, html, _)] = app.pages
+    assert "沒有人審查" in html and "上傳者：@someone" in html and app.rescans == 1
+
+
+def test_run_shows_the_notice_of_an_old_index(mods, src, entry):
+    app = FakeApp(mods.parent, workshop_url=listing(src, {"notice": "這份清單不再更新。", "modules": [entry]}))
+    run(app)
+    [(_, html, _)] = app.pages
+    assert "這份清單不再更新。" in html and "整理桌面" in html and "上傳者" not in html
+
+
+def test_run_with_empty_uploads_opens_an_empty_list(mods, src, entry):
+    app = FakeApp(mods.parent, workshop_url=listing(src, {"notice": "沒有人審查", "modules": [entry], "uploads": []}))
+    run(app)
+    [(_, html, _)] = app.pages
+    assert "沒有人審查" in html and "<tr" not in html and "整理桌面" not in html

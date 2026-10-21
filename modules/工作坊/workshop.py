@@ -10,6 +10,7 @@ import html
 import http.client
 import json
 import os
+import re
 import shutil
 import ssl
 import threading
@@ -363,8 +364,20 @@ def install(entry, modules_dir, confirmed=False):
     return state(entry, modules_dir)
 
 
-def render(entries, modules_dir, template):
-    """把索引變成 page.html 裡的一列列（放進 template 的 {rows}）。索引是從網路來的，裡面的字一律當文字，不當 HTML。"""
+def uploader(author):
+    """一列上的上傳者那一句（還沒跳脫的純文字）。不是字串、或只有空白就是 ""；GitHub 帳號名（英數與 -）前面加 @；
+    其他的（例如 build 寫的「帳號已刪除」）照寫。"""
+    if not isinstance(author, str) or not author.strip():
+        return ""
+    return f"上傳者：@{author}" if re.fullmatch(r"[A-Za-z0-9-]+", author) else f"上傳者：{author}"
+
+
+def render(entries, modules_dir, template, notice=""):
+    """把清單變成 page.html 裡的一列列（放進 template 的 {rows}），清單最上面那一行放進 {notice}。
+    清單是從網路來的，裡面的字一律當文字，不當 HTML；notice、author、warning 不是字串、或只有空白，就當沒有。"""
+    text = notice if isinstance(notice, str) else ""
+    box = f'<p class="notice">{html.escape(text)}</p>' if text.strip() else ""
+    template = template.replace("{notice}", box, 1)  # 只換第一個；要在換 {rows} 之前，免得說明文字裡的字被換掉
     rows = []
     for entry in entries:
         now = state(entry, modules_dir)
@@ -374,9 +387,14 @@ def render(entries, modules_dir, template):
         note = f'<div class="note">{BUNDLED_NOTE}</div>' if now == "bundled" else ""
         notes = entry.get("notes") or ""  # 這一版改了什麼（D78）；舊的索引沒有這一項
         notes = f'<div class="notes">這一版：{html.escape(str(notes))}</div>' if notes else ""
+        line = uploader(entry.get("author"))
+        author = f'<div class="author">{html.escape(line)}</div>' if line else ""
+        w = entry.get("warning")
+        warning = f'<div class="warning">⚠ {html.escape(w)}</div>' if isinstance(w, str) and w.strip() else ""
         rows.append(
             f'<tr><td class="icon">{html.escape(str(entry.get("icon") or ""))}</td>'
-            f'<td><b>{name}</b><div class="desc">{html.escape(str(entry.get("description") or ""))}</div>{notes}{note}</td>'
+            f'<td><b>{name}</b>{author}<div class="desc">{html.escape(str(entry.get("description") or ""))}</div>'
+            f'{notes}{warning}{note}</td>'
             f'<td class="ver">{html.escape(str(entry["version"]))}</td>'
             f'<td class="state">{LABELS[now]}</td><td class="act">{button}</td></tr>')
     head, mark, tail = template.rpartition("{rows}")  # 只換最後一個：前面的說明文字裡提到它也沒關係
