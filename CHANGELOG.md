@@ -4,6 +4,49 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-21
+
+這一版的工作坊清單換到新的地方：有 GitHub 帳號的人都能上傳自己的模組，沒有人審查，清單上標出每個模組的上傳者。核心邏輯一行沒改，只換了版本號。「更新」不碰 config.py 與 modules/，已經在用的人按完「更新」還要自己做兩件事：①把 .backup/download-0.5.2.zip 解開（在終端機進到 iPLoT 資料夾打 open .backup，Finder 就會打開它），用裡面的 iPLoT-v0.5.2/modules/工作坊 整個換掉自己的 modules/工作坊；②打開 config.py，把 WORKSHOP_URL 那一行換成 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"。兩件做完再執行「重新啟動」。只做②的話，舊的工作坊看到的是空的清單；兩件都不做也能用，只是不會有新模組。新下載的 iPLoT 不用做。
+
+**核心邏輯一行沒改**：`core/` 只動 `__init__.py` 的版本號（D108），`ui/`、`main.py`、`requirements/` 沒變；`api_version` 仍是 3，既有模組不用改。
+
+### 變更
+- 工作坊（`modules/工作坊/workshop.py`）：新的 `read_listing` 讀清單，有 `uploads` 就讀它、沒有才讀 `modules`；頁面最上面多一行 `notice`（沒有人審查的提醒），每一列多一行上傳者，有 `warning` 的模組標出來；下載的檔對不上 sha256 時說的是 `ShaMismatch` 那一句（D107）。
+- `config.py` 的 `WORKSHOP_URL` 指到 iplot-modules 的 `index.json`（D101）；`UPDATE_URL` 不變。
+- `tools/publish.py`：多 `--modules-site`（跟 `--modules` 互斥）；只印 `UPDATE_URL`；忘了給旗標會在寫任何檔之前停；有未 commit 的改動時提醒 `.gitattributes` 只認已 commit 的那一份；印出核心包的最上層資料夾。
+- `tests/acceptance_workshop.py`：照兩個網址分開驗（`update.json` 與 `index.json`）。
+
+### 包的內容
+- 核心的包（`git archive`）不帶這十三樣：tests/、docs/plans/、docs/original/、docs/00_*、docs/01_*、docs/04_*、tools/、.github/、requirements-dev.txt、pyproject.toml、.gitignore、.gitattributes、modules/科學計算/（`.gitattributes` 的 `export-ignore`，D108）。`docs/02`、`docs/03` 留著（「開工」要開 `docs/02`）。
+- 「行事曆」0.1.1 跟著包走（v0.5.1 之後合進來的，跟工作坊上那一版一樣）；「科學計算」不進包（M6 的人工驗收還沒做，之後從 iplot-modules 傳）。
+- 跟 v0.5.1 比，核心、介面、設定與模組的差別（`git diff --stat v0.5.1 -- core ui main.py requirements config.py modules`）：
+
+```
+ config.py                            |    2 +-
+ core/__init__.py                     |    2 +-
+ modules/工作坊/iplot.py              |    6 +-
+ modules/工作坊/page.html             |    7 +-
+ modules/工作坊/workshop.py           |   57 ++++++--
+ modules/科學計算/CHANGELOG.md        |   26 ++++
+ modules/科學計算/examples/HK2.py     |  181 +++++++++++++++++++++++++
+ modules/科學計算/examples/HK6.py     |  252 +++++++++++++++++++++++++++++++++++
+ modules/科學計算/examples/HK8.py     |  127 ++++++++++++++++++
+ modules/科學計算/examples/README.md  |    3 +
+ modules/科學計算/hk_page.py          |  464 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ modules/科學計算/hk_tk.py            | 1130 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ modules/科學計算/iplot.py            |   36 +++++
+ modules/科學計算/匯入作業包/iplot.py |   21 +++
+ modules/科學計算/收作業/iplot.py     |   21 +++
+ modules/行事曆/CHANGELOG.md          |    7 +
+ modules/行事曆/iplot.py              |    5 +-
+ modules/行事曆/page.html             |    6 +-
+ modules/行事曆/pages.py              |   14 ++
+ 19 files changed, 2347 insertions(+), 20 deletions(-)
+```
+
+### 新增（文件）
+- `docs/plans/` 的設計與計畫寫下 D100–D109；`docs/08` 改名 `docs/08_操作說明-0.5.2.md`，第 1.2 節改寫、「上傳模組」一節。
+
 ## [0.5.1] - 2026-10-14
 
 這一版多了三個工作坊模組：「互通」讓任何模組不開面板也能打開（Spotlight、Dock、一行指令；在「互通」按「加上」之後也能直接 python3 iplot.py），「主控面板」讓任何模組叫出面板，「行事曆」打開就是這個月的月曆，每天寫行程、心情、看到了什麼、做了什麼、放照片，存成一天一個資料夾並產生網頁，打開「公開」的日子可以另外產生一份放上網路用的資料夾。核心只改了一件事：面板停在下一層時，app.run 在這一層找不到就退到最上層找。按「更新」只換核心，這三個模組到工作坊裝；新下載的 iPLoT 已經帶著它們。
