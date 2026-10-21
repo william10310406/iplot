@@ -4,6 +4,7 @@ tools/ 不是套件，用檔案路徑載入。真的跑 git archive 的那一個
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import zipfile
 from pathlib import Path
@@ -196,11 +197,12 @@ def test_printed_config_lines_can_be_pasted(publish, repo, capsys):
     assert re.search(r'^WORKSHOP_URL = "https://example.invalid/x/index.json"$', out, re.M)
 
 
-def test_core_only_run_keeps_the_index(publish, repo, capsys):
+@pytest.mark.parametrize("extra", [[], ["--modules-site", "https://example.invalid/modules/"]])
+def test_core_only_run_keeps_the_index(publish, repo, capsys, extra):
     out = repo / "交付" / "發佈"
     publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面"], root=repo)
     before = (out / "index.json").read_bytes()
-    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x"], root=repo) == 0
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", *extra], root=repo) == 0
     assert (out / "index.json").read_bytes() == before, "沒給 --modules：不動原本的 index.json"
 
 
@@ -397,3 +399,46 @@ def test_pack_module_with_a_file_list_keeps_skip(publish, tmp_path):
     out = publish.pack_module(folder, tmp_path / "out", ["iplot.py", ".origin", "gone.txt"])
     with zipfile.ZipFile(out) as z:
         assert z.namelist() == ["M/iplot.py"]
+
+
+SITE_URL = "https://example.invalid/modules/"
+
+
+def test_modules_and_modules_site_cannot_be_given_together(publish, repo, capsys):
+    with pytest.raises(SystemExit) as exc:
+        publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面",
+                      "--modules-site", SITE_URL], root=repo)
+    assert exc.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+    assert not (repo / "交付").exists(), "一個檔都不產生"
+
+
+def test_modules_site_prints_only_the_update_line(publish, repo, capsys):
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules-site", SITE_URL],
+                        root=repo) == 0
+    said = capsys.readouterr().out
+    assert re.search(r'^UPDATE_URL = "https://example.invalid/x/update.json"$', said, re.M)
+    assert not re.search(r"^WORKSHOP_URL = ", said, re.M)
+    assert "WORKSHOP_URL 照 config.py，不改" in said
+
+
+def test_modules_site_replaces_the_module_list_with_a_link(publish, repo):
+    out = repo / "交付" / "發佈"
+    publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules", "整理桌面"], root=repo)
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules-site", SITE_URL],
+                        root=repo) == 0
+    tags = parsed((out / "index.html").read_text(encoding="utf-8"))
+    text = "".join(tags.text)
+    assert SITE_URL in [a["href"] for tag, a in tags.opened if tag == "a"]
+    assert f"模組在 {SITE_URL}，誰都能上傳。" in text
+    assert "整理桌面" not in text and "在 iPLoT 裡按「工作坊」就能安裝" not in text
+    assert json.loads((out / "update.json").read_text(encoding="utf-8"))["sha256"] in text
+
+
+def test_modules_site_is_escaped_in_the_page(publish, repo):
+    site = 'https://example.invalid/m?a=1&b="x"'
+    assert publish.main(["--version", "9.9.9", "--base-url", "https://example.invalid/x", "--modules-site", site],
+                        root=repo) == 0
+    page = (repo / "交付" / "發佈" / "index.html").read_text(encoding="utf-8")
+    assert "&amp;" in page and "&quot;" in page and '"x"' not in page
+    assert site in [a["href"] for tag, a in parsed(page).opened if tag == "a"]

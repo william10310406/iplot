@@ -12,8 +12,9 @@
 
 --base-url 是 --out 那個資料夾放上網之後對應的網址。iPLoT 自己的檔放在 GitHub Pages（D79）：
     python3 tools/publish.py --version 0.5.0 --base-url https://<帳號>.github.io/iplot-workshop \
-        --out ../iplot-workshop --modules 開工 作業系統 打開核心原始碼
-在本機試就用 file:///…/交付/發佈。
+        --out ../iplot-workshop --modules-site https://william10310406.github.io/iplot-modules/
+iPLoT 自己只發核心：--modules-site https://william10310406.github.io/iplot-modules/（模組從 iplot-modules 的上傳表單發）；
+--modules 留給本機 file:// 試與測試。在本機試就用 file:///…/交付/發佈。
 config.py 填 UPDATE_URL = "<base-url>/update.json"、WORKSHOP_URL = "<base-url>/index.json"。
 模組的版本與這一版改了什麼，取自模組資料夾裡的 CHANGELOG.md（格式跟 repo 的一樣）最上面那一節：
 版本號，與那一節的第一段（寫進 index.json 的 notes）。沒有 CHANGELOG.md 的模組，版本跟 --version 一樣、notes 是空的；
@@ -155,11 +156,12 @@ a {{ color: var(--accent); }}
 <p class="notes">{notes}</p>
 </div>
 <h2>模組</h2>
-<p>在 iPLoT 裡按「工作坊」就能安裝、更新這些模組；也可以下載 zip、解開後把資料夾放進 modules/。</p>
 {modules}
 </body>
 </html>
 """
+HERE = "<p>在 iPLoT 裡按「工作坊」就能安裝、更新這些模組；也可以下載 zip、解開後把資料夾放進 modules/。</p>"
+SITE = '<p>模組在 <a href="{url}">{url}</a>，誰都能上傳。</p>'
 MODULE = """<div class="box">
 <p><span class="icon">{icon}</span><b>{name}</b> <span class="muted">{version}</span></p>
 <p>{description}</p>
@@ -168,15 +170,16 @@ MODULE = """<div class="box">
 </div>"""
 
 
-def write_html(update: dict, entries: list[dict], out: Path) -> Path:
+def write_html(update: dict, entries: list[dict], out: Path, modules_site: str | None = None) -> Path:
     """out/index.html：給還沒裝 iPLoT 的人看的一頁，資料就是 update.json 與 index.json 那兩份。
     純 HTML 加內嵌的 CSS，沒有 JS、沒有外部資源；每個字都先 html.escape。"""
     e = lambda value: html.escape(str(value or ""), quote=True)  # noqa: E731
     blocks = [MODULE.format(icon=e(m.get("icon")), name=e(m["name"]), version=e(m["version"]), description=e(m.get("description")),
                             notes=f'<p class="notes">這一版：{e(m.get("notes"))}</p>\n' if m.get("notes") else "",
                             zip_url=e(m["zip_url"]), sha256=e(m["sha256"])) for m in entries]
+    modules = HERE + "\n" + "\n".join(blocks) if modules_site is None else SITE.format(url=e(modules_site))
     page = PAGE.format(version=e(update["version"]), zip_url=e(update["zip_url"]), zip_name=e(update["zip_url"].rpartition("/")[2]),
-                       sha256=e(update["sha256"]), notes=e(update["notes"]), modules="\n".join(blocks))
+                       sha256=e(update["sha256"]), notes=e(update["notes"]), modules=modules)
     (out / "index.html").write_text(page, encoding="utf-8")
     return out / "index.html"
 
@@ -190,7 +193,11 @@ def main(argv: list[str], root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description="產生核心 zip、update.json、模組 zip、index.json、index.html、.nojekyll")
     parser.add_argument("--version", required=True, help="核心版本，例如 0.5.0")
     parser.add_argument("--base-url", required=True, help="--out 那個資料夾放上網之後對應的網址")
-    parser.add_argument("--modules", nargs="*", default=[], help="要放進工作坊的模組：名稱，或 名稱=版本")
+    modules = parser.add_mutually_exclusive_group()
+    modules.add_argument("--modules", nargs="*", default=[], help="要放進工作坊的模組：名稱，或 名稱=版本")
+    modules.add_argument("--modules-site", metavar="網址",
+                         help="模組網站的網址，例如 https://william10310406.github.io/iplot-modules/："
+                              "給了就只發核心，index.json 不動，那一頁的模組那一段換成一句話＋連結")
     parser.add_argument("--ref", help="核心 zip 從哪個 git ref 打包；預設是 v<版本> 這個 tag")
     parser.add_argument("--out", help="產生的檔放哪裡（相對於現在的資料夾）；預設是 iPLoT 資料夾裡的 交付/發佈/")
     args = parser.parse_args(argv)
@@ -247,17 +254,22 @@ def main(argv: list[str], root: Path = ROOT) -> int:
         made.append(packed)
     if wanted:  # 沒給 --modules：只發佈核心，原本的 index.json 不動，網頁上的模組照它列
         made.append(write_index(entries, out))
-    else:
+    elif args.modules_site is None:
         with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
             entries = json.loads((out / "index.json").read_text(encoding="utf-8"))["modules"]
     (out / ".nojekyll").write_bytes(b"")
-    made += [write_html(update, entries, out), out / ".nojekyll"]
+    made += [write_html(update, entries, out, args.modules_site), out / ".nojekyll"]
     print(f"產生在 {out}：\n" + "\n".join(f"  {p.relative_to(out)}" for p in made))
     if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
         print(f"注意：工作目錄有還沒 commit 的改動；核心的包是從 {ref} 打的，不含那些改動"
               "（模組的包含：模組收的是 git 追蹤的檔在磁碟上的樣子）。")
+    update_line = f'UPDATE_URL = "{_url(args.base_url, "update.json")}"'
+    if args.modules_site is not None:
+        print(f"把 {out} 放上 --base-url 那個網址之後，在 config.py 填這一行（從行首貼上，前面不要留空白）：\n"
+              f"{update_line}\nWORKSHOP_URL 照 config.py，不改（模組在 {args.modules_site}）。")
+        return 0
     print(f"把 {out} 放上 --base-url 那個網址之後，在 config.py 填這兩行（從行首貼上，前面不要留空白）：\n"
-          f'UPDATE_URL = "{_url(args.base_url, "update.json")}"\nWORKSHOP_URL = "{_url(args.base_url, "index.json")}"')
+          f'{update_line}\nWORKSHOP_URL = "{_url(args.base_url, "index.json")}"')
     return 0
 
 
