@@ -834,6 +834,49 @@ def test_read_index_checks_the_types(workshop, src, entry):
     assert [e["version"] for e in workshop.read_index(index.as_uri())] == ["2"], "版本一律當字串；同名的只留第一筆"
 
 
+def listing(src, data):
+    """把 data 寫成 src 旁邊的 index.json，回它的 file:// 網址。"""
+    index = src.parent / "index.json"
+    index.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return index.as_uri()
+
+
+def test_read_listing_prefers_uploads_over_modules(workshop, src, entry):
+    up = {**entry, "name": "上傳的", "author": "someone"}
+    url = listing(src, {"notice": "沒有人審查", "modules": [entry], "uploads": [up]})
+    assert workshop.read_listing(url) == ([up], "沒有人審查")
+
+
+def test_read_listing_reads_modules_when_there_is_no_uploads(workshop, src, entry):
+    assert workshop.read_listing(listing(src, {"modules": [entry]})) == ([entry], "")
+
+
+def test_empty_uploads_does_not_fall_back_to_modules(workshop, src, entry):
+    assert workshop.read_listing(listing(src, {"modules": [entry], "uploads": []})) == ([], "")
+
+
+def test_read_listing_checks_uploads_like_modules(workshop, src, entry):
+    for bad in ({"uploads": "x"}, {"uploads": None}, {"uploads": [{"name": "x"}]},
+                {"uploads": [{**entry, "sha256": 1}]}, {"notice": "n"}):
+        with pytest.raises(ValueError):
+            workshop.read_listing(listing(src, bad))
+
+
+def test_read_listing_dedupes_and_stringifies_uploads(workshop, src, entry):
+    got, _ = workshop.read_listing(listing(src, {"uploads": [{**entry, "version": 2}, entry]}))
+    assert len(got) == 1 and got[0]["version"] == "2"
+
+
+@pytest.mark.parametrize("notice", [5, None, ["x"], {"a": 1}, True])
+def test_notice_that_is_not_a_string_is_empty(workshop, src, entry, notice):
+    assert workshop.read_listing(listing(src, {"notice": notice, "modules": [entry]})) == ([entry], "")
+
+
+def test_read_index_is_read_listing_without_the_notice(workshop, src, entry):
+    url = listing(src, {"notice": "n", "modules": [], "uploads": [{**entry, "author": "a"}]})
+    assert workshop.read_index(url) == workshop.read_listing(url)[0] == [{**entry, "author": "a"}]
+
+
 def test_page_does_not_reload_and_handles_failures():
     """清單頁是用 html 字串開的，重新載入會變成空白頁：「取消」不能用 location.reload()。"""
     page = (MODULE / "page.html").read_text(encoding="utf-8")

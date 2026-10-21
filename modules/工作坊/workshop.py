@@ -2,7 +2,8 @@
 這裡都是普通的函式，旁邊的 iplot.py 只負責串起來，page.html 是列出清單的那一頁。
 
 規矩（D70）：只寫進自己裝的那個 modules/<名稱>/ 與暫存資料夾；覆蓋前，舊資料夾整個存進它自己的 .history/；
-從這裡裝進來的模組帶著空檔案 .unconfirmed，第一次執行前 iPLoT 會先問一次。"""
+從這裡裝進來的模組帶著空檔案 .unconfirmed，第一次執行前 iPLoT 會先問一次。
+新的清單在 uploads 這個鍵（D107），沒有才讀 modules；頂層的 notice 是清單最上面那一行。"""
 import contextlib
 import hashlib
 import html
@@ -48,12 +49,15 @@ def _open(url, timeout):
                                   context=_context())
 
 
-def read_index(url, timeout=15):
-    """讀 index.json，回裡面的 modules 清單（版本一律當字串；同名的只留第一筆）。
-    格式不對（不是 JSON、沒有 modules、某一筆缺項或型別不對）丟 ValueError。"""
+def read_listing(url, timeout=15):
+    """讀 index.json，回 (清單, notice)。清單讀 uploads 這個鍵，沒有才讀 modules（D107）；uploads 在但是空的，就是空的，
+    不退回 modules。版本一律當字串；同名的只留第一筆；每一筆其他的鍵原樣留著。notice 不是字串就當 ""。
+    格式不對（不是 JSON、兩個鍵都沒有、某一筆缺項或型別不對）丟 ValueError。"""
     with _open(url, timeout) as r:
         data = json.loads(r.read().decode("utf-8"))
-    entries = data.get("modules") if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        raise ValueError("index.json 的格式不對")
+    entries = data.get("uploads" if "uploads" in data else "modules")
     if not isinstance(entries, list) or not all(isinstance(e, dict) and all(k in e for k in NEEDED) for e in entries):
         raise ValueError("index.json 的格式不對")
     if not all(isinstance(e[k], str) for e in entries for k in ("name", "zip_url", "sha256")):
@@ -61,7 +65,13 @@ def read_index(url, timeout=15):
     seen = {}
     for e in entries:
         seen.setdefault(e["name"], {**e, "version": str(e["version"])})
-    return list(seen.values())
+    notice = data.get("notice")
+    return list(seen.values()), notice if isinstance(notice, str) else ""
+
+
+def read_index(url, timeout=15):
+    """舊的入口，只回清單；iplot.py 用 read_listing。"""
+    return read_listing(url, timeout)[0]
 
 
 def read_origin(folder):
