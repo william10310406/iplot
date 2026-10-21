@@ -33,6 +33,7 @@ BUNDLED = ("作業系統", "更新", "工作坊")
 BUNDLED_NOTE = "這是 iPLoT 自己要用的隨附模組，工作坊不覆蓋它；要換新版，自己把新的資料夾複製進 modules/。"
 CONFIRM = "需要確認"  # 已修改、版本未知的要先確認才覆蓋：page.html 看到這個回答就不會當成裝好了
 NEEDED = ("name", "version", "zip_url", "sha256")  # 索引的每一筆至少要有這幾項
+MISMATCH = "無法安裝：下載的檔案跟清單對不上。清單可能剛更新過，關掉工作坊再開一次；再不行就是檔案有問題"
 
 
 def _context():
@@ -200,8 +201,12 @@ def snapshot(folder):
     return saved
 
 
+class ShaMismatch(ValueError):
+    """下載的檔跟清單寫的 sha256 對不上。清單頁開著的時候那個模組剛好部署了新版，也會這樣。"""
+
+
 def download(url, dest, sha256, timeout=60):
-    """把 url 下載到 dest，回 dest。內容的 sha256 對不上就把 dest 刪掉、丟 ValueError。"""
+    """把 url 下載到 dest，回 dest。內容的 sha256 對不上就把 dest 刪掉、丟 ShaMismatch（ValueError 的一種）。"""
     dest.parent.mkdir(parents=True, exist_ok=True)
     h = hashlib.sha256()
     with _open(url, timeout) as r, dest.open("wb") as f:
@@ -210,7 +215,7 @@ def download(url, dest, sha256, timeout=60):
             f.write(chunk)
     if h.hexdigest() != str(sha256).lower():
         dest.unlink()
-        raise ValueError("下載的檔案跟索引寫的 sha256 對不上")
+        raise ShaMismatch("下載的檔案跟索引寫的 sha256 對不上")
     return dest
 
 
@@ -423,6 +428,8 @@ class Api:
             return CONFIRM
         except zipfile.BadZipFile:
             return "無法安裝：下載的檔案不是 zip"
+        except ShaMismatch:  # 清單頁開著的時候清單可能剛換過
+            return MISMATCH
         except (ValueError, KeyError, TypeError) as exc:  # sha256 不符、包的內容不對、索引那一筆的型別不對
             return f"無法安裝：{exc}"
         except NotInstalled as exc:  # 寫檔出錯：訊息裡已經說了放回去了沒有

@@ -192,6 +192,19 @@ def test_install_rejects_bad_sha(workshop, mods, entry):
     assert not (mods / "整理桌面").exists() and not (mods / ".workshop-tmp").exists()
 
 
+def test_download_mismatch_is_a_sha_mismatch(workshop, entry, tmp_path):
+    assert issubclass(workshop.ShaMismatch, ValueError)
+    with pytest.raises(workshop.ShaMismatch):
+        workshop.download(entry["zip_url"], tmp_path / "x.zip", "0" * 64)
+    assert not (tmp_path / "x.zip").exists()
+
+
+def test_api_install_says_the_list_may_have_just_changed(workshop, mods, entry, tmp_path):
+    api = workshop.Api(FakeApp(tmp_path), [{**entry, "sha256": "0" * 64}], mods)
+    assert api.install("整理桌面") == workshop.MISMATCH
+    assert not (mods / "整理桌面").exists() and not (mods / ".workshop-tmp").exists()
+
+
 def test_install_rejects_wrong_top_folder(workshop, mods, src):
     """計畫的審查焦點 4：zip 的最上層不是 <name>/（打包錯）：不解壓、資料夾不變。"""
     folder = make_module(mods, "整理桌面", "print('我自己的')\n")
