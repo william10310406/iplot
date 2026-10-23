@@ -11,7 +11,12 @@ import pytest
 from conftest import FakeApp
 
 MODULE = Path(__file__).resolve().parents[1] / "modules" / "主控面板" / "iplot.py"
-PS = "  101 /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 main.py\n  202 /usr/bin/python3 {home}/main.py\n"
+PS = "  101 /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 main.py\n  202 /usr/bin/python3 {main}\n"
+
+
+def ps_for(home):
+    """假的 ps 輸出：202 是開著 home 那一份 iPLoT 的面板。main.py 的路徑用這個平台的分隔符組。"""
+    return PS.format(main=home / "main.py")
 
 
 @pytest.fixture
@@ -54,7 +59,7 @@ def test_in_the_safe_mode_panel_too(panel_mod, home):
 
 
 def test_find_panel_by_absolute_path(panel_mod, home):
-    assert panel_mod.find_panel(home, ps=lambda: PS.format(home=home), lsof=lambda pid: "", me=999) == 202
+    assert panel_mod.find_panel(home, ps=lambda: ps_for(home), lsof=lambda pid: "", me=999) == 202
 
 
 def test_find_panel_by_relative_main_py_and_cwd(panel_mod, home):
@@ -66,7 +71,7 @@ def test_find_panel_by_relative_main_py_and_cwd(panel_mod, home):
 def test_find_panel_with_spaces_in_the_path(panel_mod, tmp_path):        # Review Focus 3
     home = tmp_path / "我的 iPLoT"
     home.mkdir()
-    assert panel_mod.find_panel(home, ps=lambda: PS.format(home=home), lsof=lambda pid: "", me=999) == 202
+    assert panel_mod.find_panel(home, ps=lambda: ps_for(home), lsof=lambda pid: "", me=999) == 202
     first = PS.splitlines()[0] + "\n"
     assert panel_mod.find_panel(home, ps=lambda: first, lsof=lambda pid: f"p{pid}\nfcwd\nn{home}\n", me=999) == 101
 
@@ -74,13 +79,14 @@ def test_find_panel_with_spaces_in_the_path(panel_mod, tmp_path):        # Revie
 def test_find_panel_ignores_itself_and_other_iplots(panel_mod, home, tmp_path):
     other = tmp_path / "別的 iPLoT"
     other.mkdir()
-    assert panel_mod.find_panel(home, ps=lambda: PS.format(home=home), lsof=lambda pid: "", me=202) is None
-    assert panel_mod.find_panel(home, ps=lambda: PS.format(home=other), lsof=lambda pid: f"n{other}\n", me=999) is None
+    assert panel_mod.find_panel(home, ps=lambda: ps_for(home), lsof=lambda pid: "", me=202) is None
+    assert panel_mod.find_panel(home, ps=lambda: ps_for(other), lsof=lambda pid: f"n{other}\n", me=999) is None
     assert panel_mod.find_panel(home, ps=lambda: "  7 /bin/zsh main.py\n  8 vim /x/main.py\n", lsof=nothing, me=1) is None
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="把已經開著的主控面板叫到最前面只在 macOS 才有")
 def test_open_panel_brings_the_running_one_forward(panel_mod, home):
-    app, activated, launched = go(panel_mod, home, ps=lambda: PS.format(home=home))
+    app, activated, launched = go(panel_mod, home, ps=lambda: ps_for(home))
     assert activated == [202] and launched == [] and app.logs == ["主控面板已經開著，叫到最前面了"]
 
 
@@ -101,8 +107,9 @@ def test_launch_failure_is_one_sentence(panel_mod, home):
     assert app.logs == ["打不開主控面板：x"]
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="把已經開著的主控面板叫到最前面只在 macOS 才有")
 def test_appkit_missing_still_logs(panel_mod, home):
-    app, _, _ = go(panel_mod, home, ps=lambda: PS.format(home=home), activate=lambda pid, platform: False)
+    app, _, _ = go(panel_mod, home, ps=lambda: ps_for(home), activate=lambda pid, platform: False)
     assert app.logs == ["主控面板已經開著，但沒辦法把它叫到最前面"]
 
 
@@ -138,6 +145,7 @@ def test_activate_directly_when_macos_allows_it(panel_mod, monkeypatch):
     assert panel_mod.activate(None, platform="darwin", run=nothing) is True
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="用 AppKit 把面板叫到最前面只在 macOS 才有")
 def test_activate_hands_over_to_a_plain_helper_when_refused(panel_mod, monkeypatch):
     """macOS 14 起，自己不在前面的 App 叫別人到前面會被拒絕；一般的 python 子程序叫就可以（Task 0 量過）。"""
     monkeypatch.setitem(sys.modules, "AppKit", fake_appkit(False))
@@ -174,5 +182,5 @@ def test_find_panel_matches_however_the_path_is_normalized(panel_mod, tmp_path):
     import unicodedata
     home = tmp_path / unicodedata.normalize("NFC", "ガイド iPLoT")
     home.mkdir()
-    line = f"  5 python3 {unicodedata.normalize('NFD', str(home))}/main.py\n"
+    line = f"  5 python3 {unicodedata.normalize('NFD', str(home / 'main.py'))}\n"
     assert panel_mod.find_panel(home, ps=lambda: line, lsof=nothing, me=1) == 5
