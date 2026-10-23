@@ -24,11 +24,8 @@ jobs:
       - run: ruff check .
       - if: runner.os == 'Linux'
         run: xvfb-run -a python -m pytest -q -rs --cov=core --cov-report=term
-      - if: runner.os == 'macOS'
-        run: python -m pytest -q -rs --cov=core --cov-report=term
-      - if: runner.os == 'Windows'
-        env:
-          PYTHONIOENCODING: utf-8
+      # 不要設 PYTHONIOENCODING：它會傳給測試開的子行程，藏住「把中文印到 cp1252／cp950 管線就崩潰」的 bug，真的 Windows 使用者不會設它（所以 Windows log 的 -rs 理由是 \u 跳脫）
+      - if: runner.os != 'Linux'
         run: python -m pytest -q -rs --cov=core --cov-report=term
       - if: ${{ !cancelled() && runner.os == 'Linux' }}
         run: xvfb-run -a python tests/smoke.py
