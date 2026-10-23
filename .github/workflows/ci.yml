@@ -24,7 +24,11 @@ jobs:
       - run: ruff check .
       - if: runner.os == 'Linux'
         run: xvfb-run -a python -m pytest -q -rs --cov=core --cov-report=term
-      - if: runner.os != 'Linux'
+      - if: runner.os == 'macOS'
+        run: python -m pytest -q -rs --cov=core --cov-report=term
+      - if: runner.os == 'Windows'
+        env:
+          PYTHONIOENCODING: utf-8
         run: python -m pytest -q -rs --cov=core --cov-report=term
       - if: ${{ !cancelled() && runner.os == 'Linux' }}
         run: xvfb-run -a python tests/smoke.py
