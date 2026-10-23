@@ -23,7 +23,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: python -m pytest -q --cov=core --cov-report=term
-      - if: runner.os == 'Linux'
+      - if: ${{ !cancelled() && runner.os == 'Linux' }}
         run: xvfb-run -a python tests/smoke.py
-      - if: runner.os != 'Linux'
+      - if: ${{ !cancelled() && runner.os != 'Linux' }}
         run: python tests/smoke.py
