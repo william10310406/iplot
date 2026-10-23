@@ -28,6 +28,9 @@ from core.types import DEFAULT_CONFIG
 
 INTEROP = Path(__file__).resolve().parents[1] / "modules" / "互通"
 NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run")
+# 「沒被重寫」的記號：先把 mtime 設成這個整秒的舊時間（2001-09-09），之後看它還在不在。
+# 不用 1 奈秒：NTFS 的時間精度是 100 奈秒，1 奈秒會被存成 0；整秒每個檔案系統都存得下。
+OLD_NS = 1_000_000_000 * 10**9
 
 
 @pytest.fixture
@@ -190,9 +193,9 @@ def test_remember_python_only_when_changed(load, tmp_path):
     boot, record = load("boot"), tmp_path / ".python"
     assert boot.recorded_python(tmp_path) is None
     boot.remember_python(tmp_path, "/a/python3")
-    os.utime(record, ns=(1, 1))
+    os.utime(record, ns=(OLD_NS, OLD_NS))
     boot.remember_python(tmp_path, "/a/python3")
-    assert record.stat().st_mtime_ns == 1 and boot.recorded_python(tmp_path) == "/a/python3"
+    assert record.stat().st_mtime_ns == OLD_NS and boot.recorded_python(tmp_path) == "/a/python3"
     boot.remember_python(tmp_path, "/b/python3")
     assert boot.recorded_python(tmp_path) == "/b/python3" and not list(tmp_path.glob(".python.*"))
 
@@ -212,9 +215,9 @@ def test_the_app_binary_counts_as_the_same_python(load, tmp_path):
     boot = load("boot")
     exe, _, inner = fake_framework(tmp_path / "fw")
     boot.remember_python(tmp_path, exe)
-    os.utime(tmp_path / ".python", ns=(1, 1))
+    os.utime(tmp_path / ".python", ns=(OLD_NS, OLD_NS))
     boot.remember_python(tmp_path, inner)
-    assert boot.recorded_python(tmp_path) == exe and (tmp_path / ".python").stat().st_mtime_ns == 1
+    assert boot.recorded_python(tmp_path) == exe and (tmp_path / ".python").stat().st_mtime_ns == OLD_NS
     assert boot.same_python(exe, inner) and not boot.same_python(exe, "/usr/bin/python3")
 
 
@@ -414,11 +417,12 @@ def test_close_destroys_the_window(popup):
 def test_report_sends_the_sentence_file_line_and_details(popup):
     from core.types import ErrorInfo
 
-    p = popup.p
-    err = ErrorInfo("NameError", "name 'x' is not defined", Path("/m/iplot.py"), 7, "Traceback…", "module", "M")
+    p, file = popup.p, Path("/m/iplot.py")
+    err = ErrorInfo("NameError", "name 'x' is not defined", file, 7, "Traceback…", "module", "M")
     p.run(lambda: (p.report(err), 0)[1])
     [[sent]] = popup.wv.windows[0].calls("report")
-    assert sent == {"kind": "NameError", "message": "name 'x' is not defined", "file": "/m/iplot.py", "line": 7,
+    # file 是這個平台寫法的路徑字串（Windows 是 \m\iplot.py）
+    assert sent == {"kind": "NameError", "message": "name 'x' is not defined", "file": str(file), "line": 7,
                     "traceback": "Traceback…", "sentence": "模組『M』第 7 行出錯：NameError，name 'x' is not defined",
                     "id": 0}
 
@@ -556,6 +560,7 @@ def test_add_counts_lines_like_python_does(load, tmp_path, odd):
 
 # ── shortcut：macOS 的 .app 捷徑，交給 Python.app 開（D86） ──
 
+@pytest.mark.skipif(sys.platform != "darwin", reason=".app 捷徑（執行檔要有 0o755 執行權限）只在 macOS 才有")
 def test_plist_keys_and_executable(load, tmp_path):
     sc, mod = load("shortcut"), make_module(tmp_path, "開工")
     b = sc.write(tmp_path / "捷徑", "開工", mod, "/py/python3", tmp_path / "run.py", sips=pytest.fail)
@@ -589,6 +594,7 @@ def test_script_hands_over_to_the_python_app(load, tmp_path):
     assert f"app={shlex.quote(str(app))}" in text and '[ ! -d "$app" ]' in text
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="捷徑用 /bin/sh 跑的指令稿只在 macOS 才有")
 def test_script_really_runs_in_sh_with_odd_paths(load, tmp_path):
     """沒有 Python.app 的 Python：真的用 /bin/sh 跑產生的指令稿，假的 Python 把收到的參數寫出來。"""
     py = tmp_path / "我的 py" / "python3"
@@ -669,9 +675,9 @@ def test_sync_leaves_up_to_date_shortcuts_alone(load, tmp_path):
     a = make_module(tmp_path, "a")
     sc.sync(base, {"A": a}, "/py", run, sips=pytest.fail)
     plist = base / "A.app" / "Contents" / "Info.plist"
-    os.utime(plist, ns=(1, 1))
+    os.utime(plist, ns=(OLD_NS, OLD_NS))
     sc.sync(base, {"A": a}, "/py", run, sips=pytest.fail)
-    assert plist.stat().st_mtime_ns == 1
+    assert plist.stat().st_mtime_ns == OLD_NS
 
 
 def test_a_failed_icon_conversion_means_no_icon(load, tmp_path):
@@ -769,7 +775,8 @@ def test_records_are_replaced_atomically(load, home, interop, monkeypatch):     
     monkeypatch.setattr(os, "replace", boom)
     problems = do_sync(load, home, interop, platform="darwin")
     monkeypatch.undo()
-    assert (interop / ".sync-error").read_bytes() == before == "第一次的問題\n".encode()
+    assert (interop / ".sync-error").read_bytes() == before  # 換不上去：舊紀錄一個位元組都沒變
+    assert (interop / ".sync-error").read_text(encoding="utf-8") == "第一次的問題\n"  # 文字模式讀：Windows 上寫的是 \r\n
     assert any("磁碟滿了" in p for p in problems) and not list(interop.glob(".*.tmp"))
     assert not (interop / ".lock").exists()
 
@@ -889,8 +896,9 @@ def test_main_module_error_returns_1(entry, home):
 
 def test_main_files_go_to_on_files_relative_to_cwd(entry, home, tmp_path):
     make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
-    assert entry.go(["A", "x.txt", "/abs/y.txt"], cwd=tmp_path) == 0
-    assert [repr([tmp_path / "x.txt", Path("/abs/y.txt")])] in entry.wv.windows[0].calls("log")
+    absolute = Path(tmp_path.anchor, "abs", "y.txt")  # 這個平台的絕對路徑：/abs/y.txt，Windows 是 C:\abs\y.txt
+    assert entry.go(["A", "x.txt", str(absolute)], cwd=tmp_path) == 0
+    assert [repr([tmp_path / "x.txt", absolute])] in entry.wv.windows[0].calls("log")
 
 
 def test_main_unconfirmed_cancel_returns_1(entry, home, load, monkeypatch):
@@ -1131,12 +1139,15 @@ def test_api_reveal_copy_and_resync(load, home, monkeypatch):
 
 def test_names_reach_the_page_as_data_not_markup(load, home, tmp_path, monkeypatch):
     made, interop, config = _patch_tree(home, tmp_path)
-    odd = make_module(home / "modules", "<b>z", 'TITLE = "<b>y</b>"\n')
+    odd = make_module(home / "modules", "&z", 'TITLE = "<b>y</b>"\n')  # 資料夾名不用 < >：Windows 的檔名不准有
     button = load_button()
     html = button.render(button.status(home, config, "/py", interop))
-    for raw in ("<b>x</b>", "<b>y</b>", "<b>z"):
+    for raw in ("<b>x</b>", "<b>y</b>"):
         assert raw not in html
     assert "\\u003cb>x\\u003c/b>" in html and "\\u003cb>y\\u003c/b>" in html and "__STATUS__" not in html
+    # 頁面拿 application/json 的 textContent 去 JSON.parse：那裡不解析 &…;，& 原字照放才對，變成 &amp; 就會照字顯示
+    page = json.loads(re.search(r'id="data">(.*?)</script>', html, re.S).group(1))
+    assert {"name": "<b>y</b>", "path": str(odd / "iplot.py")} in page["candidates"] and "&amp;" not in html
     monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: [])
     data = button.Api(None, home, config, "/py", interop).resync()
     assert {"name": "<b>x</b>", "reason": "工作坊裝來的"} in data["skipped"]
@@ -1520,7 +1531,8 @@ def test_an_added_snippet_without_interop_runs_it_as_a_plain_script(load, tmp_pa
     f = folder / "iplot.py"
     f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
     load("snippet").add(f, 20)
-    r = subprocess.run([sys.executable, "iplot.py"], cwd=folder, capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "iplot.py"], cwd=folder, capture_output=True, encoding="utf-8",
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8"})  # 接到管線時英文版 Windows 預設 cp1252
     assert r.returncode == 0 and "找不到 iPLoT 的「互通」" in r.stderr and "最外層跑了" in r.stdout
 
 
@@ -1530,8 +1542,8 @@ def test_an_added_snippet_with_iplot_direct_never_hands_over(load, tmp_path):
     f = folder / "iplot.py"
     f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
     load("snippet").add(f, 20)
-    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True,
-                       env={**os.environ, "IPLOT_DIRECT": "1"})
+    r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, encoding="utf-8",
+                       env={**os.environ, "IPLOT_DIRECT": "1", "PYTHONIOENCODING": "utf-8"})
     assert r.returncode == 0 and "最外層跑了" in r.stdout and r.stderr == ""
     assert not (home / "modules" / "互通" / "run.py.argv.json").exists()
 
