@@ -13,7 +13,7 @@
 ### 變更
 - 工作坊（`modules/工作坊/workshop.py`）：新的 `read_listing` 讀清單，有 `uploads` 就讀它、沒有才讀 `modules`；頁面最上面多一行 `notice`（沒有人審查的提醒），每一列多一行上傳者，有 `warning` 的模組標出來；下載的檔對不上 sha256 時說的是 `ShaMismatch` 那一句（D107）。
 - `config.py` 的 `WORKSHOP_URL` 指到 iplot-modules 的 `index.json`（D101）；`UPDATE_URL` 不變。
-- `tools/publish.py`：多 `--modules-site`（跟 `--modules` 互斥）；只印 `UPDATE_URL`；忘了給旗標會在寫任何檔之前停；有未 commit 的改動時提醒 `.gitattributes` 只認已 commit 的那一份；印出核心包的最上層資料夾。
+- `tools/publish.py`：多 `--modules-site`（跟 `--modules` 互斥）；給了 `--modules-site` 就只印 `UPDATE_URL` 那一行；忘了給旗標會在寫任何檔之前停；工作樹的 `.gitattributes` 跟打包的那一版裡的不一樣時，提醒核心的包照那一版裡的那一份排除檔案；印出核心的包最上層的檔與資料夾。
 - `tests/acceptance_workshop.py`：照兩個網址分開驗（`update.json` 與 `index.json`）。
 
 ### 包的內容
