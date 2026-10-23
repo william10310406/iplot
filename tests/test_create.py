@@ -79,5 +79,6 @@ def test_template_passes_ruff():
     pytest.importorskip("ruff")
     root = Path(__file__).resolve().parents[1]
     r = subprocess.run([sys.executable, "-m", "ruff", "check", "--config", str(root / "pyproject.toml"),
-                        "--stdin-filename", "iplot.py", "-"], input=template(), capture_output=True, text=True)
+                        "--stdin-filename", "iplot.py", "-"], input=template(), capture_output=True,
+                       encoding="utf-8")   # 範本有中文與 emoji：不能用 Windows 預設的 cp1252 寫進 stdin
     assert r.returncode == 0, r.stdout

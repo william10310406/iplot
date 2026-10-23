@@ -1042,6 +1042,7 @@ def test_save_reports_unreadable_fields_as_sentences(load, tmp_path):
     assert got == {"saved": [], "unreadable": [f"讀不到這個檔（不是 UTF-8），沒有覆寫它：{(folder / '做了.txt').resolve()}"]}
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="用 chmod 讓資料夾擋住寫入只在 macOS 才有")
 def test_save_into_a_missing_or_read_only_folder_is_one_sentence_and_keeps_the_text(load, tmp_path):  # Review Focus 5
     a, root = api(load, tmp_path), tmp_path / "資料"
     root.mkdir()

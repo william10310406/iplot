@@ -2,6 +2,7 @@
 
 import dataclasses
 import getpass
+from pathlib import Path
 
 import pytest
 from conftest import make_module
@@ -24,7 +25,8 @@ def test_empty_everything(home, view):
 
 def test_missing_root_noted(home, view):
     c = started(home, view, ("modules", "/nonexistent"))
-    assert "/nonexistent" in c.scope.groups[1].note
+    # 「/nonexistent」在 home 所在磁碟的根目錄底下（Windows 上沒有磁碟機代號，會接成 C:\nonexistent）
+    assert str(Path(home.anchor, "nonexistent")) in c.scope.groups[1].note
 
 
 def test_broken_config_falls_back(tmp_path):

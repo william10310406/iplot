@@ -236,7 +236,8 @@ def test_jobs_run_one_at_a_time(panel, bridge, window, home):
     marks = [c[0].split() for c in window.calls("log") if c[0].startswith(("start", "end"))]
     assert [m[0] for m in marks] == ["start", "end"] * 3
     times = [float(m[1]) for m in marks]
-    assert times == sorted(times) and all(times[i + 1] - times[i] >= 0.19 for i in (0, 2, 4))
+    # 0.19 再扣一格時鐘：Windows 上 Python 3.10 的 time.monotonic 約 15.6 ms 才跳一格，sleep(0.2) 可能只量到 0.188
+    assert times == sorted(times) and all(times[i + 1] - times[i] >= 0.19 - 0.016 for i in (0, 2, 4))
 
 
 def test_job_exception_goes_to_report_internal(panel, window, home):
