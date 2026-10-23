@@ -43,6 +43,7 @@ def test_version_and_api_version():
     (scan.find_children, [("folder", EMPTY), ("root", EMPTY)]),
     (scan.roots_from_config, [("home", EMPTY), ("roots", EMPTY)]),
     (scan.is_module, [("folder", EMPTY)]),
+    (scan.home_path, [("s", EMPTY)]),
     (history.snapshot, [("file", EMPTY), ("keep", EMPTY)]),
     (errors.describe, [("error", EMPTY)]),
 ], ids=lambda x: getattr(x, "__qualname__", ""))

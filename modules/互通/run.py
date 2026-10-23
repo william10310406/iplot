@@ -40,11 +40,10 @@ class NoTk:
 
 
 def _expand(text: str) -> Path:
-    """~ 換成家目錄；「~打錯的名字/…」找不到那個使用者時 pathlib 丟 RuntimeError，那就照字面。"""
-    try:
-        return Path(text).expanduser()
-    except RuntimeError:
-        return Path(text)
+    """「~」「~/…」換成家目錄；「~名字/…」各平台都照字面（core.scan.home_path）。確認過 Python 之後才叫得到這裡。"""
+    from core.scan import home_path
+
+    return home_path(text) or Path(text)
 
 
 def resolve(core, target: str, cwd: Path):

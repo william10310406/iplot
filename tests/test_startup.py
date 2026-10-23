@@ -1,6 +1,7 @@
 """規格 §12 從零啟動情境 1–5，用 FakeView 不開視窗。情境 6 由 tests/smoke.py 負責。"""
 
 import dataclasses
+import getpass
 
 import pytest
 from conftest import make_module
@@ -79,6 +80,15 @@ def test_load_config_bad_tilde_falls_back(tmp_path):
     config, err = load_config(f)
     assert config == DEFAULT_CONFIG and (err.source, err.file) == ("config", f)
     assert "~Desktop" in err.message
+
+
+def test_load_config_refuses_a_tilde_with_a_real_user_name(tmp_path):
+    """「~帳號名/…」各平台都算壞（只有「~」「~/…」換成家目錄），就算那個帳號真的存在。"""
+    entry = f"~{getpass.getuser()}/Desktop"
+    f = tmp_path / "config.py"
+    f.write_text(f'ROOTS = ["modules", {entry!r}]\n', encoding="utf-8")
+    config, err = load_config(f)
+    assert config == DEFAULT_CONFIG and entry in err.message
 
 
 @pytest.mark.parametrize("src, name", [

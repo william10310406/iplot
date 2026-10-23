@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### 修正
+- 「~名字」（例如 `~Desktop`）在每個平台都不換成家目錄：`config.py` 的 `ROOTS` 寫成這樣算壞、整份用預設值啟動並說哪裡壞，「互通」的檔案參數照字面、以工作目錄為準；只有「~」與「~/…」換成家目錄。原本靠 pathlib 找不到那個使用者時丟例外，Windows 不丟，會猜成 `C:\Users\<名字>`（`core/scan.py` 新增 `home_path`，列進 `docs/07` 第 13 節）。
+
 ## [0.5.2] - 2026-10-23
 
 這一版的工作坊清單換到新的地方：有 GitHub 帳號的人都能上傳自己的模組，沒有人審查，清單上標出每個模組的上傳者。核心邏輯一行沒改，只換了版本號。「更新」不碰 config.py 與 modules/，已經在用的人按完「更新」還要自己做兩件事：①把 .backup/download-0.5.2.zip 解開（在終端機進到 iPLoT 資料夾打 open .backup，Finder 就會打開它），用裡面的 iPLoT-v0.5.2/modules/工作坊 整個換掉自己的 modules/工作坊；②打開 config.py，把 WORKSHOP_URL 那一行換成 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"。兩件做完再執行「重新啟動」。只做②的話，舊的工作坊看到的是空的清單；兩件都不做也能用，只是不會有新模組。新下載的 iPLoT 不用做。

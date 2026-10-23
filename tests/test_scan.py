@@ -1,10 +1,19 @@
+import getpass
+import os
 import unicodedata
 from pathlib import Path
 
 import pytest
 from conftest import make_module
 
-from core.scan import find_children, find_modules, is_module, module_info, roots_from_config
+from core.scan import (
+    find_children,
+    find_modules,
+    home_path,
+    is_module,
+    module_info,
+    roots_from_config,
+)
 from core.text import T
 from core.types import Root
 
@@ -112,6 +121,21 @@ def test_unreadable_child_folder_is_skipped(home):
     finally:
         locked.chmod(0o755)
     assert names(g) == ["A"] and g.note is None
+
+
+def test_home_path_only_expands_a_bare_tilde():
+    """「~」「~/…」換成家目錄；「~名字」各平台都不認，連自己的帳號名也一樣（Windows 的 expanduser 不丟例外，不能靠它）。"""
+    me = getpass.getuser()
+    assert home_path("~") == Path.home()
+    assert home_path("~/x") == home_path(f"~{os.sep}x") == Path.home() / "x"
+    assert home_path(f"~{me}/x") is None and home_path("~Desktop") is None
+    assert home_path("a/~b") == Path("a/~b") and home_path("") == Path("")
+
+
+def test_tilde_with_a_real_user_name_is_a_relative_root(home):
+    me = getpass.getuser()
+    [root] = roots_from_config(home, [f"~{me}/x"])
+    assert root.path == (home / f"~{me}" / "x").resolve()
 
 
 def test_bad_tilde_root_becomes_missing_not_crash(home):

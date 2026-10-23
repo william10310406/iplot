@@ -18,6 +18,13 @@ def _nfc(name: str) -> str:
     return unicodedata.normalize("NFC", name)
 
 
+def home_path(s: str) -> Path | None:
+    """「~」與「~/…」把 ~ 換成家目錄；「~名字」各平台都不認，回 None。不靠 expanduser 丟不丟例外：Windows 不丟，會猜成別人的家目錄。"""
+    if not s.startswith("~"):
+        return Path(s)
+    return Path(s).expanduser() if s[1:2] in ("", "/", os.sep) else None
+
+
 def is_module(folder: Path) -> bool:
     """folder 是資料夾（不是符號連結），裡面有檔名剛好是 iplot.py 的檔案；讀不到就不是。"""
     with contextlib.suppress(OSError):  # APFS 不分大小寫，所以比對 listdir 的實際檔名，iPLoT.py 不算
@@ -62,10 +69,7 @@ def roots_from_config(home: Path, roots: Iterable[str]) -> list[Root]:
         elif s == "..":
             root = Root(T["parent"], "parent", home.parent.resolve())
         else:
-            try:
-                p = Path(s).expanduser()
-            except RuntimeError:  # 「~Desktop」少了斜線：pathlib 找不到叫 Desktop 的使用者，當成相對路徑
-                p = Path(s)
+            p = home_path(s) or Path(s)  # 「~Desktop」少了斜線：當成相對路徑
             root = Root(s, "extra", (p if p.is_absolute() else home / p).resolve())
         if not any(_same(root.path, r.path) for r in result):
             result.append(root)

@@ -4,6 +4,7 @@
 
 import ast
 import dataclasses
+import getpass
 import importlib
 import importlib.util
 import inspect
@@ -1200,6 +1201,14 @@ def test_an_unknown_tilde_user_is_one_sentence_not_a_traceback(load, home, entry
     make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
     assert entry.go(["A", "~沒有這個人/f.txt"], cwd=tmp_path) == 0
     assert [repr([tmp_path / "~沒有這個人/f.txt"])] in entry.wv.windows[0].calls("log")
+
+
+def test_a_tilde_with_a_real_user_name_is_a_relative_path(load, home, entry, tmp_path):
+    """「~帳號名/…」各平台都照字面、以工作目錄為準，就算那個帳號真的存在；只有「~」「~/…」換成家目錄。"""
+    me = getpass.getuser()
+    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
+    assert entry.go(["A", f"~{me}/f.txt", "~/g.txt"], cwd=tmp_path) == 0
+    assert [repr([tmp_path / f"~{me}" / "f.txt", Path.home() / "g.txt"])] in entry.wv.windows[0].calls("log")
 
 
 def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
