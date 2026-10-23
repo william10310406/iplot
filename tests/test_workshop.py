@@ -95,9 +95,9 @@ def test_digest_covers_the_listed_files_only(workshop, mods):
         (folder / junk).parent.mkdir(exist_ok=True)
         (folder / junk).write_text("junk", encoding="utf-8")
     assert workshop.digest(folder, listed) == d
-    (folder / "iplot.py").write_text("x = 2\n", encoding="utf-8")
+    (folder / "iplot.py").write_text("x = 2\n", encoding="utf-8", newline="\n")
     assert workshop.digest(folder, listed) != d
-    (folder / "iplot.py").write_text("x = 1\n", encoding="utf-8")
+    (folder / "iplot.py").write_text("x = 1\n", encoding="utf-8", newline="\n")  # 跟 make_module 寫的逐位元組一樣，下一句才只差少了 helper.py
     (folder / "helper.py").unlink()
     assert workshop.digest(folder, listed) != d, "少了一個也算改過"
 
@@ -499,7 +499,7 @@ def test_rollback_that_cannot_write_a_file_back_does_not_say_it_put_it_back(work
     要說放回時出錯、快照在哪裡，並替留下來的模組資料夾放 .unconfirmed。（第二輪審查 R1：以前沒有測試走到這條路，
     把比對拿掉、一律當成放回了，其他放回原樣的測試照樣通過。）"""
     folder = make_module(mods, "記帳", "print('v1')\n")
-    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8", newline="\n")  # Windows 的文字模式不換成 \r\n
     real_copy, calls = workshop.shutil.copyfile, []
 
     def copyfile(source, target):
@@ -590,7 +590,7 @@ def test_rollback_does_not_delete_anything_when_the_snapshot_is_unreadable(works
     """第二輪審查 R2：快照讀不到（寫壞了）時，放回原樣不能先把資料夾清掉——清了就補不回來。
     一樣都不刪：包沒碰到的檔逐位元組不變；留下的每個模組資料夾放 .unconfirmed；那一句照實說是新舊混合、在哪裡。"""
     folder = make_module(mods, "記帳", "print('v1')\n")
-    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8", newline="\n")  # Windows 的文字模式不換成 \r\n
     make_module(folder, "子", "print('子')\n")
 
     def spoil():
@@ -637,7 +637,7 @@ def test_a_file_from_before_1980_does_not_break_the_snapshot(workshop, mods, src
     """第三輪審查 I4：zip 記不了 1980 年以前的檔案時間。模組資料夾裡有這種檔（從舊備份還原的、時間被清成 0 的）時，
     存快照照樣成功、照常裝好——以前是一句英文「ZIP does not support timestamps before 1980」、留下半個 zip，而且永遠更新不了。"""
     folder = make_module(mods, "記帳", "print('v1')\n")
-    (folder / "舊帳.csv").write_text("1970\n", encoding="utf-8")
+    (folder / "舊帳.csv").write_text("1970\n", encoding="utf-8", newline="\n")  # Windows 的文字模式不換成 \r\n
     os.utime(folder / "舊帳.csv", (0, 0))
     api = workshop.Api(FakeApp(tmp_path), [pack(src, "記帳", {"iplot.py": "print('v2')\n"})], mods)
     assert api.install("記帳", True) == workshop.LABELS["installed"]
@@ -728,7 +728,7 @@ def test_update_asks_before_overwriting_a_file_the_module_made(workshop, mods, e
     先回「需要確認」、什麼都不動；確認之後才蓋，舊的在快照裡。"""
     workshop.install(entry, mods)
     folder = mods / "整理桌面"
-    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8")
+    (folder / "帳本.csv").write_text("我的帳\n", encoding="utf-8", newline="\n")  # Windows 的文字模式不換成 \r\n
     newer = {**pack(src / "v2", "整理桌面", {**V2, "帳本.csv": "作者的測試資料\n"}), "version": "1.1.0"}
     assert workshop.state(newer, mods) == "update"
     api = workshop.Api(FakeApp(tmp_path), [newer], mods)

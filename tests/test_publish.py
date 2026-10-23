@@ -45,7 +45,7 @@ def test_changelog_notes_extracts_section(publish, tmp_path):
 def test_pack_module_layout_and_exclusions(publish, tmp_path):
     """zip 最上層剛好是模組資料夾的名字；不帶 .history/、.origin、.unconfirmed、__pycache__、.DS_Store。"""
     folder = make_module(tmp_path / "modules", "整理 桌面", 'ICON = "🧹"\n')
-    (folder / "helper.py").write_text("x = 1\n", encoding="utf-8")
+    (folder / "helper.py").write_text("x = 1\n", encoding="utf-8", newline="\n")  # Windows 的文字模式不換成 \r\n
     (folder / "data").mkdir()
     (folder / "data" / "a.txt").write_text("a", encoding="utf-8")
     for junk in (".history/2026.py", "__pycache__/h.pyc", "data/__pycache__/x.pyc", ".origin", ".unconfirmed", ".DS_Store"):

@@ -13,10 +13,10 @@ DEFAULT_SRC = 'def run(app):\n    print("ok")\n'
 
 
 def make_module(parent, name, src=DEFAULT_SRC):
-    """在 parent 底下建資料夾 name 並寫入 iplot.py，回傳資料夾。"""
+    """在 parent 底下建資料夾 name 並寫入 iplot.py，回傳資料夾。換行照 src 寫（Windows 的文字模式不會把 \\n 換成 \\r\\n）。"""
     folder = parent / name
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "iplot.py").write_text(src, encoding="utf-8")
+    (folder / "iplot.py").write_text(src, encoding="utf-8", newline="\n")
     return folder
 
 
