@@ -2,7 +2,8 @@
 看還活著沒、stderr 乾不乾淨。只驗「啟動後活著」；按下按鈕之後的行為由 tests/test_startup.py 驗（D43）。
 
 情境 1–6 走安全模式（main.py --safe，tkinter 面板）：那是永遠開得起來的那條路。
-情境 7 是預設啟動（網頁面板）：只在 macOS、而且這份原始碼旁邊已經有裝好的 lib/ 時才跑，把 lib/ 一起複製過去。
+情境 7 是預設啟動（網頁面板）：只在 macOS、而且這份原始碼旁邊已經有裝好的 lib/ 時才跑，把 lib/ 一起複製過去；
+不跑時印一行「跳過——」加上不成立的條件，總結那一行分開寫跑了幾個、跳過幾個。
 
 用法：python3 tests/smoke.py    （PYTHON 環境變數可指定直譯器，預設是跑這個檔的那一個）
 三個平台都是這一個檔；Linux 沒有顯示器時前面加 xvfb-run -a。"""
@@ -32,7 +33,26 @@ SCENARIOS = [
     ("沒裝 tkinterdnd2", {}, [PY, "-c", NO_DND]),
 ]
 WEB = ("lib/ 在、預設啟動（網頁面板）", {}, [PY, "main.py"])  # 這個情境的乾淨副本多一份 lib/
-if sys.platform == "darwin" and (SRC / "lib" / ".installed").exists():
+
+
+def web_skip_reason(platform: str = sys.platform, src: Path = SRC) -> str | None:
+    """情境 7（網頁面板）不跑的原因：每一個不成立的條件都寫出來；兩個條件都成立就回 None。"""
+    reasons = [reason for reason, missing in (("不是 macOS", platform != "darwin"),
+                                              ("旁邊沒有裝好的 lib/", not (src / "lib" / ".installed").exists()))
+               if missing]
+    return "、".join(reasons) or None
+
+
+def skip_line(n: int, what: str, reason: str) -> str:
+    return f"情境 {n}（{what}）：跳過——{reason}"
+
+
+def summary(ran: int, skipped: int, ok: bool) -> str:
+    return f"smoke：跑了 {ran} 個情境、跳過 {skipped} 個，" + ("全部活著、stderr 乾淨" if ok else "有情境失敗")
+
+
+WEB_SKIPPED = web_skip_reason()
+if WEB_SKIPPED is None:
     SCENARIOS.append(WEB)
 started: list[subprocess.Popen] = []
 
@@ -88,7 +108,9 @@ def main() -> int:
             for proc in started:
                 if proc.poll() is None:
                     proc.kill()
-    print(f"smoke：{len(SCENARIOS)} 個情境全部活著、stderr 乾淨" if ok else "smoke：有情境失敗")
+    if WEB_SKIPPED:
+        print(skip_line(len(SCENARIOS) + 1, WEB[0], WEB_SKIPPED))
+    print(summary(len(SCENARIOS), 1 if WEB_SKIPPED else 0, ok))
     return 0 if ok else 1
 
 
