@@ -9,16 +9,12 @@ import types
 from pathlib import Path
 
 import pytest
+from conftest import make_module, new_tk
 
 tkinter = pytest.importorskip("tkinter")
-try:
-    _probe = tkinter.Tk()
-    _probe.update()  # macOS 的 Tk 9.0：沒跑過事件迴圈就 destroy 的視窗，會讓之後的事件迴圈當掉（SIGTRAP）
-    _probe.destroy()
-except tkinter.TclError:
-    pytest.skip("沒有顯示器", allow_module_level=True)
-
-from conftest import make_module  # noqa: E402
+_probe = new_tk(module_level=True)  # 只有 Linux 沒有顯示器才整個檔跳過；其他 TclError 照原本的訊息失敗
+_probe.update()  # macOS 的 Tk 9.0：沒跑過事件迴圈就 destroy 的視窗，會讓之後的事件迴圈當掉（SIGTRAP）
+_probe.destroy()
 
 from core.core import Core  # noqa: E402
 from core.text import T  # noqa: E402

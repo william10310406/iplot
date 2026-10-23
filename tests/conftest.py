@@ -1,5 +1,7 @@
 import dataclasses
 import json
+import os
+import sys
 import time
 import types
 from pathlib import Path
@@ -18,6 +20,24 @@ def make_module(parent, name, src=DEFAULT_SRC):
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "iplot.py").write_text(src, encoding="utf-8", newline="\n")
     return folder
+
+
+def headless() -> bool:
+    """Linux 而且沒有 DISPLAY、也沒有 WAYLAND_DISPLAY：Tk 開不了視窗是預期中的。"""
+    return sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def new_tk(make=None, *, module_level=False):
+    """建一個 Tk（make 預設是當下的 tkinter.Tk）回傳。開不起來時，只有 headless() 才以「沒有顯示器」跳過；
+    其他情況的 TclError 照原本 Tcl 的訊息丟出去，讓測試失敗——macOS、Windows 沒有「沒有顯示器」這回事。"""
+    import tkinter
+
+    try:
+        return (make or tkinter.Tk)()
+    except tkinter.TclError:
+        if headless():
+            pytest.skip("沒有顯示器", allow_module_level=module_level)
+        raise
 
 
 class FakeView:

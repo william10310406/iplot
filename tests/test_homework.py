@@ -16,7 +16,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from conftest import FakeApp
+from conftest import FakeApp, new_tk
 
 COURSE = Path(__file__).resolve().parents[1] / "modules" / "科學計算"
 NAMES = ("hk_tk", "hk_page")
@@ -143,10 +143,7 @@ except ImportError:  # 沒有 tkinter 的 Python：Tk 的測試各自跳過
 def _new_root(tk_class=None):
     if tkinter is None:
         pytest.skip("這個 Python 沒有 tkinter")
-    try:
-        root = (tk_class or tkinter.Tk)()
-    except tkinter.TclError:
-        pytest.skip("沒有顯示器")
+    root = new_tk(tk_class or tkinter.Tk)  # 只有 Linux 沒有顯示器才跳過；其他 TclError 照原本的訊息失敗
     root.withdraw()
     return root
 
