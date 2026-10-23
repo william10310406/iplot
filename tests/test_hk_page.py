@@ -52,11 +52,11 @@ def in_panel(monkeypatch):
 
 
 def homework(folder, src=None, name="HK0.py"):
-    """在 folder 寫一份作業檔（預設是規範的範例），回那個檔。"""
+    """在 folder 寫一份作業檔（預設是規範的範例），回那個檔。換行照 src 寫（Windows 的文字模式不會把 \\n 換成 \\r\\n）。"""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     file = folder / name
-    file.write_text(spec_example() if src is None else src, encoding="utf-8")
+    file.write_text(spec_example() if src is None else src, encoding="utf-8", newline="\n")
     return file
 
 

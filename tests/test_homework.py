@@ -626,9 +626,10 @@ def test_ensure_venv_argv_and_no_install_guard(tmp_path, load, monkeypatch):
 def test_installed_parses_json_and_normalizes(tmp_path, load):
     hk = load("hk_tk")
     popen = FakePopen(output=lambda argv: ['["Scikit_Learn","numpy","PyYAML","zope.interface"]\n'])
-    assert hk.installed(Path("/venv/python"), popen=popen) == {"scikit-learn", "numpy", "pyyaml", "zope-interface"}
+    python = Path("/venv/python")
+    assert hk.installed(python, popen=popen) == {"scikit-learn", "numpy", "pyyaml", "zope-interface"}
     argv, kw = popen.calls[0]
-    assert argv[:2] == ["/venv/python", "-c"] and "importlib.metadata" in argv[2]
+    assert argv[:2] == [str(python), "-c"] and "importlib.metadata" in argv[2]  # str(python)：Windows 用反斜線
     assert "shell" not in kw
     assert hk.installed(Path("/x"), popen=FakePopen(output=lambda argv: ["壞掉\n"])) == set()
 
@@ -653,9 +654,10 @@ def test_install_one_at_a_time_without_shell(tmp_path, load, monkeypatch):
     hk = load("hk_tk")
     monkeypatch.delenv("HK_NO_INSTALL")
     popen = pip_popen()
-    ok, failed = hk.install(Path("/venv/bin/python"), ["pandas", "PyWavelets"], [].append, popen=popen)
+    python = Path("/venv/bin/python")
+    ok, failed = hk.install(python, ["pandas", "PyWavelets"], [].append, popen=popen)
     assert ok == ["pandas", "PyWavelets"] and failed == []
-    assert popen.argvs == [["/venv/bin/python", "-m", "pip", "install", "--no-input", "--disable-pip-version-check", p]
+    assert popen.argvs == [[str(python), "-m", "pip", "install", "--no-input", "--disable-pip-version-check", p]
                            for p in ("pandas", "PyWavelets")]
     for _, kw in popen.calls:
         assert "shell" not in kw and kw["text"] is True
@@ -664,11 +666,23 @@ def test_install_one_at_a_time_without_shell(tmp_path, load, monkeypatch):
 def test_install_keeps_going_when_one_package_fails(tmp_path, load, monkeypatch):
     hk = load("hk_tk")
     monkeypatch.delenv("HK_NO_INSTALL")
+    monkeypatch.setattr(hk, "_apple_silicon", lambda: True)  # Apple Silicon 的 Mac：mlx-lm 照樣交給 pip
     popen = pip_popen(fail={"mlx-lm"})
     ok, failed = hk.install(Path("/py"), ["mlx-lm", "pandas"], [].append, popen=popen)
-    assert ok == ["pandas"]
-    assert failed == [("mlx-lm", "ERROR: No matching distribution found for mlx-lm")]
+    assert ok == ["pandas"] and [argv[-1] for argv in popen.argvs] == ["mlx-lm", "pandas"]
+    assert failed == [("mlx-lm", "ERROR: No matching distribution found for mlx-lm")]  # 原因是 pip 的原文
     assert hk.summary_of_install(ok, failed) == "已裝 pandas；裝不了 mlx-lm（ERROR: No matching distribution found for mlx-lm）"
+
+
+def test_install_keeps_going_when_mlx_lm_cannot_install_here(tmp_path, load, monkeypatch):
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    monkeypatch.setattr(hk, "_apple_silicon", lambda: False)  # 別的機器（Windows、Linux、Intel Mac）：mlx-lm 不叫 pip
+    popen = pip_popen(fail={"mlx-lm"})
+    ok, failed = hk.install(Path("/py"), ["mlx-lm", "pandas"], [].append, popen=popen)
+    assert ok == ["pandas"] and [argv[-1] for argv in popen.argvs] == ["pandas"]
+    assert failed == [("mlx-lm", "這台機器裝不了，HK9 要在 Apple Silicon 的 Mac 上看")]
+    assert hk.summary_of_install(ok, failed) == "已裝 pandas；裝不了 mlx-lm（這台機器裝不了，HK9 要在 Apple Silicon 的 Mac 上看）"
 
 
 def test_install_reason_falls_back_to_the_last_lines(load, monkeypatch):
@@ -1055,12 +1069,14 @@ def test_roster_window_opens_student_with_venv_python(tmp_path, load, tk_root):
     hk = load("hk_tk")
     out = roster_out(tmp_path)
     popen = FakePopen()
-    win = hk.Roster(out, Path("/venv/bin/python"), tk_root, popen=popen)
+    python = Path("/venv/bin/python")
+    win = hk.Roster(out, python, tk_root, popen=popen)
     assert win.listbox.get(0, "end") == ("B1", "B2    語法錯誤", "B3    不是作業檔")
     assert tk_root.title() == "HK5_收件 — 3 份"
     win.listbox.selection_set(0)
     win.open_button.invoke()
-    assert popen.argvs == [["/venv/bin/python", str(COURSE / "hk_tk.py"), str(out / "B1"), "HK5"]]
+    # Roster 把 python 轉成絕對路徑：POSIX 照原樣，Windows 用反斜線、補上目前的磁碟代號
+    assert popen.argvs == [[str(python.absolute()), str(COURSE / "hk_tk.py"), str(out / "B1"), "HK5"]]
     assert popen.calls[0][1] == {"cwd": str(out / "B1")}
     win.listbox.selection_clear(0, "end")
     win.open_button.invoke()  # 沒選：不開
@@ -1384,11 +1400,12 @@ def test_roster_marks_and_opens_new_format(tmp_path, load, tk_root):
         (out / name / "hk_page.py").write_bytes((COURSE / "hk_page.py").read_bytes())
     assert hk.roster(out) == [("B1", ""), ("B2", ""), ("B3", "檢查不過")]
     popen = FakePopen()
-    win = hk.Roster(out, Path("/venv/bin/python"), tk_root, popen=popen)
+    python = Path("/venv/bin/python")
+    win = hk.Roster(out, python, tk_root, popen=popen)
     win.listbox.selection_set(1)
     win.open_selected()
     [(argv, kw)] = popen.calls
-    assert argv == ["/venv/bin/python", str(out / "B2" / "iplot.py"), "--all"]
+    assert argv == [str(python.absolute()), str(out / "B2" / "iplot.py"), "--all"]  # 絕對路徑：Windows 會補磁碟代號
     assert kw["cwd"] == str(out / "B2") and kw["env"]["HK_FROM_IPLOT"] == "1"
     assert kw["env"]["HK_BATCH"] == "1"  # 批次名單開的：明說是批次模式（不靠上面有沒有 hk_tk.py 猜）
 
