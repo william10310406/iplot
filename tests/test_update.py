@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sys
+import urllib.parse
 import zipfile
 from pathlib import Path
 
@@ -39,9 +40,10 @@ def update():
 
 
 def write(base, files):
+    """換行照字串寫：tree() 比的是位元組，Windows 的文字模式不能把 \\n 換成 \\r\\n。"""
     for name, text in files.items():
         (base / name).parent.mkdir(parents=True, exist_ok=True)
-        (base / name).write_text(text, encoding="utf-8")
+        (base / name).write_text(text, encoding="utf-8", newline="\n")
 
 
 def tree(base):
@@ -88,8 +90,8 @@ def test_newer(update):
 
 def test_fetch_json_from_file_url_with_spaces_and_chinese(update, source):
     assert update.fetch_json((source / "update.json").as_uri())["version"] == "9.9.9"
-    raw = "file://" + str(source / "update.json")  # 沒有轉成 %XX 的寫法也要開得了
-    assert update.fetch_json(raw)["notes"] == "這一版改了什麼"
+    raw = urllib.parse.unquote((source / "update.json").as_uri())  # 沒有轉成 %XX 的寫法也要開得了
+    assert "發佈" in raw and update.fetch_json(raw)["notes"] == "這一版改了什麼"
 
 
 def test_download_verifies_sha(update, source, tmp_path):
@@ -262,7 +264,8 @@ def test_fetch_json_from_a_path_with_a_real_space(update, tmp_path):
     folder = tmp_path / "發 佈"
     folder.mkdir()
     (folder / "update.json").write_text('{"version": "1.0.0"}', encoding="utf-8")
-    assert update.fetch_json("file://" + str(folder / "update.json")) == {"version": "1.0.0"}
+    raw = urllib.parse.unquote((folder / "update.json").as_uri())  # file:///…/發 佈/update.json，空白沒寫成 %20
+    assert " " in raw and update.fetch_json(raw) == {"version": "1.0.0"}
 
 
 def test_apply_rolls_back_when_a_swap_fails(update, home, source, monkeypatch):
