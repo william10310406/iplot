@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-## [0.5.2] - 2026-10-21
+## [0.5.2] - 2026-10-23
 
 這一版的工作坊清單換到新的地方：有 GitHub 帳號的人都能上傳自己的模組，沒有人審查，清單上標出每個模組的上傳者。核心邏輯一行沒改，只換了版本號。「更新」不碰 config.py 與 modules/，已經在用的人按完「更新」還要自己做兩件事：①把 .backup/download-0.5.2.zip 解開（在終端機進到 iPLoT 資料夾打 open .backup，Finder 就會打開它），用裡面的 iPLoT-v0.5.2/modules/工作坊 整個換掉自己的 modules/工作坊；②打開 config.py，把 WORKSHOP_URL 那一行換成 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"。兩件做完再執行「重新啟動」。只做②的話，舊的工作坊看到的是空的清單；兩件都不做也能用，只是不會有新模組。新下載的 iPLoT 不用做。
 
