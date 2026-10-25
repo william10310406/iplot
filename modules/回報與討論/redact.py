@@ -30,6 +30,12 @@ BACK_OPEN = r"(?:(?![A-Za-z0-9])|(?=[bBrRuUfF](?![A-Za-z0-9]))|(?=[bBrR][bBrR](?
 SYMMETRIC = (("'", OPEN), ('"', ""), ("`", ""), ("＂", ""), ("＇", ""))
 # 開引號與閉引號不同字的（中文引號、書名號）：沒有怎麼兩兩配的問題
 PAIRS = ("「」", "『』", "“”", "‘’", "《》", "〈〉")
+# ASCII 以外的引號，裡面（去掉頭尾空白）以絕對路徑開頭的那一對：名字裡可能也有同一種閉引號
+# （「/…/「論語」心得_王小明.txt」），只遮到第一個閉引號的話後半段連名字一起露出來。標籤延伸到第 4、5 步會吃到的
+# 地方（PATH_END：吃到空白為止，閉引號可能一起吃掉，只多遮）；那裡比閉引號近的（最後一段有空白、名字裡有 ' 或
+# 括號的），照一對遮到閉引號。ASCII 的引號照舊
+ASCII_QUOTES = "'\""
+ABS_START = re.compile(r"/|[A-Za-z]:[\\/]|\\\\|file:", re.IGNORECASE)
 QUOTE_READINGS = (
     *(re.compile(pattern) for q, opener in SYMMETRIC for pattern in (
         # (a) 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到下一個同種引號：路徑裡可以有空白，前面緊貼什麼都算
@@ -49,25 +55,23 @@ QUOTE_READINGS = (
 QUOTE_READINGS_BACK = tuple(re.compile(rf"{q}[^{q}\n]*{q}" + (BACK_OPEN if opener else "")) for q, opener in SYMMETRIC)
 # 括號裡的絕對路徑，整段（可以有空白）：ImportError 的 (…/My Drive/…/工具.py)
 PAREN_ABS = re.compile(r"\((?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)[^()\n]*)\)")
-# 沒有引號的路徑不吃過去的中文閉引號；’ 也是撇號：後面緊接著英文字母的（Bob’s、O’Brien）照樣當路徑的一部分
-CLOSERS = "」』”’》〉"
-APOSTROPHE = r"’(?=[A-Za-z])"
-# 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 與閉引號的最後一個 / 或 \，最後一段到空白、引號、括號、
-# 閉引號為止（寫成「一般的字*（撇號 一般的字*）*」：每一個字只有一條路，不用回頭試）
-TAIL = (rf"(?:[^'\"\n()<>{CLOSERS}]*(?:{APOSTROPHE}[^'\"\n()<>{CLOSERS}]*)*[/\\])?"
-        rf"[^\s'\"()<>/\\{CLOSERS}]*(?:{APOSTROPHE}[^\s'\"()<>/\\{CLOSERS}]*)*")
-# 已知開頭（第 4 步）後面要接的：分隔符號、空白、引號、)、閉引號或字串結尾——以分隔符號為界
-KNOWN_END = rf"(?=$|[/\\\s'\"){CLOSERS}])"
+# 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 的最後一個 / 或 \，最後一段到空白、引號、括號為止。
+# 中文的閉引號照吃：資料夾或檔名裡常有（《論語》心得_王小明.txt、「HK2」/…），停在那裡的話後半段連名字一起露出來
+TAIL = r"(?:[^'\"\n()<>]*[/\\])?[^\s'\"()<>/\\]*"
+# 第 2 步用的：從 ASCII 以外的引號裡那個絕對路徑的開頭起，第 4、5 步會吃到哪裡
+PATH_END = re.compile(TAIL)
+# 已知開頭（第 4 步）後面要接的：分隔符號、空白、引號、) 或字串結尾——以分隔符號為界
+KNOWN_END = r"(?=$|[/\\\s'\")])"
 # 沒有引號的其他絕對路徑：前面只看 ASCII（中文字也算 \w）；POSIX 至少兩段、Windows 的 X:\ 或 X:/、UNC 的 \\。
 # 緊接在冒號後面的也算（讀不到:/Volumes/…），:// 不算（網址；https://github.com/… 後面那幾段前面是英數字或 /）
-SEG = rf"(?:[^\s'\"()<>/\\{CLOSERS}]|{APOSTROPHE})"
 OTHER_ABS = re.compile(r"(?<![A-Za-z0-9_>.~/\\-])(?!(?<=:)//)"
-                       rf"(?:/{SEG}+(?=[/\\]{SEG})|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\)" + TAIL)
+                       r"(?:/[^\s'\"()<>/\\]+(?=[/\\][^\s'\"()<>/\\])|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\)" + TAIL)
 # file:// 的網址：file:// 留著、後面的路徑換成標籤。file:///C:/… 的第三個 / 也留著，路徑從磁碟機開頭（家目錄才認得）；
 # 遮過的 file:///<HOME>/… 也拆在同一個地方（冪等）
 FILE = re.compile(r"file://(?:/(?=[A-Za-z]:[\\/]|<))?", re.IGNORECASE)
-# 沒有引號的（第 4 步）：開頭之後第一個不是分隔符號的字要是路徑的字——不是 < 或 .（遮過的標籤不再換）
-FILE_URL = re.compile(rf"(?P<head>{FILE.pattern})(?=[/\\]*[^\s'\"()<>./\\{CLOSERS}])(?P<path>{TAIL})", re.IGNORECASE)
+# 沒有引號的（第 4 步）：開頭之後第一個不是分隔符號的字要是路徑的字——不是 < 或 .（遮過的標籤不再換）、
+# 不是中文的閉引號（「…file://」 的 file:// 後面沒有路徑）
+FILE_URL = re.compile(rf"(?P<head>{FILE.pattern})(?=[/\\]*[^\s'\"()<>./\\」』”’》〉])(?P<path>{TAIL})", re.IGNORECASE)
 # SyntaxError 訊息尾巴的 (檔名, line N)：檔名裡可以有一層括號（王小明 (1).py），不吃掉前面的 '(' was never closed
 SYNTAX_FILE = re.compile(r"\((?P<f>[^()\n/\\<]+(?:\([^()\n/\\<]*\)[^()\n/\\<]*)*), line (?P<n>\d+)\)")
 # SyntaxError 尾巴裡留著的檔名：iPLoT 自己的
@@ -243,17 +247,25 @@ def redact(text: str, ctx: Ctx) -> tuple[str, dict[str, int]]:
     text = _frames(text, label, counts)
 
     # 2. 引號裡的路徑：每一種讀法配出來的一對，裡面（去掉頭尾空白、開頭的 file://）含 / 或 \、不以 < 開頭
-    # （遮過的記號）、不含 ://（網址）的才算；重疊或共用一個引號的幾對合成一段。每一段裡面整個換成一個標籤，
-    # 引號、頭尾的空白與 file:// 留在標籤外面（'HK2/…/成績.csv ' → '.../<檔名已遮蔽>.csv '）
+    # （遮過的記號）、不含 ://（網址）的才算；ASCII 以外的引號裡以絕對路徑開頭的（ABS_START），延伸到第 4、5 步
+    # 會吃到的地方（PATH_END）。重疊或共用一個引號的幾對合成一段。每一段裡面整個換成一個標籤，引號、頭尾的空白與
+    # file:// 留在標籤外面（'HK2/…/成績.csv ' → '.../<檔名已遮蔽>.csv '）；延伸過閉引號的，閉引號也在標籤裡
     def quoted(text: str) -> str:
         n = len(text)
         pairs = [m.span(m.lastindex or 0) for pattern in QUOTE_READINGS for m in pattern.finditer(text)]  # 有第 1 組的用第 1 組
         pairs += [(n - m.end(), n - m.start()) for pattern in QUOTE_READINGS_BACK for m in pattern.finditer(text[::-1])]
-        spans = []
-        for s, e in sorted(pairs):
-            inner = _file_url(text[s + 1:e - 1].strip())[1]
+        # reach：延伸算過的最遠的地方。路徑的開頭在那之前的，延伸不會更遠（擋住的引號、括號、最後一個分隔符號都一樣），
+        # 而且一定併進那一段：不用再算（一行很多對的時候不會每一對都掃到行尾）
+        spans, reach = [], 0
+        for s, e in sorted(pairs):  # text[s] 是這一對的開引號（每一種讀法都是）；text[e - 1] 留在標籤後面
+            whole = text[s + 1:e - 1].strip()
+            head, inner = _file_url(whole)
             if not ("/" in inner or "\\" in inner) or inner.startswith("<") or "://" in inner:
                 continue
+            start = e - 1 - len(text[s + 1:e - 1].lstrip()) + len(head)  # 路徑的開頭
+            if text[s] not in ASCII_QUOTES and ABS_START.match(whole) and start >= reach:
+                reach = PATH_END.match(text, start).end()
+                e = max(e, reach + 1)
             if spans and s < spans[-1][1]:  # 重疊，或這一對的開引號就是上一段的閉引號
                 spans[-1] = (spans[-1][0], max(spans[-1][1], e))
             else:

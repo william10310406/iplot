@@ -298,24 +298,47 @@ CASES = [
     ("doubled_double_quotes", {},  # 從左、從右兩兩配都是兩個 ""：只有 (c)（含分隔符號、頭尾不是空白）認得中間那一對
      '""HK2/王小明/a.txt""', '"".../<檔名已遮蔽>.txt""'),
 ]
-# 中文引號、反引號、全形引號也是引號（M8 最後審查）：每一種一列相對路徑、一列絕對路徑；閉引號與後面的字留著
+# 中文引號、反引號、全形引號也是引號（M8 最後審查）：每一種一列相對路徑、一列絕對路徑。相對的閉引號與後面的字留著；
+# 絕對的延伸到第 4、5 步會吃到的地方（名字裡可能也有同一種閉引號）：閉引號與後面的字吃到空白為止（舊的樣子，只多遮）
 QUOTE_MARKS = (("corner", "「」"), ("white_corner", "『』"), ("curly_double", "“”"), ("curly_single", "‘’"),
                ("double_angle", "《》"), ("angle", "〈〉"), ("backtick", "``"), ("full_width_double", "＂＂"),
                ("full_width_single", "＇＇"))
 CASES += [row for name, (o, c) in QUOTE_MARKS for row in (
     (f"{name}_relative", {}, f"讀不到{o}HK2/王小明_B11201234/成績.csv{c}，請確認", f"讀不到{o}.../<檔名已遮蔽>.csv{c}，請確認"),
-    (f"{name}_absolute", {}, f"讀不到{o}/Volumes/USB/學生/王小明.csv{c}，請確認",
-     f"讀不到{o}<PATH>/.../<檔名已遮蔽>.csv{c}，請確認"))]
+    (f"{name}_absolute", {}, f"讀不到{o}/Volumes/USB/學生/王小明.csv{c}，請確認", f"讀不到{o}<PATH>/.../<檔名已遮蔽>"))]
 CASES += [
     ("curly_single_with_apostrophe", {},  # ’ 也是撇號：最短的 ‘Bob’ 沒有分隔符號，配到這一行最後一個 ’ 的那一對才是路徑
      "讀不到‘Bob’s/王小明.txt’，請確認", "讀不到‘.../<檔名已遮蔽>.txt’，請確認"),
     ("corner_after_a_masked_opener", {},  # 每一個開引號各配到它後面第一個閉引號：第一對以 < 開頭不算，第二對照樣遮
      "「<IPLOT>/x 「HK2/王小明/a.txt」", "「<IPLOT>/x 「.../<檔名已遮蔽>.txt」"),
-    ("unquoted_path_stops_at_a_closing_mark", {},  # 開引號在上一行（配不到）：沒有引號的路徑不吃掉閉引號與後面的字
-     "「第一行\n/Volumes/USB/學生/王小明.csv」，請確認", "「第一行\n<PATH>/.../<檔名已遮蔽>.csv」，請確認"),
-    ("home_then_a_closing_mark", {}, "在\n/Users/laoban」裡", "在\n<HOME>」裡"),
-    ("apostrophe_inside_an_unquoted_path", {},  # 後面緊接著英文字母的 ’ 是撇號，照樣當路徑的一部分
+    ("unquoted_path_swallows_a_closing_mark", {},  # 開引號在上一行（配不到）：沒有引號的路徑吃到空白為止，閉引號也吃掉
+     "「第一行\n/Volumes/USB/學生/王小明.csv」，請確認", "「第一行\n<PATH>/.../<檔名已遮蔽>"),
+    ("home_then_a_closing_mark", {},  # 家目錄緊接著閉引號：不以分隔符號為界，不算家目錄，整段當成其他的絕對路徑
+     "在\n/Users/laoban」裡", "在\n<PATH>/.../<檔名已遮蔽>"),
+    ("apostrophe_inside_an_unquoted_path", {},  # ’ 也是撇號（Bob’s）：照樣當路徑的一部分
      "see /Volumes/USB/Bob’s/王小明.txt now", "see <PATH>/.../<檔名已遮蔽>.txt now"),
+    # 資料夾或檔名裡有中文的閉引號（《論語》心得、「HK2」）：沒有引號的絕對路徑照樣整段遮，不停在閉引號（最後審查的複審）
+    ("book_title_inside_an_unquoted_path", {},  # numpy 的訊息的樣子
+     "FileNotFoundError: /Users/laoban/作業/《論語》心得_王小明.txt not found.",
+     "FileNotFoundError: <HOME>/.../<檔名已遮蔽>.txt not found."),
+    ("corner_quotes_inside_an_unquoted_path", {}, "讀不到 /Volumes/USB/「HK2」/王小明.csv", "讀不到 <PATH>/.../<檔名已遮蔽>.csv"),
+    ("corner_quotes_inside_a_windows_path", WIN,
+     "讀不到 C:\\Users\\laoban\\Desktop\\「HK2」\\王小明.docx", "讀不到 <HOME>/.../<檔名已遮蔽>.docx"),
+    ("curly_quotes_inside_an_unquoted_path", {},
+     "讀不到 /Users/laoban/Desktop/“期末”王小明.docx", "讀不到 <HOME>/.../<檔名已遮蔽>.docx"),
+    ("absolute_path_in_corner_quotes_with_corner_quotes_inside", {},  # 第一個 」 是名字裡的：延伸到空白為止，整段遮
+     "讀不到「/Users/laoban/作業/「論語」心得_王小明.txt」", "讀不到「<HOME>/.../<檔名已遮蔽>"),
+    ("double_slash_in_corner_quotes", {},  # 開頭兩個 /：第 5 步不認（//server/…），第 2 步一樣延伸到空白為止
+     "讀不到「//server/share/王小明.txt」", "讀不到「<PATH>/.../<檔名已遮蔽>"),
+    ("one_segment_absolute_path_in_corner_quotes", {},  # 只有一段：第 5 步也不認
+     "讀不到「/王小明.csv」，請確認", "讀不到「<PATH>/.../<檔名已遮蔽>"),
+    # 第 4、5 步停在閉引號前面的（最後一段有空白、名字裡有 ' 或括號）：照一對遮到閉引號，閉引號後面的留著
+    ("space_in_the_last_segment_in_corner_quotes", {},
+     "讀不到「/Volumes/USB/學生/Wang Xiaoming.txt」，請確認", "讀不到「<PATH>/.../<檔名已遮蔽>.txt」，請確認"),
+    ("apostrophe_in_an_absolute_path_in_corner_quotes", {},
+     "讀不到「/Volumes/USB/Bob's/王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>.csv」"),
+    ("parentheses_in_a_windows_path_in_corner_quotes", WIN,  # Windows 的「新增資料夾 (2)」
+     "讀不到「D:\\學生 (2)\\王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>.csv」"),
     ("colon_glued_to_a_path", {}, "RuntimeError: 讀不到:/Volumes/USB/學生/王小明.csv",
      "RuntimeError: 讀不到:<PATH>/.../<檔名已遮蔽>.csv"),
     ("colon_glued_to_a_windows_path", WIN, "RuntimeError: 讀不到:D:\\學生\\王小明.csv",
@@ -353,10 +376,20 @@ NOISY_PREFIXES = ("Can't ", "Plan B's ", "it's 1/2 ", "'x ' / ", '"a" / ', "'李
 NOISY_PATHS = ("'HK2/王小明_B11201234/a.txt'", "'HK2\\\\王小明_B11201234\\\\a.txt'",  # 第二個是 Windows 的 repr：兩個反斜線
                "b'HK2/王小明_B11201234/a.txt'", '"HK2/王小明_B11201234/a.txt"',
                "' HK2/王小明_B11201234/a.txt'", "'HK2/王小明_B11201234/a.txt '",
-               "「HK2/王小明_B11201234/a.txt」", "‘HK2/王小明_B11201234/a.txt’", "`HK2/王小明_B11201234/a.txt`")
+               "「HK2/王小明_B11201234/a.txt」", "‘HK2/王小明_B11201234/a.txt’", "`HK2/王小明_B11201234/a.txt`",
+               # 中文引號、書名號、反引號裡的絕對路徑，名字裡又有同一種閉引號（最後審查的複審）
+               "「/Volumes/USB/「HK2」/王小明_B11201234/a.txt」", "《/Users/laoban/作業/《論語》心得_王小明_B11201234.txt》",
+               "`/Volumes/USB/學生/王小明_B11201234/a.txt`")
 NOISY_SUFFIXES = ("", " not found", "。")
 # 引號湯：前綴是這些記號任取 0–2 個接起來，接一個 NOISY_PATHS，後面再接 0–1 個記號
 SOUP = ("'", '"', "/", "\\", " ", "a", "1", "王", "<", "C:")
+# 資料夾或檔名裡有中文的閉引號（《論語》心得_王小明.txt、「HK2」/王小明.csv）：絕對路徑在什麼前後、什麼引號裡都整段遮。
+# 湯與噪音句只把記號放在路徑外面，抓不到這一種（最後審查 A 停在閉引號，後半段連名字一起露出來，複審才找到）
+CLOSER_BASES = ("/Users/laoban/作業", "/Volumes/USB/作業")
+CLOSER_NAMES = tuple(name for o, c in ("「」", "『』", "“”", "‘’", "《》", "〈〉") for name in (
+    f"{o}論語{c}心得_王小明.txt", f"{o}HK2{c}/王小明.txt", f"王小明{o}期中{c}.txt", f"{o}期中{c}/王小明/a.txt"))
+CLOSER_WRAPS = (("讀不到 ", ""), ("FileNotFoundError: ", " not found."), ("讀不到:", ""), ("讀不到「", "」"),
+                ("讀不到《", "》，請確認"), ("讀不到`", "`"), ("讀不到 '", "'"), ("讀不到 (", ")"), ("打不開 file://", ""))
 
 # 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
 SAMPLE = (
@@ -427,13 +460,22 @@ def test_quote_soup_is_idempotent_and_only_ambiguous_quotes_leak(load):
         assert redact.redact(once, ctx)[0] == once, (text, once)
         if "王小明" in once:
             quote = path[-1]
-            assert quote not in "」’", (text, once)  # 開引號與閉引號不同字的：只有一種配法，一個都不能漏
+            assert quote not in "」』”’》〉", (text, once)  # 開引號與閉引號不同字的：只有一種配法，一個都不能漏
             # 其他的漏得掉的只有兩類，都是照引號本身分不出來的：
             # (1) 前綴的最後一個字是 ASCII 英數字：開引號緊貼英數字是撇號的規則（crab'…'），照設計不當開頭
             # (2) 後綴就是路徑的那種引號、前綴裡也有一個：路徑自己的兩個引號外面都有落單的同一種引號，
             #     哪兩個配成一對都說得通
             glued = prefix[-1:].isascii() and prefix[-1:].isalnum()
             assert glued or (suffix == quote and quote in prefix), (text, once)
+
+
+def test_closing_marks_inside_an_absolute_path_never_leak(load):
+    redact = load("redact")
+    ctx = redact.Ctx(**MAC)
+    for base, name, (before, after) in itertools.product(CLOSER_BASES, CLOSER_NAMES, CLOSER_WRAPS):
+        text = f"{before}{base}/{name}{after}"
+        once = redact.redact(text, ctx)[0]
+        assert "王小明" not in once and redact.redact(once, ctx)[0] == once, (text, once)
 
 
 def test_redact_counts(load):
@@ -816,6 +858,19 @@ def hint_of(report, key):
     return getattr(report, key).format(name=TXT)
 
 
+def marker_of(report, key):
+    """traceback 中間截掉的那一行：最後一句是 HINT（複製成了）才說在剪貼簿裡，其他的叫人看最後一行。"""
+    return report.TRUNCATED if key == "HINT" else report.TRUNCATED_ELSEWHERE
+
+
+def has_marker(template, text):
+    """text 裡有沒有 template（TRUNCATED 或 TRUNCATED_ELSEWHERE）那一行，{n} 是任何行數。"""
+    return re.search(re.escape(template).replace(re.escape("{n}"), r"\d+"), text) is not None
+
+
+CLIPBOARD = "完整報告在剪貼簿裡"  # TRUNCATED 說的：只在真的複製成了時說
+
+
 @pytest.mark.parametrize("value", ["a&b=c#d", "100% +1", "第一行\n第二行", "~~~~text\nx\n~~~~", "王小明 💬",
                                    "a/b\\c\"d'e"])
 def test_url_roundtrips(load, value):
@@ -854,6 +909,10 @@ def test_hint_sentences_are_the_agreed_ones(load):
     assert report.HINT_LOG == ("剪貼簿沒有複製成功：完整報告在 iPLoT 的訊息區；GitHub 出錯或內容被截斷時，"
                                "從那裡複製全文、直接貼上。")
     assert ["⌘V" in hint_of(report, key) for key in HINTS] == [True, False, False, False]
+    # traceback 中間截掉的那一行也一樣：沒複製成時不說「在剪貼簿裡」，叫人看最後一行（最後審查的複審）
+    assert report.TRUNCATED == "…（中間 {n} 行太長，已截斷；完整報告在剪貼簿裡）…"
+    assert report.TRUNCATED_ELSEWHERE == "…（中間 {n} 行太長，已截斷；完整報告在哪裡，看最後一行）…"
+    assert [CLIPBOARD in marker_of(report, key) for key in HINTS] == [True, False, False, False]
 
 
 @pytest.mark.parametrize("key", HINTS)
@@ -876,6 +935,7 @@ def test_fit_always_ends_the_body_with_the_hint(load, key):
         u, cut = report.fit("BUG", "t", b, report.MAX_URL, h)
         cuts.append(cut)
         assert query(u)["body"].split("\n")[-1] == h
+        assert (CLIPBOARD in query(u)["body"]) <= (key == "HINT")  # 沒複製成的那三句：截斷的那一行也不說在剪貼簿裡
     assert cuts == [False, True, True, True]
 
 
@@ -917,10 +977,10 @@ def test_fit_keeps_the_first_and_last_lines(load, key):
     inner = out.split("~~~~text\n", 1)[1].split("\n~~~~\n", 1)[0].split("\n")
     k = len(inner) - 2
     assert inner[0] == lines[0] and inner[-1] == lines[-1] and k >= 1
-    assert inner[1] == report.TRUNCATED.format(n=len(lines) - 1 - k)
+    assert inner[1] == marker_of(report, key).format(n=len(lines) - 1 - k)  # 複製成了才說在剪貼簿裡
     assert inner[2:] == lines[-k:]
     # 二分找的是最大的 k：再多留一行就放不下
-    more = [lines[0], report.TRUNCATED.format(n=len(lines) - 2 - k), *lines[-k - 1:]]
+    more = [lines[0], marker_of(report, key).format(n=len(lines) - 2 - k), *lines[-k - 1:]]
     assert len(report.url("BUG", "t", out.replace("\n".join(inner), "\n".join(more)))) > 3000
     assert out.endswith("\n\n" + h)
 
@@ -1054,6 +1114,7 @@ def test_fit_never_exceeds_the_limit(load, limit, key):
         assert cut, name
         assert len(u) <= limit and report.login_redirect(u) <= report.MAX_LOGIN_REDIRECT, name
         assert query(u)["body"].endswith("\n\n" + h), name
+        assert (CLIPBOARD in query(u)["body"]) <= (key == "HINT"), name
 
 
 def test_save_writes_utf8_with_stamp_and_kind(load, tmp_path):
@@ -1263,6 +1324,9 @@ def test_send_says_copied_only_when_the_page_copied(load, tmp_path, monkeypatch,
         assert out.endswith("\n\n" + want) and (report.HINT in out) == copied, args
         assert (r["hint"], r["uncopied"]) == (want, missed), args  # 頁面的 #hint：送出之後、「再複製一次」沒成的時候
         assert u == report.fit("BUG", rep.title, b, report.max_url(), want)[0], args
+        # traceback 中間截掉的那一行也照實說：沒複製成的話不說「完整報告在剪貼簿裡」，叫人看最後一行
+        assert (CLIPBOARD in out) == (copied and size == "cut"), args
+        assert has_marker(report.TRUNCATED_ELSEWHERE, out) == (not copied and size == "cut"), args
 
 
 def test_send_points_at_the_page_when_it_can_neither_copy_nor_save(load, tmp_path, monkeypatch, opened):
@@ -1909,7 +1973,7 @@ TK_CUT_CASES = [("opened", "saved"), ("failed", "saved"), ("opened", "copied"), 
 
 
 @pytest.mark.parametrize("browser, save", TK_CUT_CASES, ids=["-".join(c) for c in TK_CUT_CASES])
-def test_on_error_in_tk_says_when_the_url_was_cut(tmp_path, tk, monkeypatch, browser, save):
+def test_on_error_in_tk_says_when_the_url_was_cut(load, tmp_path, tk, monkeypatch, browser, save):
     # tkinter 那一頭截過時也要說（網頁那一頭是 CUT_SAVED／CUT_UNSAVED）：只給人網址的話，人不知道網址裡的 traceback
     # 少了一段。開成了說在訊息區那一句裡、開不成說在給網址的那一行裡，只說一次；檔案一定會指給人看
     calls = []
@@ -1941,6 +2005,10 @@ def test_on_error_in_tk_says_when_the_url_was_cut(tmp_path, tk, monkeypatch, bro
     else:
         assert failed == [f"瀏覽器打不開。{cut}把這串網址整個複製到瀏覽器的網址列：{calls[0]}"]
         assert cut not in first and first.endswith(hint if save == "copied" else "直接貼上。")
+    # 網址裡 traceback 截掉的那一行：Tk 的剪貼簿真的複製成了才說「完整報告在剪貼簿裡」，沒成的叫人看最後一行
+    report = load("report")  # run_module 跑完才匯
+    out = query(calls[0])["body"]
+    assert (CLIPBOARD in out) == (save == "copied") and has_marker(report.TRUNCATED_ELSEWHERE, out) == (save != "copied")
     assert_no_leak(view.logs)
 
 

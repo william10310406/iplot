@@ -32,7 +32,8 @@ HINT = "完整報告已複製，GitHub 出錯或內容被截斷時，按 ⌘V／
 HINT_FILE = "剪貼簿沒有複製成功：完整報告存在 iPLoT 的 回報/{name}；GitHub 出錯或內容被截斷時，從那個檔複製全文、直接貼上。"
 HINT_PAGE = "剪貼簿沒有複製成功：完整報告在 iPLoT 那一頁下面那一格；GitHub 出錯或內容被截斷時，從那裡複製全文、直接貼上。"
 HINT_LOG = "剪貼簿沒有複製成功：完整報告在 iPLoT 的訊息區；GitHub 出錯或內容被截斷時，從那裡複製全文、直接貼上。"
-TRUNCATED = "…（中間 {n} 行太長，已截斷；完整報告在剪貼簿裡）…"
+TRUNCATED = "…（中間 {n} 行太長，已截斷；完整報告在剪貼簿裡）…"  # traceback 中間截掉的那一行：hint 是 HINT 時
+TRUNCATED_ELSEWHERE = "…（中間 {n} 行太長，已截斷；完整報告在哪裡，看最後一行）…"  # 沒複製成時：不說在剪貼簿裡
 CUT = "（太長，已截斷）"     # 「發生了什麼」或內文的尾巴截掉時，接在截剩的那一段後面的一行
 
 
@@ -277,9 +278,9 @@ def _grow(ok, cut, low: int, top: int) -> str | None:
     return cut(_most(lambda n: ok(cut(n)), low, top))
 
 
-def _middle(body: str):
-    """第 2 步：框裡多於 2 行的話，回 (cut, 1, top)：cut(k) 是留框裡的第一行與最後 k 行、中間換成 TRUNCATED 的內文，
-    1 ≤ k ≤ top。沒有框、或框裡不到 3 行，回 None。"""
+def _middle(body: str, marker: str):
+    """第 2 步：框裡多於 2 行的話，回 (cut, 1, top)：cut(k) 是留框裡的第一行與最後 k 行、中間換成 marker（TRUNCATED
+    或 TRUNCATED_ELSEWHERE）的內文，1 ≤ k ≤ top。沒有框、或框裡不到 3 行，回 None。"""
     lines = body.split("\n")
     box = _fence(lines)
     if box is None or box[1] - box[0] - 1 <= 2:
@@ -288,7 +289,7 @@ def _middle(body: str):
     inner = lines[i + 1:j]
 
     def cut(k: int) -> str:
-        mid = TRUNCATED.format(n=len(inner) - 1 - k)
+        mid = marker.format(n=len(inner) - 1 - k)
         return "\n".join([*lines[:i + 1], inner[0], mid, *inner[-k:], *lines[j:]])
     return cut, 1, len(inner) - 2
 
@@ -335,7 +336,10 @@ def _what(body: str):
 
 def _shorten(category: str, title: str, body: str, limit: int, hint: str) -> str | None:
     """fit 的第 2、3 步，標題不動：回截到放得下的內文（不用截就是 body）；內文只剩 CUT 也放不下，回 None。
-    每一步放不下時，下一步從比較短的那一份接著截（框裡只有 3 行時，換成 TRUNCATED 那一句反而比較長）。"""
+    每一步放不下時，下一步從比較短的那一份接著截（框裡只有 3 行時，換成 TRUNCATED 那一句反而比較長）。
+    traceback 中間截掉的那一行：hint 是 HINT（真的複製成了）才說在剪貼簿裡，不然是 TRUNCATED_ELSEWHERE。"""
+    marker = TRUNCATED if hint == HINT else TRUNCATED_ELSEWHERE
+
     def ok(b: str) -> bool:
         return fits(url(category, title, with_hint(b, hint)), limit)
 
@@ -344,7 +348,7 @@ def _shorten(category: str, title: str, body: str, limit: int, hint: str) -> str
 
     if ok(body):
         return body
-    for step in (_middle, _what):
+    for step in (lambda b: _middle(b, marker), _what):
         found = step(body)
         if found is not None:
             cut, low, top = found
