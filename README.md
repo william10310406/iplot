@@ -138,7 +138,7 @@ UPDATE_URL = "https://william10310406.github.io/iplot-workshop/update.json"
 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"
 ```
 
-從 0.5.x 換上來的，照 CHANGELOG 0.6.0 那一段做（`docs/08_操作說明-0.6.0.md` 第 1.2 節）。從 0.5.0、0.5.1 換上來、沒做過 0.5.2 那兩件事的（`WORKSHOP_URL` 還指著 `iplot-workshop/index.json`，或 `modules/工作坊` 還沒照 0.5.2 的說明換過），另外用 0.6.0 的包裡的 `iPLoT-v0.6.0/modules/工作坊` 換掉 `modules/工作坊`，把 `WORKSHOP_URL` 換成上面那一行，再執行「重新啟動」（做法見 docs/08 第 1.2 節第 6 步）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
+從 0.5.x 換上來的，照 CHANGELOG 0.6.0 那一段做（按「更新」跳出來的說明就是它；`docs/08_操作說明-0.6.0.md` 第 1.2 節）。從 0.5.0、0.5.1 換上來、沒做過 0.5.2 那兩件事的（`WORKSHOP_URL` 還指著 `iplot-workshop/index.json`，或 `modules/工作坊` 還沒照 0.5.2 的說明換過），照那一段最後幾句做：用 0.6.0 的包裡 `iPLoT-v0.6.0/modules` 的「回報與討論」「互通」「工作坊」換掉自己 `modules/` 裡的，把 `WORKSHOP_URL` 換成上面那一行，執行「重新啟動」，再在面板雙擊一次「互通」把捷徑重新做好（做法見 docs/08 第 1.2 節第 6 步）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
 
 不想連網：把網址換成 `None`（不加引號），存檔，執行「重新啟動」；按下去只會說一句怎麼設定。要用別人放檔案的地方：換成那個人給的網址（字串，要加引號）。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，照上面那三行自己加上去；不加等於沒設定（`None`）。
 
