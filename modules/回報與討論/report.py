@@ -24,7 +24,7 @@ MAX_URL = 2000            # 保守值，每個平台都一樣（研究助理 202
                           # 登入的瀏覽器的實際上限沒量過）。有人反映截太多再實測放寬：Task 0 Step 2 的做法
 MAX_LOGIN_REDIRECT = 5600 # 沒登入時 GitHub 轉去登入的那條網址：量到 ≤ 5742 字才完整（2026-10-24），留一點餘裕
 LOGIN = "https://github.com/login?return_to="
-MAX_TITLE = 200           # 網址放不下時，標題超過這麼多字就截到這麼多（設計第 8 節）
+MAX_TITLE = 200           # 網址放不下時，標題超過這麼多字一律先截到這麼多、再截內文（設計第 8 節）
 HINT = "完整報告已複製，GitHub 出錯或內容被截斷時，按 ⌘V／Ctrl+V 貼上。"
 TRUNCATED = "…（中間 {n} 行太長，已截斷；完整報告在剪貼簿裡）…"
 CUT = "（太長，已截斷）"     # 「發生了什麼」或內文的尾巴截掉時，接在截剩的那一段後面的一行
@@ -337,18 +337,17 @@ def _shorten(category: str, title: str, body: str, limit: int) -> str | None:
 
 def fit(category: str, title: str, body: str, limit: int) -> tuple[str, bool]:
     """預填的網址與有沒有截（設計第 8 節、第 17 節第 2、15 條）。內文最後一定是 HINT，截的時候也留著；
-    回的網址 ≤ limit、轉去登入的那條 ≤ MAX_LOGIN_REDIRECT。順序：①放得下就照用；②traceback 的框留第一行與最後
-    k 行；③「發生了什麼」從後面截，還是放不下就從內文的尾巴截；④標題超過 MAX_TITLE 字截到 MAX_TITLE、再從頭做
-    ②③；內文只剩 CUT 也放不下（標題本身就很長）就再截標題。都是在編碼之前以行或字為單位截，不會切在 %XX 中間。
-    limit 比只帶 HINT 的網址（約 440 字）還短時沒辦法，回最短的那一條。"""
+    回的網址 ≤ limit、轉去登入的那條 ≤ MAX_LOGIN_REDIRECT。順序：①放得下就照用（標題再長也不動）；放不下的話，
+    標題超過 MAX_TITLE 字一律先截到 MAX_TITLE，再截內文：②traceback 的框留第一行與最後 k 行；③「發生了什麼」從後面
+    截，還是放不下就從內文的尾巴截；④內文只剩 CUT 也放不下（標題本身就很長）就再截標題。都是在編碼之前以行或字為
+    單位截，不會切在 %XX 中間。limit 比只帶 HINT 的網址（約 440 字）還短時沒辦法，回最短的那一條。"""
     u = url(category, title, with_hint(body))
     if fits(u, limit):
         return u, False
-    for t in (title, title[:MAX_TITLE]) if len(title) > MAX_TITLE else (title,):
-        b = _shorten(category, t, body, limit)
-        if b is not None:
-            return url(category, t, with_hint(b)), True
     t = title[:MAX_TITLE]
+    b = _shorten(category, t, body, limit)
+    if b is not None:
+        return url(category, t, with_hint(b)), True
     b = _tail(body, 0) if body else body
     n = _most(lambda n: fits(url(category, t[:n], with_hint(b)), limit), 0, len(t))
     return url(category, t[:n], with_hint(b)), True

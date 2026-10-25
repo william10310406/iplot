@@ -839,6 +839,23 @@ def test_fit_cuts_a_long_title(load):
     assert "### 環境\n" + "\n".join(ENV) in query(u)["body"]
 
 
+def test_fit_caps_the_title_whenever_it_cuts(load):
+    # 要截的時候，標題超過 200 字一律先截到 200 字，再截內文：不會留著 300、1500 字的標題，去截環境與 traceback
+    report = load("report")
+    b = report.body("x", ENV, SENTENCE, long_tb(10))
+    u, cut = report.fit("BUG", "a" * 300, b, report.MAX_URL)
+    assert cut and len(u) <= report.MAX_URL
+    assert query(u)["title"] == "a" * 200
+    assert u == report.fit("BUG", "a" * 200, b, report.MAX_URL)[0]
+    assert "### 環境\n" + "\n".join(ENV) in query(u)["body"]
+    # 標題截到 200 字內文就放得下的話，內文一個字都不截
+    b = report.body("x", ENV, SENTENCE, TB)
+    u, cut = report.fit("BUG", "a" * 1500, b, report.MAX_URL)
+    assert cut and query(u)["title"] == "a" * 200 and query(u)["body"] == report.with_hint(b)
+    # 不用截就不動標題（第 1 步：放得下就照用）
+    assert report.fit("BUG", "a" * 250, b, report.MAX_URL) == (report.url("BUG", "a" * 250, report.with_hint(b)), False)
+
+
 @pytest.mark.parametrize("limit", [1500, 2000, 4000])
 def test_fit_never_exceeds_the_limit(load, limit):
     report = load("report")
