@@ -3,6 +3,7 @@
 
 import getpass
 import importlib
+import itertools
 import os
 import re
 import sys
@@ -228,7 +229,23 @@ CASES = [
      "No such file or directory: b'HK2/王小明/a.txt'", "No such file or directory: b'.../<檔名已遮蔽>.txt'"),
     ("one_letter_word_apostrophe", {},  # 一個字母的字（B）接撇號會當開頭的引號：裡面沒有 / 或 \ 就不算一對，不吃掉路徑的開引號
      "Plan B's 'HK2/王小明/a.txt'", "Plan B's '.../<檔名已遮蔽>.txt'"),
+    ("closing_quote_does_not_open", {},  # 'x ' 的閉引號跟路徑的開引號之間是 " / "：頭尾是空白，不算一對
+     "'x ' / 'HK2/a.txt'", "'x ' / '.../<檔名已遮蔽>.txt'"),
+    ("quoted_name_then_date_then_path", {},  # '王小明' 的閉引號到路徑的開引號之間有日期的 /，但頭尾是空白
+     "ValueError: '王小明' 2026/10/25 交的 'HK2/王小明/成績.csv'", "ValueError: '王小明' 2026/10/25 交的 '.../<檔名已遮蔽>.csv'"),
+    ("dict_repr_keeps_context", {},  # "v" 的閉引號到 "z" 的開引號那一段結尾是空白：不算一對，不把中間整段遮掉
+     '{"k": "v", \'p\': \'HK2/王小明/x.txt\', "z": 1}', '{"k": "v", \'p\': \'.../<檔名已遮蔽>.txt\', "z": 1}'),
+    ("one_letter_apostrophe_then_slash", {},  # B' 當開頭、裡面有 1/2 的 /，但結尾是空白：不算一對
+     "Plan B's 1/2 'HK2/x.txt'", "Plan B's 1/2 '.../<檔名已遮蔽>.txt'"),
 ]
+
+# 引號裡的相對路徑前面有各種會騙引號配對的字：撇號、一個字母的字接撇號、沒有分隔符號的一對、中間有 / 的日期與分數、
+# 字串前綴、dict／list 的 repr。前綴裡不放「王小明」（只看路徑裡的那一個有沒有漏；'王小明' 在前面的那一句是第 58 列）
+NOISY_PREFIXES = ("Can't ", "Plan B's ", "it's 1/2 ", "'x ' / ", '"a" / ', "'李大華' 2026/10/25 ", "[b'a', ",
+                  "{'k': 'v', ", "rock'n'roll ", "'分數' / ", "b's ", "isn't 3/4 ", 'x = "" / ', "(", "")
+NOISY_PATHS = ("'HK2/王小明_B11201234/a.txt'", "'HK2\\\\王小明_B11201234\\\\a.txt'",  # 第二個是 Windows 的 repr：兩個反斜線
+               "b'HK2/王小明_B11201234/a.txt'", '"HK2/王小明_B11201234/a.txt"')
+NOISY_SUFFIXES = ("", " not found", "。")
 
 # 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
 SAMPLE = (
@@ -277,6 +294,16 @@ def test_redact_is_idempotent(load, name, over, text, want):
     ctx = redact.Ctx(**{**MAC, **over})
     once = redact.redact(text, ctx)[0]
     assert redact.redact(once, ctx)[0] == once
+
+
+def test_quoted_relative_path_is_masked_in_noisy_lines(load):
+    redact = load("redact")
+    ctx = redact.Ctx(**MAC)
+    for prefix, path, suffix in itertools.product(NOISY_PREFIXES, NOISY_PATHS, NOISY_SUFFIXES):
+        text = prefix + path + suffix
+        once = redact.redact(text, ctx)[0]
+        assert "王小明" not in once and "B11201234" not in once, (text, once)
+        assert redact.redact(once, ctx)[0] == once, (text, once)
 
 
 def test_redact_counts(load):
