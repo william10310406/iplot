@@ -16,8 +16,8 @@ from typing import Any
 
 from core.core import Core
 from core.errors import describe
-from core.scan import is_module
-from core.text import T
+from core.scan import is_module, module_info
+from core.text import REPORT_MODULE, T
 from core.types import ErrorInfo, ModuleInfo, Scope
 
 MAX_ICON = 1024 * 1024  # 圖示檔的上限：1 MB（D65）
@@ -133,6 +133,14 @@ class Bridge:
             error = errors[error_id]
             self._panel.submit(lambda: core.action("edit", error.file, core.config.editor, error.line))
 
+    def report_error(self, error_id: int) -> None:
+        """「回報這個問題」：第 error_id 筆回報交給「回報與討論」的 on_error(app, error)（D110）；那個模組不在了就重掃。"""
+        errors = self._panel.errors
+        if isinstance(error_id, int) and 0 <= error_id < len(errors):
+            error = errors[error_id]
+            self._on(REPORT_MODULE, lambda core, info: self._panel.press(core, info, "on_error", (error,), quiet=True),
+                     self._panel.bundled)
+
     def rescan(self) -> None:
         """重掃（視窗取得焦點時頁面會呼叫，D11）。"""
         self._panel.submit(self._panel.core.rescan)
@@ -208,10 +216,11 @@ class WebPanel:
             finally:
                 self._jobs.task_done()
 
-    def press(self, core: Core, info: ModuleInfo) -> None:
-        """執行模組，前後各告訴頁面一聲：輸出要等模組結束才進訊息區，執行期間頁面得看得出它還在跑。"""
+    def press(self, core: Core, info: ModuleInfo, handler: str = "run", args: tuple = (), quiet: bool = False) -> None:
+        """執行模組，前後各告訴頁面一聲：輸出要等模組結束才進訊息區，執行期間頁面得看得出它還在跑。
+        也用來跑模組的某個 handler（回報這個問題）。"""
         self._js("busy", info.title)
-        core.press(info)
+        core.press(info, handler, args, quiet)
         self._js("busy", None)
 
     def submit(self, job: Callable[[], object]) -> None:
@@ -225,6 +234,11 @@ class WebPanel:
     def find(self, id: str) -> ModuleInfo | None:
         """目前面板上資料夾是 id 的模組；不在面板上、或那個資料夾已經不是模組（被刪了）就回 None。"""
         return next((m for m in self.core.all_modules() if str(m.folder) == id and is_module(m.folder)), None)
+
+    def bundled(self, name: str) -> ModuleInfo | None:
+        """modules/ 底下叫 name 的模組（跟 Core.action 找「作業系統」一樣，不管面板停在哪一層）；不是模組就回 None。"""
+        folder = self.home / "modules" / name
+        return module_info(folder, (self.home / "modules").resolve(), "here") if is_module(folder) else None
 
     def root(self, path: str) -> Path | None:
         """目前面板上資料夾是 path 的那一組的資料夾；沒有這一組就回 None。"""
@@ -249,10 +263,12 @@ class WebPanel:
         self._js("log", text)
 
     def report(self, error: ErrorInfo) -> None:
-        """訊息區顯示錯誤：白話一句，「打開檔案」與「詳細」由頁面排。頁面壞到顯示不了也不往外丟。"""
+        """訊息區顯示錯誤：白話一句，「打開檔案」與「詳細」由頁面排。頁面壞到顯示不了也不往外丟。
+        reportable 是 modules/回報與討論 在不在：在才有「回報這個問題」。"""
         self.errors.append(error)
+        reportable = is_module(self.home / "modules" / REPORT_MODULE)
         with contextlib.suppress(self.webview.JavascriptException):
-            self._js("report", {**error_json(error), "id": len(self.errors) - 1})
+            self._js("report", {**error_json(error), "id": len(self.errors) - 1, "reportable": reportable})
 
     def _dialog(self, kind: str, *args: Any) -> Any:
         """推一個對話框給頁面，等頁面用 answer(編號, 值) 回來；視窗關掉、頁面重新載入都算取消（None）。"""

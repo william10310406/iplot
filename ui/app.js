@@ -251,6 +251,12 @@ function entry(text, error) {
       acts.append(more);
       body.append(tb);
     }
+    if (error.reportable) {  // 有「回報與討論」模組才有（D110）；按一次就變灰，不會排好幾個預覽頁
+      const report = el("button", "btn-s", T.report_issue);
+      report.type = "button";
+      report.onclick = () => { report.disabled = true; api().report_error(error.id); };
+      acts.append(report);
+    }
     row.append(acts);
   }
   log.append(row);
@@ -300,7 +306,7 @@ iplot.show = (scope) => {
 
 iplot.log = (text) => { entry(text); };
 
-// error 的欄位見 ui/web.py 的 error_json；sentence 是白話那一句
+// error 的欄位見 ui/web.py 的 error_json；id 與 reportable 是 WebPanel.report 加的；sentence 是白話那一句
 iplot.report = (error) => {
   if (error.source === "core") iplot.busy(null);  // 核心自己出錯時不一定來得及說「跑完了」
   entry(error.sentence, error);

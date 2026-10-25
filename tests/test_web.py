@@ -337,8 +337,8 @@ def test_bridge_exposes_only_its_methods(bridge):
     這是整潔，不是安全邊界——pywebview 用名字一路 getattr，知道名字的頁面程式碼叫得到底線後面的東西；
     真正的邊界是頁面零外部資源、模組的輸出一律當文字（tests/test_boundaries.py）。"""
     public = {n for n in dir(bridge) if not n.startswith("_")}
-    assert public == {"state", "press", "enter", "back", "create", "add_child", "action", "open_error", "rescan",
-                      "answer"}
+    assert public == {"state", "press", "enter", "back", "create", "add_child", "action", "open_error",
+                      "report_error", "rescan", "answer"}
     assert all(callable(getattr(bridge, n)) for n in public)
 
 
@@ -435,7 +435,7 @@ def test_report_has_sentence_and_open_error_edits_at_the_line(panel, bridge, win
     bridge.press(str(a))
     panel.wait()
     [error] = window.calls("report")[-1]
-    assert set(error) == ERROR_KEYS | {"id"}
+    assert set(error) == ERROR_KEYS | {"id", "reportable"}
     assert error["sentence"] == T["error_at_line"].format(module="A", line=2, kind="ZeroDivisionError",
                                                            message="division by zero")
     assert (error["file"], error["line"], error["source"]) == (str(a / "iplot.py"), 2, "module")
@@ -453,6 +453,86 @@ def test_error_json_without_file(home):
     assert error_json(error) == {"kind": "TypeError", "message": "m", "file": None, "line": None, "traceback": "",
                                  "source": "config", "module": None,
                                  "sentence": T["config_error"].format(message="m")}
+
+
+REPORTER_SRC = "def on_error(app, error):\n    app.log('got ' + error.kind)\n"
+NAME_ERROR = ErrorInfo("NameError", "x", None, None, "", "module", "A")
+
+
+def test_reportable_follows_the_report_module(panel, home, window):
+    """D110：modules/回報與討論 是模組時，錯誤那一列才有「回報這個問題」；每一筆在回報的當下各算各的。"""
+    panel.report(NAME_ERROR)
+    first = window.calls("report")[-1][0]
+    assert first["reportable"] is False
+    make_module(home / "modules", "回報與討論", REPORTER_SRC)
+    panel.report(NAME_ERROR)
+    assert window.calls("report")[-1][0]["reportable"] is True
+    assert window.calls("report")[0][0] == first
+
+
+def test_report_error_hands_the_same_error_to_on_error(panel, home, bridge, monkeypatch):
+    """「回報這個問題」把面板上那一筆 ErrorInfo 原封不動交給「回報與討論」的 on_error，而且 quiet（設計第 17 節第 6 條）。"""
+    make_module(home / "modules", "回報與討論", REPORTER_SRC)
+    seen = []
+    monkeypatch.setattr(panel.core, "press", lambda info, handler="run", args=(), quiet=False:
+                        seen.append((info, handler, args, quiet)))
+    panel.report(NAME_ERROR)
+    bridge.report_error(0)
+    panel.wait()
+    [(info, handler, args, quiet)] = seen
+    assert info.folder == home / "modules" / "回報與討論"
+    assert (handler, quiet) == ("on_error", True)
+    assert len(args) == 1 and args[0] is panel.errors[0]
+
+
+def test_report_error_runs_on_error_quietly_with_busy(panel, home, bridge, window):
+    """真的跑一次：on_error 的輸出進訊息區、沒有「完成」那一行；執行中照樣告訴頁面（經過 WebPanel.press）。"""
+    make_module(home / "modules", "回報與討論", REPORTER_SRC)
+    panel.report(NAME_ERROR)
+    bridge.report_error(0)
+    panel.wait()
+    logs = [c[0] for c in window.calls("log")]
+    done = T["done"].split("{seconds")[0].format(title="回報與討論")
+    assert "got NameError" in logs and not any(line.startswith(done) for line in logs)
+    assert window.calls("busy") == [["回報與討論"], [None]]
+
+
+@pytest.mark.parametrize("bad", [999, -1, "0", None, 1.5])
+def test_report_error_ignores_bad_ids(panel, home, bridge, window, monkeypatch, bad):
+    """頁面傳來的編號只認回報過的那幾筆（照 open_error）：其餘什麼都不做，也不重掃。"""
+    make_module(home / "modules", "回報與討論", REPORTER_SRC)
+    seen = []
+    monkeypatch.setattr(panel.core, "press", lambda *a: seen.append(a))
+    panel.report(NAME_ERROR)
+    shows = len(window.calls("show"))
+    bridge.report_error(bad)
+    panel.wait()
+    assert seen == [] and len(window.calls("show")) == shows
+
+
+def test_report_error_without_the_module_rescans(panel, bridge, window):
+    """「回報與討論」不在（回報之後被刪掉，或從來沒有）：按了就重掃，不報錯、不記任何一行。"""
+    panel.report(NAME_ERROR)
+    shows, logs = len(window.calls("show")), len(window.calls("log"))
+    bridge.report_error(0)
+    panel.wait()
+    assert len(window.calls("show")) == shows + 1
+    assert len(window.calls("log")) == logs and len(window.calls("report")) == 1
+
+
+def test_report_error_works_from_a_child_level(panel, home, bridge, window):
+    """面板停在下一層時 modules/回報與討論 不在畫面上：照樣找得到（用路徑找，不用 WebPanel.find；設計第 17 節第 5 條）。"""
+    a = make_module(home / "modules", "A").resolve()
+    make_module(a, "B")
+    make_module(home / "modules", "回報與討論", REPORTER_SRC)
+    rescan(panel)
+    bridge.enter(str(a))
+    panel.wait()
+    assert "回報與討論" not in modules(window.calls("show")[-1][0])
+    panel.report(NAME_ERROR)
+    bridge.report_error(0)
+    panel.wait()
+    assert "got NameError" in [c[0] for c in window.calls("log")]
 
 
 # 選檔案、選資料夾（D67）
