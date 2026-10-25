@@ -26,7 +26,7 @@
 在終端機裡、iPLoT 資料夾中執行 `python3 main.py --safe`（Linux 也可以 `./iPLoT.sh --safe`），開的是 tkinter 面板，不用 `lib/`、不用網路。安全模式只有這一個入口：要自己加 `--safe` 才會進去。
 
 - **什麼時候用**：網頁面板開不起來；模組要用 `turtle` 或 tkinter 開自己的視窗（在預設的面板上這類模組不會執行，訊息區會說要用安全模式）；上一層或 `config.py` 多掃的位置裡有東西讓面板出問題。
-- **長什麼樣**：標題是「iPLoT v0.5.1（安全模式）」；只掃 `modules/`，所以只有「這一層」；一欄文字按鈕，沒有圖示和狀態列，單擊就執行；右鍵四項（打開程式碼、在資料夾中顯示、在終端機打開、在這裡新增下一層模組…）；＋ 在每組標題的右邊。
+- **長什麼樣**：標題是「iPLoT v0.6.0（安全模式）」；只掃 `modules/`，所以只有「這一層」；一欄文字按鈕，沒有圖示和狀態列，單擊就執行；右鍵四項（打開程式碼、在資料夾中顯示、在終端機打開、在這裡新增下一層模組…）；＋ 在每組標題的右邊。
 - **需要 tkinter**（python.org 的 Python 內含；Linux 裝 `python3-tk`）。沒有的話印一句「這個 Python 沒有 tkinter，安全模式與備用面板都開不了；請用 python.org 的版本」就結束。
 - **裝不起來時退到的是後備面板，不是安全模式**：沒有網路、pip 失敗、這個平台沒有網頁面板（Linux）、Windows 缺 WebView2 Runtime（這一項未經實機驗證）——iPLoT 在終端機說明原因，改開後備的 tkinter 面板，同樣的說明也寫在訊息區最前面。後備面板跟安全模式是同一個 tkinter 面板（一欄文字按鈕、單擊就執行、右鍵四項），差別在範圍：它照常掃上一層與 `ROOTS`，標題沒有「（安全模式）」。它一樣需要 tkinter。0.4.0 在這種時候是直接進安全模式，0.5.0 改了。
 - **這兩種 tkinter 面板都沒有頁面**：模組用 `app.page` 開自己的一頁畫面時，只會在訊息區看到一句「這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用」。隨附的「工作坊」就是這種模組（見「更新與工作坊」）。
@@ -39,7 +39,7 @@
 
 | 層 | 在哪裡 | 顏色 |
 |---|---|---|
-| 這一層 | `iPLoT/modules/` 底下的資料夾。隨附的九個模組和自己做的模組都在這 | 藍 |
+| 這一層 | `iPLoT/modules/` 底下的資料夾。隨附的 11 個模組（主控面板、互通、作業系統、回報與討論、工作坊、打開核心原始碼、更新、行事曆、重新啟動、開Terminal、開工）和自己做的模組都在這 | 藍 |
 | 上一層 | iPLoT 資料夾的上一層底下的資料夾。把 iPLoT 放在 `~/`，`Documents` 只要放進一個 `iplot.py` 就變成按鈕 | 紅 |
 | 下一層 | 任何模組資料夾裡面再有模組，圖示右下角出現 ▸，點 ▸ 進去看，可以一直往下。還沒有下一層的模組沒有 ▸，第一個從右鍵「在這裡新增下一層模組…」加 | 紫 |
 
@@ -94,7 +94,7 @@ print("你的年齡是" + x + "歲")
 │ • 已掃描 modules/、../，找到 4 個模組              │   訊息區：錯誤、print() 和 app.log 都在這
 │ • 模組『開工』第 7 行出錯：                        │
 │   NameError，name 'x' is not defined               │
-│                              [ 打開檔案 ] [ 詳細 ] │
+│             [ 打開檔案 ] [ 詳細 ] [ 回報這個問題 ] │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -138,7 +138,7 @@ UPDATE_URL = "https://william10310406.github.io/iplot-workshop/update.json"
 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"
 ```
 
-從 0.5.x 換上來的，照 CHANGELOG 0.6.0 那一段做（`docs/08_操作說明-0.6.0.md` 第 1.2 節）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
+從 0.5.x 換上來的，照 CHANGELOG 0.6.0 那一段做（`docs/08_操作說明-0.6.0.md` 第 1.2 節）。從 0.5.0、0.5.1 換上來、沒做過 0.5.2 那兩件事的（`WORKSHOP_URL` 還指著 `iplot-workshop/index.json`，或 `modules/工作坊` 還沒照 0.5.2 的說明換過），另外用 0.6.0 的包裡的 `iPLoT-v0.6.0/modules/工作坊` 換掉 `modules/工作坊`，把 `WORKSHOP_URL` 換成上面那一行，再執行「重新啟動」（做法見 docs/08 第 1.2 節第 6 步）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
 
 不想連網：把網址換成 `None`（不加引號），存檔，執行「重新啟動」；按下去只會說一句怎麼設定。要用別人放檔案的地方：換成那個人給的網址（字串，要加引號）。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，照上面那三行自己加上去；不加等於沒設定（`None`）。
 
@@ -149,14 +149,14 @@ WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"
 iPLoT 自己只發核心。完整的指令，在 iPLoT 資料夾裡（設計第 9.1 節）：
 
 ```
-python3 tools/publish.py --version 0.5.2 --base-url https://william10310406.github.io/iplot-workshop --out ../iplot-workshop --modules-site https://william10310406.github.io/iplot-modules/
+python3 tools/publish.py --version 0.6.0 --base-url https://william10310406.github.io/iplot-workshop --out ../iplot-workshop --modules-site https://william10310406.github.io/iplot-modules/
 ```
 
-還沒打 `v0.5.2` 這個 tag 時加 `--ref HEAD`。`--out` 是 `iplot-workshop` 的本機 clone，放在 iPLoT 資料夾隔壁；沒給 `--out` 就是 `交付/發佈/`。給了 `--modules-site`，它在 `--out` 產生下面這些檔：
+還沒打 `v0.6.0` 這個 tag 時加 `--ref HEAD`。`--out` 是 `iplot-workshop` 的本機 clone，放在 iPLoT 資料夾隔壁；沒給 `--out` 就是 `交付/發佈/`。給了 `--modules-site`，它在 `--out` 產生下面這些檔：
 
 | 產生的檔 | 誰用 | 內容 |
 |---|---|---|
-| `iPLoT-v0.5.2.zip` | 「更新」下載 | 核心的包，也就是交付用的那一整包（最上層是 `iPLoT-v0.5.2/`；「更新」只取裡面的四樣）：`git archive` 打出 `v0.5.2` 這個 tag 的內容，`.gitattributes` 裡標了 `export-ignore` 的不帶（`tests/`、`tools/`、`docs/plans/` 這些）。還沒打 tag 時加 `--ref HEAD`，照最後一次 commit 打。打包的那一版裡 `core/__init__.py` 寫的版本要等於 `--version`，不一樣工具就停下來說一句，不產生任何檔 |
+| `iPLoT-v0.6.0.zip` | 「更新」下載 | 核心的包，也就是交付用的那一整包（最上層是 `iPLoT-v0.6.0/`；「更新」只取裡面的四樣）：`git archive` 打出 `v0.6.0` 這個 tag 的內容，`.gitattributes` 裡標了 `export-ignore` 的不帶（`tests/`、`tools/`、`docs/plans/` 這些）。還沒打 tag 時加 `--ref HEAD`，照最後一次 commit 打。打包的那一版裡 `core/__init__.py` 寫的版本要等於 `--version`，不一樣工具就停下來說一句，不產生任何檔 |
 | `update.json` | 「更新」讀 | 版本、zip 的網址、zip 的 sha256、這一版改了什麼（取自 `CHANGELOG.md` 那一版那一節的第一段，也就是摘要；它會整段顯示在「要更新嗎」的對話框裡，所以那一段中間不能有空行） |
 | `index.html` | 用瀏覽器看的人 | 一頁：核心的版本、下載連結、sha256、怎麼開始用；模組那一段只有一句話＋連結：「模組在 <`--modules-site` 的網址>，誰都能上傳。」沒有 JS、沒有外部資源 |
 | `.nojekyll` | GitHub Pages | 空檔：讓 Pages 照原樣放出每個檔 |
@@ -172,14 +172,14 @@ python3 tools/publish.py --version 0.5.2 --base-url https://william10310406.gith
 發佈的順序：
 
 1. commit `.gitattributes`、版本號（`core/__init__.py`）、`config.py`、`modules/工作坊`、`CHANGELOG.md`，和這一版其他的改動。
-2. 打 tag（`v0.5.2`）。
-3. 跑上面那一行 `publish.py`。它會印「核心的包最上層：」接著那一層的檔與資料夾；工作樹的 `.gitattributes` 跟 tag 裡的不一樣時（改了還沒 commit，或還沒追蹤），多印一句「注意：工作樹的 .gitattributes 跟 v0.5.2 裡的不一樣…」：`git archive` 只認 tag 裡已經 commit 的那一份，要照新的排，先 commit、重打 tag 再發佈。
+2. 打 tag（`v0.6.0`）。
+3. 跑上面那一行 `publish.py`。它會印「核心的包最上層：」接著那一層的檔與資料夾；工作樹的 `.gitattributes` 跟 tag 裡的不一樣時（改了還沒 commit，或還沒追蹤），多印一句「注意：工作樹的 .gitattributes 跟 v0.6.0 裡的不一樣…」：`git archive` 只認 tag 裡已經 commit 的那一份，要照新的排，先 commit、重打 tag 再發佈。
 4. 解開核心的包檢查：最上層跟上一步印的一樣，`tests/`、`tools/`、`docs/plans/` 不在裡面，留下的檔沒有個人路徑與開發用電腦的帳號名。
 5. 到 `../iplot-workshop` commit、push：
 
 ```
 git add -A
-git commit -m "0.5.2（<iPLoT 的短 sha>）"
+git commit -m "0.6.0（<iPLoT 的短 sha>）"
 git push
 ```
 
@@ -198,7 +198,7 @@ python3 tests/acceptance_workshop.py
 **`--modules`：本機 `file://` 試與測試用。** iPLoT 自己的模組不再從這裡發，到 iplot-modules 的上傳表單（見下面「上傳自己的模組」）。不用上傳、不用網路：`--base-url file:///<絕對路徑>/交付/發佈`。在 iPLoT 資料夾裡可以直接這樣寫：
 
 ```
-python3 tools/publish.py --version 0.5.2 --ref HEAD --base-url "file://$(pwd)/交付/發佈" --modules 開工
+python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/交付/發佈" --modules 開工
 ```
 
 `--modules` 後面寫 `modules/` 裡的資料夾名稱（`modules/` 裡沒有的名稱，工具會說是哪幾個，不產生任何檔）。給了 `--modules`，除了上面那張表的檔，還多兩樣，最後印出 `UPDATE_URL`、`WORKSHOP_URL` 兩行（都在 `--base-url` 底下）：
@@ -318,6 +318,10 @@ python3 tools/publish.py --version 0.5.2 --ref HEAD --base-url "file://$(pwd)/�
 - **「收作業」**（同一層）：選 TronClass 下載的檔（一人一個 `.zip` 或 `.txt`，或全班一包的 zip），可以多選；檔名裡看得出 HKn 就收進那一份，看不出來會問一次。
 - **批次模式（不開面板）**：在 `modules/科學計算/` 裡執行 `python3 hk_tk.py --batch ~/Downloads/HK5.zip --kit ~/Downloads/t2026fscSpace`，收進 zip 旁邊的 `HK5_收件/`（套件裝進 zip 旁邊的 `科學計算-venv/`），開一個全班名單的視窗，雙擊一個就開；Windows 未經實機驗證。
 - 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.6.0.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
+
+## 回報問題與討論
+
+錯誤訊息旁邊的「回報這個問題」（隨附的模組「回報與討論」）會先遮掉路徑與使用者名稱、給你看、讓你改，再用瀏覽器開到 `https://github.com/william10310406/iplot/discussions` 的新增頁，標題、內文都填好；雙擊面板上「回報與討論」這一格，可以回報沒有錯誤訊息的問題、提建議、問問題、看論壇。要有 GitHub 帳號，送出是你在瀏覽器裡按：iPLoT 不登入、不連網，只把內容填進網址交給瀏覽器。論壇是公開的，學生的名字請自己再看一次（錯誤訊息裡直接寫著的名字遮不到）。iPLoT 打不開的時候，直接到那個網址發；怎麼按、遮了什麼、沒遮什麼，見 [docs/08](docs/08_操作說明-0.6.0.md) 第 10 節。
 
 ## 文件
 
