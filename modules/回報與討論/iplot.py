@@ -63,12 +63,18 @@ def _again(rep: report.Report, title: str, body: str) -> tuple[str, str, str]:
     return title, body, f"{title}\n\n{body}"
 
 
-def _save(kind: str, full: str) -> tuple[Path | None, OSError | None]:
-    """把完整的回報存進 OUTBOX（一律存，不只截過的時候）；存不了回 (None, 錯誤)，照樣往下走。"""
+def _save(kind: str, full: str) -> tuple[Path | None, Exception | None]:
+    """把完整的回報存進 OUTBOX（一律存，不只截過的時候）；存不了回 (None, 錯誤)，照樣往下走。
+    ValueError：full 裡有孤立的代理字元（Linux 上解不開的資料夾名字）時，write_text 丟 UnicodeEncodeError。"""
     try:
         return report.save(OUTBOX, stamp(), kind, full), None
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return None, exc
+
+
+def _why(exc: BaseException | None, ctx: redact.Ctx) -> str:
+    """句子裡的錯誤訊息：OSError 的字帶著完整的路徑（家目錄、帳號名），而那一句可能被複製進公開的貼文，先用同一個 ctx 遮過。"""
+    return redact.redact(str(exc), ctx)[0]
 
 
 def _open(u: str) -> bool:
@@ -79,12 +85,18 @@ def _open(u: str) -> bool:
         return False
 
 
-def _sentence(ok: bool, cut: bool, f: Path | None, err: OSError | None) -> str:
-    """send 回給頁面的那一句：只講檔案與網址（剪貼簿成不成，頁面自己知道，那一句由頁面加）。"""
-    lost = f"存不了檔（{err}）；完整的回報只在剪貼簿裡。"
-    if not ok:
-        return NOT_OPENED.format(where=f"完整的回報存在 回報/{f.name}，關掉這個視窗之後 iPLoT 會指給你看。" if f else lost)
-    text = OPENED.format(where=f"完整的回報也存在 回報/{f.name}。" if f else lost)
+def _sentence(ok: bool, cut: bool, f: Path | None, err: Exception | None, ctx: redact.Ctx) -> str:
+    """send 回給頁面的那一句：只講檔案與網址（剪貼簿成不成，頁面自己知道，那一句由頁面加）。截過的話，開成了、
+    開不成都接截斷的那一句：只叫人複製網址的話，人不知道網址裡的 traceback 少了一段。"""
+    if f is None:
+        where = f"存不了檔（{_why(err, ctx)}）；完整的回報只在剪貼簿裡。"
+    elif ok:
+        where = f"完整的回報也存在 回報/{f.name}。"
+    elif cut:  # 「關掉這個視窗之後 iPLoT 會指給你看」由後面的 CUT_SAVED 說，不說兩次
+        where = f"完整的回報存在 回報/{f.name}。"
+    else:
+        where = f"完整的回報存在 回報/{f.name}，關掉這個視窗之後 iPLoT 會指給你看。"
+    text = (OPENED if ok else NOT_OPENED).format(where=where)
     if cut:
         text += CUT_SAVED if f else CUT_UNSAVED
     return text
@@ -96,8 +108,8 @@ class Api:
 
     def __init__(self, rep: report.Report, kind: str, saved: list[Path]):
         self._rep, self._kind = rep, kind
-        self._saved = saved  # 截過、或瀏覽器打不開的那一次存的檔：on_error 在頁面關掉之後指給人看
-        self._lock = threading.Lock()  # pywebview 每一次 api 呼叫各一條執行緒
+        self._saved = saved  # 截過、或瀏覽器打不開的那一次存的檔：on_error 在頁面關掉之後、拿著 _lock 看，指給人看
+        self._lock = threading.Lock()  # pywebview 每一次 api 呼叫各一條執行緒；頁面關掉時 send 可能還拿著它
 
     def measure(self, title: str, body: str) -> dict:
         """長度那一行與 full：頁面把 full 放進 #full，按下去時複製的就是它（跟 send 存的檔一字不差）。"""
@@ -117,11 +129,18 @@ class Api:
             title, body, full = _again(rep, title, body)
             f, err = _save(self._kind, full)
             u, cut = report.fit(rep.category, title, body, report.max_url())
+            if cut:  # 截過的：開瀏覽器之前就記下（webbrowser.open 還沒回來，頁面就可能被關掉）
+                self._mark(f)
             ok = _open(u)
-            if f is not None and (cut or not ok) and f not in self._saved:
-                self._saved.append(f)
+            if not ok:
+                self._mark(f)
             return {"ok": ok, "url": "" if ok else u, "file": f.name if f else "", "cut": cut,
-                    "new_url": report.url(rep.category, "", ""), "sentence": _sentence(ok, cut, f, err)}
+                    "new_url": report.url(rep.category, "", ""), "sentence": _sentence(ok, cut, f, err, rep.ctx)}
+
+    def _mark(self, f: Path | None) -> None:
+        """記下頁面關掉之後要指給人看的檔：存不了的不記；同一秒按兩次（檔名一樣）不記兩次。"""
+        if f is not None and f not in self._saved:
+            self._saved.append(f)
 
 
 def run(app):
@@ -136,8 +155,11 @@ def on_error(app, error):
         return _by_file(app, rep, error.kind)
     saved = []
     data = {"mode": "edit", "title": rep.title, "body": rep.body, "notice": rep.notice, "hint": report.HINT}
-    app.page("回報這個問題", render(data), Api(rep, error.kind, saved))
-    for p in saved:
+    api = Api(rep, error.kind, saved)
+    app.page("回報這個問題", render(data), api)
+    with api._lock:  # 頁面關掉的時候 send 可能還在 pywebview 的執行緒上跑（例如卡在 webbrowser.open）：等它做完再看
+        files = list(saved)
+    for p in files:
         app.reveal(p)
 
 
@@ -153,7 +175,12 @@ def _by_file(app, rep: report.Report, kind: str) -> None:
                        "按「取消」就不送，草稿留著。"):
         app.log(f"沒有送出；草稿留在 回報/{draft.name}")
         return
-    first, _, rest = draft.read_text(encoding="utf-8-sig").partition("\n")  # 記事本存檔可能加 BOM
+    try:
+        text = draft.read_text(encoding="utf-8-sig")  # 記事本存檔可能加 BOM
+    except (OSError, UnicodeDecodeError) as exc:  # 按「確定」之前草稿被刪了，或存成了 Big5 之類的編碼
+        app.log(_unreadable(exc, draft.name, rep.ctx))
+        return
+    first, _, rest = text.partition("\n")
     lines = rest.split("\n")
     while lines and not lines[0].strip():  # 標題底下的空行不算內文
         lines.pop(0)
@@ -162,22 +189,33 @@ def _by_file(app, rep: report.Report, kind: str) -> None:
     copied = _copy_tk(full)
     u, cut = report.fit(rep.category, title, body, report.max_url())
     ok = _open(u)
-    app.log(_tk_sentence(p, err, copied, report.url(rep.category, "", ""), draft.name))
+    app.log(_tk_sentence(p, err, copied, report.url(rep.category, "", ""), rep.ctx))
+    if p is None and not copied:  # 遮過的全文只剩訊息區這一份（草稿沒有再遮過，不叫人從草稿貼）
+        app.log(full)
     if not ok:
         app.log(f"瀏覽器打不開。把這串網址整個複製到瀏覽器的網址列：{u}")
     if p is not None and (cut or not ok):
         app.reveal(p)
 
 
-def _tk_sentence(p: Path | None, err: OSError | None, copied: bool, new_url: str, draft: str) -> str:
-    """tkinter 面板開了瀏覽器之後訊息區的那一句：完整的回報在哪裡、GitHub 出錯時怎麼貼。"""
+def _unreadable(exc: Exception, draft: str, ctx: redact.Ctx) -> str:
+    """草稿讀不回來時訊息區的那一句（不開瀏覽器）：編碼不對的草稿還在，叫人這次存成 UTF-8；刪掉了的就只叫人再按一次。"""
+    if isinstance(exc, UnicodeDecodeError):
+        return (f"讀不回草稿（{_why(exc, ctx)}），沒有送出；改過的草稿留在 回報/{draft}，再按一次「回報這個問題」"
+                "會開新的一份，這次請存成 UTF-8。")
+    return f"讀不回草稿（{_why(exc, ctx)}），沒有送出；請再按一次「回報這個問題」。"
+
+
+def _tk_sentence(p: Path | None, err: Exception | None, copied: bool, new_url: str, ctx: redact.Ctx) -> str:
+    """tkinter 面板開了瀏覽器之後訊息區的那一句：完整的回報在哪裡、GitHub 出錯時怎麼貼。存不了檔、也沒複製成的話，
+    遮過的全文由 _by_file 接在這一句的下一則（草稿沒有再遮過，不是拿去貼的那一份）。"""
     if p is None and copied:
-        return (f"完整的回報已經複製到剪貼簿；存不了檔（{err}），完整的回報只在剪貼簿裡。如果 GitHub 出錯（例如顯示 500）："
-                f"確認瀏覽器已經登入之後再選一次；還是不行，就打開 {new_url}、直接貼上（複製這個網址會蓋掉剪貼簿）。"
-                + report.HINT)
+        return (f"完整的回報已經複製到剪貼簿；存不了檔（{_why(err, ctx)}），完整的回報只在剪貼簿裡。如果 GitHub 出錯"
+                f"（例如顯示 500）：確認瀏覽器已經登入之後再選一次；還是不行，就打開 {new_url}、直接貼上（複製這個網址會蓋掉"
+                "剪貼簿）。" + report.HINT)
     if p is None:
-        return (f"存不了檔（{err}），剪貼簿也沒有複製成功：如果 GitHub 出錯，打開 {new_url}，再從草稿 回報/{draft} 複製全文、"
-                "直接貼上（草稿沒有再遮過，貼上之前再看一次）。")
+        return (f"存不了檔（{_why(err, ctx)}），剪貼簿也沒有複製成功：完整的回報（遮過的）是下面那一則訊息。如果 GitHub 出錯，"
+                f"打開 {new_url}，再從訊息區複製下面那一則、直接貼上。")
     if copied:
         return (f"完整的回報已經複製到剪貼簿，也存在 回報/{p.name}。如果 GitHub 出錯（例如顯示 500）：確認瀏覽器已經登入之後"
                 f"再選一次；還是不行，就打開 {new_url}（複製這個網址會蓋掉剪貼簿），再從 回報/{p.name} 複製全文、直接貼上。"

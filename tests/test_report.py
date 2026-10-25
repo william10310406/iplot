@@ -1,6 +1,7 @@
 """隨附模組「回報與討論」（modules/回報與討論）：遮蔽、內文、網址、截斷、預覽頁與面板的流程（M8、D110–D116）。
 不開瀏覽器（autouse 的替身）、不連網、不寫進 repo（跑模組的流程先複製到 tmp）；遮蔽的表用假的 Ctx，只有端對端的兩個用這台機器。"""
 
+import errno
 import getpass
 import importlib
 import inspect
@@ -11,6 +12,7 @@ import platform
 import re
 import shutil
 import sys
+import threading
 import types
 import webbrowser
 from html.parser import HTMLParser
@@ -1404,3 +1406,213 @@ def test_on_error_end_to_end_leaks_nothing(tmp_path, web, opened):
     if len(user) >= 3:
         assert user not in out
     assert "FileNotFoundError" in q["title"] and "### 錯誤" in q["body"]
+
+
+# ── 存不了檔、草稿讀不回、開不成又截過、頁面關掉時 send 還在跑（Task 7 修補）──
+
+class Clipboard:
+    """tkinter 面板自己的那個 Tk 的替身：記下剪貼簿裡的字。"""
+    text = None
+
+    def clipboard_clear(self):
+        self.text = ""
+
+    def clipboard_append(self, s):
+        self.text += s
+
+    def update_idletasks(self):
+        pass
+
+
+def denied(where):
+    """report.save 真的存不了檔時的那種 OSError：字帶著完整的路徑（str(OSError) 是 [Errno 13] …: '<路徑>'）。"""
+    return OSError(errno.EACCES, "Permission denied", str(where))
+
+
+def refusing(monkeypatch, exc, before=None):
+    """tkinter 那一頭的 on_confirm：先叫 before(view)（有的話），再把 tmp 那一份 report.save 換成丟 exc 的替身
+    （run_module 匯進來的是 tmp 的複本，不是 load 的那一份）。"""
+    def swap(view):
+        if before is not None:
+            before(view)
+
+        def refuse(*a):
+            raise exc
+
+        monkeypatch.setattr(sys.modules["report"], "save", refuse)
+    return swap
+
+
+def press_tk(home, on_confirm):
+    """後備的 tkinter 面板上按「回報這個問題」、在草稿那一步按「確定」（之前先叫 on_confirm(view)）；回 view。"""
+    view = View(on_confirm=on_confirm)
+    view.answers = [True]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    return view
+
+
+def assert_no_leak(lines):
+    """訊息區的每一行都沒有這台的家目錄（含 Windows 的 repr：兩個反斜線）、帳號名、學生的名字。"""
+    home = str(Path.home())
+    try:
+        user = getpass.getuser()
+    except (ImportError, KeyError, OSError):
+        user = ""
+    for s in lines:
+        for leak in (home, repr(home)[1:-1], "王小明", *([user] if len(user) >= 3 else [])):
+            assert leak not in s, (leak, s)
+
+
+def test_send_masks_the_save_error(load, tmp_path, monkeypatch, opened):
+    # OSError 的字帶著完整的路徑（家目錄、帳號名）：頁面上那一句可能被複製進公開的貼文，先用同一個 ctx 遮過
+    rep = sample_rep(load)
+    api, saved = make_api(load, tmp_path, monkeypatch, rep)
+    exc = denied(f"{rep.ctx.home}/課程/王小明/回報/x.txt")
+
+    def refuse(*a):
+        raise exc
+
+    monkeypatch.setattr(load("report"), "save", refuse)
+    r = api.send(rep.title, rep.body)
+    assert (r["ok"], r["file"], saved, len(opened)) == (True, "", [], 1)
+    assert "存不了檔（[Errno 13] Permission denied: '<HOME>/.../<檔名已遮蔽>.txt'）" in r["sentence"]
+    for leak in (rep.ctx.home, "laoban", "王小明"):
+        assert leak not in r["sentence"], leak
+
+
+def test_send_survives_a_lone_surrogate(load, tmp_path, monkeypatch, opened):
+    # Linux 上解不開的資料夾名字（os.fsdecode 留下孤立的代理字元）：write_text 丟 UnicodeEncodeError（ValueError），
+    # 跟存不了檔一樣照樣開瀏覽器，不能讓 send 丟出去
+    rep = sample_rep(load)
+    api, saved = make_api(load, tmp_path, monkeypatch, rep)
+    r = api.send("[回報] 科學計算\udce9：KeyError", rep.body)
+    assert (r["ok"], r["file"], saved, len(opened)) == (True, "", [], 1)
+    assert "存不了檔" in r["sentence"] and "完整的回報只在剪貼簿裡" in r["sentence"]
+
+
+@pytest.mark.parametrize("save", ["saved", "unsaved"])
+def test_send_when_the_browser_fails_and_the_url_was_cut_says_so(load, tmp_path, monkeypatch, save):
+    # 開不成、網址又截過：只叫人複製網址的話，人不知道網址裡的 traceback 少了一段
+    iplot, report = load("iplot"), load("report")
+    monkeypatch.setattr(webbrowser, "open", lambda u, *a, **k: False)
+    rep = sample_rep(load)
+    api, saved = make_api(load, tmp_path, monkeypatch, rep)
+    if save == "unsaved":
+        blocker = tmp_path / "是一個檔"
+        blocker.write_text("x", encoding="utf-8")
+        monkeypatch.setattr(iplot, "OUTBOX", blocker)
+    r = api.send(rep.title, report.body("x", ENV, SENTENCE, long_tb(300)))
+    assert (r["ok"], r["cut"]) == (False, True) and r["sentence"].startswith("瀏覽器打不開")
+    if save == "saved":
+        assert iplot.CUT_SAVED in r["sentence"] and f"回報/{r['file']}" in r["sentence"]
+        assert r["sentence"].count("關掉這個視窗之後 iPLoT 會指給你看") == 1
+        assert [p.name for p in saved] == [r["file"]]
+    else:
+        assert r["sentence"].endswith(iplot.CUT_UNSAVED) and "存不了檔" in r["sentence"] and saved == []
+
+
+def test_send_marks_a_cut_file_before_opening_the_browser(load, tmp_path, monkeypatch):
+    # 頁面可能在 webbrowser.open 還沒回來的時候就被關掉：截過的檔在開瀏覽器之前就已經記在 saved 裡
+    report = load("report")
+    rep = sample_rep(load)
+    api, saved = make_api(load, tmp_path, monkeypatch, rep)
+    seen = []
+    monkeypatch.setattr(webbrowser, "open", lambda u, *a, **k: seen.append(list(saved)) or True)
+    r = api.send(rep.title, report.body("x", ENV, SENTENCE, long_tb(300)))
+    assert r["cut"] and seen == [[tmp_path / "回報" / r["file"]]]
+
+
+@pytest.mark.parametrize("case", ["cut", "browser-failed"])
+def test_on_error_waits_for_a_send_still_running(tmp_path, web, monkeypatch, case):
+    # pywebview 每一次 api 呼叫各一條執行緒：頁面關掉的時候 send 可能還卡在 webbrowser.open 裡。
+    # on_error 拿 Api 的鎖、等它做完，才看要指哪些檔（不然截過、開不成的那個檔指不到）
+    entered, release, results, threads = threading.Event(), threading.Event(), [], []
+
+    def browser(u, *a, **k):
+        entered.set()
+        assert release.wait(10)
+        return case == "cut"
+
+    monkeypatch.setattr(webbrowser, "open", browser)
+
+    def hook(html, api):  # 按了「在瀏覽器打開」，send 還沒回來就關掉頁面；0.2 秒之後瀏覽器才回來
+        body = "x\n" + long_tb(300) if case == "cut" else "x\n"
+        t = threading.Thread(target=lambda: results.append(api.send(page_data(html)["title"], body)))
+        t.start()
+        threads.append(t)
+        assert entered.wait(10)
+        threading.Timer(0.2, release.set).start()
+
+    home = tmp_path / "iPLoT"
+    view = View(hook=hook)
+    result, _ = press(home, view, "on_error", sample_error(home))
+    release.set()
+    threads[0].join(10)
+    assert result.ok, result.error
+    r, = results
+    assert r["cut"] if case == "cut" else not r["ok"]
+    assert [e[0] for e in view.events] == ["page-open", "page-closed", "action"]
+    action = view.events[2]
+    assert action[:2] == ("action", "reveal") and action[2].name == r["file"]
+
+
+def test_on_error_in_tk_masks_the_save_error(tmp_path, tk, monkeypatch):
+    tkinter = pytest.importorskip("tkinter")
+    root = Clipboard()
+    monkeypatch.setattr(tkinter, "_default_root", root, raising=False)
+    where = Path.home() / "課程" / "王小明" / "回報" / "x.txt"  # 真的 Ctx：這台的家目錄底下（執行時才算，不寫進檔）
+    view = press_tk(tmp_path / "iPLoT", refusing(monkeypatch, denied(where)))
+    line, = [s for s in view.logs if "存不了檔" in s]
+    assert "已經複製到剪貼簿" in line and "<HOME>/.../<檔名已遮蔽>.txt" in line
+    assert_no_leak(view.logs)
+    assert root.text and "王小明" not in root.text
+
+
+def test_on_error_in_tk_logs_the_redacted_full_text_when_it_can_neither_save_nor_copy(tmp_path, tk, monkeypatch, opened):
+    # 存不了檔、剪貼簿也沒複製成（_default_root 是 None）：遮過的全文直接寫進訊息區；
+    # 草稿沒有再遮過，不叫人從草稿複製
+    mine = Path.home() / "課程" / "王小明.py"
+
+    def add(view):
+        draft = next(e[2] for e in view.events if e[:2] == ("action", "edit"))
+        draft.write_text(draft.read_text(encoding="utf-8") + f"\n我的檔是 {mine}\n", encoding="utf-8", newline="\n")
+
+    view = press_tk(tmp_path / "iPLoT", refusing(monkeypatch, denied(Path.home() / "課程" / "王小明" / "x.txt"), add))
+    line, = [s for s in view.logs if "存不了檔" in s]
+    assert "剪貼簿也沒有複製成功" in line and "<HOME>/.../<檔名已遮蔽>.txt" in line
+    assert "訊息區" in line and "草稿" not in line
+    full, = [s for s in view.logs if s.startswith("[回報] 科學計算：KeyError")]
+    assert "我的檔是 <HOME>/.../<檔名已遮蔽>.py" in full and "### 錯誤" in full
+    assert view.logs.index(full) == view.logs.index(line) + 1  # 那一句說的「下面那一則」
+    assert_no_leak(view.logs)
+    assert len(opened) == 1
+
+
+@pytest.mark.parametrize("how", ["deleted", "big5"])
+def test_on_error_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, how):
+    # 按「確定」之前草稿被刪了、或用 Big5（cp950）存了：一句話、不開瀏覽器，不變成「回報與討論」自己的錯誤
+    names = []
+
+    def spoil(view):
+        draft = next(e[2] for e in view.events if e[:2] == ("action", "edit"))
+        names.append(draft.name)
+        if how == "deleted":
+            draft.unlink()
+        else:
+            draft.write_bytes("[回報] 科學計算：KeyError\n\n我改過了\n".encode("cp950"))
+
+    home = tmp_path / "iPLoT"
+    view = press_tk(home, spoil)
+    line, = [s for s in view.logs if s.startswith("讀不回草稿")]
+    assert "沒有送出" in line and "再按一次「回報這個問題」" in line
+    if how == "big5":
+        assert f"草稿留在 回報/{names[0]}" in line and "UTF-8" in line
+    else:
+        assert "<檔名已遮蔽>.md" in line  # FileNotFoundError 的字帶著草稿的完整路徑：遮過
+    for leak in (str(tmp_path), os.path.realpath(tmp_path)):
+        assert leak not in line
+    assert_no_leak([line])
+    assert opened == []
+    assert not list((home / "modules" / "回報與討論" / "回報").glob("*.txt"))
+    assert not [e for e in view.events if e[:2] == ("action", "reveal")]
