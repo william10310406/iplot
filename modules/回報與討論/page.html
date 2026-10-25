@@ -1,9 +1,11 @@
 <!doctype html>
 <!-- 「回報與討論」的預覽頁（iplot.py 的 render 把資料以 JSON 放進最下面那個 application/json）。
-     頁面 → Python：pywebview.api.measure（量網址長度、拿 Python 遮過的全文）、send（再遮一次、存檔、開瀏覽器）。
+     mode 是 "edit"（on_error）：一開始就是 #edit；"menu"（run）：先是 #menu 的四個入口，「回報問題」叫 start 換到 #edit。
+     頁面 → Python：pywebview.api.measure（量網址長度、拿 Python 遮過的全文）、send（再遮一次、存檔、開瀏覽器）；
+     #menu 另外叫 start（拿那一份回報）、go（提建議、問問題）、open_forum（看論壇）。
      剪貼簿：按鈕的 click 裡、叫 send 之前，用 execCommand 複製 #full 那一格；#full 只放 measure 回來的、遮過的全文，
      標題、內文那兩格從不拿去複製。#full 不能藏起來（藏起來的選不起來），所以放在畫面外。
-     字一律用 textContent／value；不放連結（會讓這個視窗自己換頁），網址一律經過 send；
+     字一律用 textContent／value；不放連結（會讓這個視窗自己換頁），網址一律經過 send、go、open_forum；
      不載入任何外部資源；深色模式跟著系統。 -->
 <html lang="zh-Hant">
 <head>
@@ -21,17 +23,17 @@ body { margin: 0; padding: 14px 18px; background: var(--bg); color: var(--fg);
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
 .notice { margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; }
 label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 12.5px; }
-input, textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px;
+input, textarea, select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px;
   background: var(--bg); color: var(--fg); font: inherit; }
 textarea { font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; resize: vertical; }
 #body { height: 20em; }
-#url { height: 6em; margin-top: 6px; }
+#url, #link { height: 6em; margin-top: 6px; }
 .note { margin: 6px 0; color: var(--muted); font-size: 12.5px; }
 .note.over { color: var(--danger); }
 .login { margin: 10px 0; }
 #result { white-space: pre-line; }
 .row { display: flex; gap: 6px; align-items: center; }
-.row input { flex: 1; }
+.row input, .row select { flex: 1; min-width: 0; }
 button { padding: 4px 12px; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent);
   color: var(--on-accent); font: inherit; font-size: 13px; white-space: nowrap; }
 button.plain { border-color: var(--line); background: none; color: var(--fg); }
@@ -42,6 +44,15 @@ button:disabled { opacity: .5; }
 </style>
 </head>
 <body>
+<section id="menu">
+  <p class="notice">論壇是公開的，任何人都看得到。「回報問題」會先讓你看過、改過要送出的內容；其他三個直接用瀏覽器打開。</p>
+  <label for="module">回報問題（畫面不對、太慢、結果不對，沒有出現錯誤訊息的）：相關的模組</label>
+  <div class="row"><select id="module"><option value="">（不指定模組）</option></select><button id="report" type="button" disabled>回報問題</button></div>
+  <p class="note">提建議、問問題的內文最後會帶這一行（版本與作業系統，沒有路徑）：<span id="env"></span></p>
+  <p class="row"><button id="idea" type="button" disabled>提建議</button><button id="qa" type="button" disabled>問問題</button><button id="forum" type="button" disabled>看論壇</button></p>
+  <p id="said"></p>
+  <textarea id="link" readonly hidden></textarea>
+</section>
 <section id="edit">
   <p class="notice"><span id="notice"></span>論壇是公開的，任何人都看得到；送出前請再看一次，特別是學生的名字。不送的話，直接關掉這個視窗。</p>
   <label for="title">標題</label>
@@ -96,7 +107,7 @@ function measure() {
 }
 
 function edited() {
-  if (!started) return;  // 還沒連上 Python：start 會量現在的內容
+  if (!started) return;  // 還沒連上 Python：connected 會量現在的內容
   ++seq;                 // 還在路上的那一次回來時丟掉，按鈕維持灰
   ready(false);
   clearTimeout(timer);
@@ -138,20 +149,67 @@ $("again").addEventListener("click", () => {
   $("result").textContent = sentence + clip(copied, true);
 });
 
+// #menu（run 的那一頁）的四顆鈕：連上 Python 之前、等 Python 回來的時候是灰的
+function menuReady(on) {
+  for (const id of ["report", "idea", "qa", "forum"]) $(id).disabled = !on;
+}
+
+$("report").addEventListener("click", () => {
+  menuReady(false);
+  window.pywebview.api.start($("module").value).then((r) => {
+    $("notice").textContent = r.notice;
+    $("title").value = r.title;
+    $("body").value = r.body;
+    $("menu").hidden = true;
+    $("edit").hidden = false;
+    measure();  // .value 放進去不會觸發 input 事件：自己量一次，#full 換成這一份、最新的那一次回來，按鈕才亮
+  }).catch((e) => {
+    $("said").textContent = "打不開回報的那一頁：" + why(e);
+    menuReady(true);
+  });
+});
+
+// 提建議、問問題、看論壇：Python 那一頭開瀏覽器；開不成的話網址放在下面那一格，讓人自己複製
+function browse(call, done) {
+  menuReady(false);
+  call().then((r) => {
+    $("said").textContent = r.ok ? done : "瀏覽器打不開。把下面這串網址整個複製到瀏覽器的網址列。";
+    $("link").value = r.url;
+    $("link").hidden = !r.url;
+  }).catch((e) => {
+    $("said").textContent = "打不開：" + why(e);
+  }).finally(() => menuReady(true));
+}
+
+const ASKED = "已經在瀏覽器打開了。登入 GitHub、按 Start discussion 才會公開。";
+$("idea").addEventListener("click", () => browse(() => window.pywebview.api.go("IDEA"), ASKED));
+$("qa").addEventListener("click", () => browse(() => window.pywebview.api.go("QA"), ASKED));
+$("forum").addEventListener("click", () => browse(() => window.pywebview.api.open_forum(), "已經在瀏覽器打開了。"));
+
 $("edit").hidden = data.mode !== "edit";
-$("notice").textContent = data.notice;
-$("title").value = data.title;
-$("body").value = data.body;
+$("menu").hidden = data.mode !== "menu";
+if (data.mode === "edit") {  // menu 的資料沒有這三個：等 start 回來才放
+  $("notice").textContent = data.notice;
+  $("title").value = data.title;
+  $("body").value = data.body;
+}
+for (const name of data.modules || []) {
+  const option = document.createElement("option");
+  option.value = name;
+  option.textContent = name;
+  $("module").append(option);
+}
+$("env").textContent = data.short_env || "";
 $("hint").textContent = data.hint;
 $("title").addEventListener("input", edited);
 $("body").addEventListener("input", edited);
 
-function start() {
+function connected() {
   if (started) return;
   started = true;
-  measure();
+  if (data.mode === "menu") menuReady(true); else measure();
 }
-if (window.pywebview && window.pywebview.api) start(); else window.addEventListener("pywebviewready", start);
+if (window.pywebview && window.pywebview.api) connected(); else window.addEventListener("pywebviewready", connected);
 </script>
 </body>
 </html>

@@ -966,13 +966,14 @@ def press(home, view, handler, *args, core=None):
     return run_module(info, App(core, info), handler, args), core
 
 
-def make_api(load, tmp_path, monkeypatch, rep, kind="KeyError"):
+def make_api(load, tmp_path, monkeypatch, rep, kind="KeyError", **menu):
     """直接建 iplot.Api 的測試一律經過它：OUTBOX 先指到 tmp_path/回報（用 load 匯進來的 iplot，OUTBOX 指的是
-    repo 裡的 modules/回報與討論/回報）。回 (api, saved)。"""
+    repo 裡的 modules/回報與討論/回報）。menu 是 run 那一頁才給的 starts=、short_env=（沒給就跟 on_error 一樣
+    只傳前三個）。回 (api, saved)。"""
     iplot = load("iplot")
     monkeypatch.setattr(iplot, "OUTBOX", tmp_path / "回報")
     saved = []
-    return iplot.Api(rep, kind, saved), saved
+    return iplot.Api(rep, kind, saved, **menu), saved
 
 
 def sample_error(home):
@@ -1039,9 +1040,9 @@ def test_api_takes_no_app(load):
     assert "app" not in ps and ps[:3] == ["rep", "kind", "saved"]
 
 
-def test_api_exposes_only_measure_and_send(load, tmp_path, monkeypatch):
+def test_api_exposes_only_its_methods(load, tmp_path, monkeypatch):
     api, _ = make_api(load, tmp_path, monkeypatch, sample_rep(load))
-    assert [n for n in dir(api) if not n.startswith("_")] == ["measure", "send"]
+    assert [n for n in dir(api) if not n.startswith("_")] == ["go", "measure", "open_forum", "send", "start"]
 
 
 def test_send_redacts_again(load, tmp_path, monkeypatch, opened):
@@ -1729,3 +1730,227 @@ def test_on_error_in_tk_says_when_the_url_was_cut(tmp_path, tk, monkeypatch, bro
         assert failed == [f"瀏覽器打不開。{cut}把這串網址整個複製到瀏覽器的網址列：{calls[0]}"]
         assert cut not in first and first.endswith(hint if save == "copied" else "直接貼上。")
     assert_no_leak(view.logs)
+
+
+# ── 四個入口：run、Api 的 start／go／open_forum、#menu（Task 8，設計第 5、9 節）──
+
+MENU = "要做什麼？輸入 1 回報問題、2 提建議、3 問問題、4 看論壇"
+ENV_LINE = "iPLoT 0.6.0・macOS 26.5（arm64）・Python 3.14.7"  # short_env 的樣子：直接建 Api 的測試用
+
+
+class ModulesCore(FakeCore):
+    """FakeCore，all_modules()（也就是 app.modules）回給定的 ModuleInfo：面板目前範圍內的模組。"""
+
+    def __init__(self, home, config, view, modules):
+        super().__init__(home, config, view)
+        self.modules = tuple(modules)
+
+    def all_modules(self):
+        return self.modules
+
+
+def science(home):
+    """照 child_tree 建：「科學計算」（最上層，level "here"）與它底下的學生作業「王小明_B11201234」（下一層模組，
+    level "child"）；回兩個的 ModuleInfo。"""
+    root = (home / "modules").resolve()
+    child = child_tree(home)
+    return module_info(home / "modules" / "科學計算", root, "here"), module_info(child, root, "child")
+
+
+def start_api(load, tmp_path, monkeypatch):
+    """照 run 的樣子建 Api：rep 是沒指定模組的那一份，starts 只有「科學計算」。回 (api, 「科學計算」的資料夾)。"""
+    report = load("report")
+    home = tmp_path / "iPLoT"
+    top, child = science(home)
+    app = App(ModulesCore(home, DEFAULT_CONFIG, FakeView(), (top, child)), copied(home))
+    api, _ = make_api(load, tmp_path, monkeypatch, report.blank(app, "BUG"), "回報",
+                      starts={"科學計算": report.blank(app, "BUG", "科學計算")}, short_env=report.short_env(app))
+    return api, top.folder
+
+
+def test_run_opens_the_menu_page(tmp_path, web, opened):
+    home = tmp_path / "iPLoT"
+    view = View()
+    result, _ = press(home, view, "run")
+    assert result.ok, result.error
+    pages = [e for e in view.events if e[0] == "page-open"]
+    assert len(pages) == 1 and pages[0][1] == "回報與討論"
+    data = page_data(pages[0][2])
+    assert data["mode"] == "menu" and data["modules"] == [] and data["short_env"].startswith("iPLoT ")
+    assert [e[0] for e in view.events] == ["page-open", "page-closed"]  # 沒送：不寫訊息區、不指檔案
+    assert opened == []
+
+
+def test_menu_lists_only_top_level_modules(tmp_path, web):
+    # 下一層模組的名字是學生的名字與學號（D95）：不列進清單，run 給 Api 的 starts 裡也沒有
+    home = tmp_path / "iPLoT"
+    bodies = []
+
+    def hook(html, api):
+        bodies.extend([api.start("科學計算")["body"], api.start("王小明_B11201234")["body"]])
+
+    view = View(hook=hook)
+    result, _ = press(home, view, "run", core=ModulesCore(home, DEFAULT_CONFIG, view, science(home)))
+    assert result.ok, result.error
+    html = view.events[0][2]
+    assert page_data(html)["modules"] == ["科學計算"]
+    assert "王小明" not in html and "B11201234" not in html
+    named, child = bodies
+    assert "- 模組：科學計算 " in named
+    assert "- 模組：" not in child and "王小明" not in child
+
+
+def test_run_reveals_the_saved_file_after_the_page_closes(tmp_path, web, opened):
+    # 跟 on_error 一樣：頁面那一頭不叫 app；截過的檔等頁面關掉、回到 run 才指給人看
+    home = tmp_path / "iPLoT"
+
+    def hook(html, api):
+        r = api.start()
+        assert api.send(r["title"], f"{r['body']}\n{long_tb(300)}")["cut"]
+
+    view = View(hook=hook)
+    result, _ = press(home, view, "run")
+    assert result.ok, result.error
+    assert [e[0] for e in view.events] == ["page-open", "page-closed", "action"]
+    action = view.events[2]
+    assert action[:2] == ("action", "reveal") and action[2].name.endswith("-回報.txt")
+    assert action[2].parent == (home / "modules" / "回報與討論" / "回報").resolve()
+    assert len(opened) == 1
+
+
+def test_api_start_returns_a_blank_report(load, tmp_path, monkeypatch, web):
+    api, _ = start_api(load, tmp_path, monkeypatch)
+    r = api.start()
+    assert set(r) == {"title", "body", "notice"} and r["title"] == "[回報] "
+    assert "### 錯誤" not in r["body"] and "- iPLoT：" in r["body"] and "- 模組：" not in r["body"]
+    assert r["notice"].startswith(("已自動遮蔽", "沒有找到"))
+
+
+def test_api_start_names_an_allowed_module(load, tmp_path, monkeypatch, opened, web):
+    # 換成那一份之後，measure、send 都用它的 ctx：「科學計算」資料夾裡的路徑遮成 <模組:科學計算>/…
+    report = load("report")
+    api, top = start_api(load, tmp_path, monkeypatch)
+    r = api.start("科學計算")
+    assert "- 模組：科學計算 " in r["body"]
+    mine = f"{r['body']}\n我的檔是 {top.resolve() / 'hk.py'}\n"
+    assert "<模組:科學計算>/hk.py" in api.measure(r["title"], mine)["full"]
+    sent = api.send(r["title"], mine)
+    assert "<模組:科學計算>/hk.py" in query(opened[0])["body"] and sent["new_url"] == report.url("BUG", "", "")
+    api.start()  # 換回沒指定模組的那一份：同一個路徑不再當成模組裡的
+    assert "<模組:科學計算>" not in api.measure(r["title"], mine)["full"]
+
+
+def test_api_start_refuses_other_names(load, tmp_path, monkeypatch, web):
+    # 不在 starts 裡的（下一層模組的名字、沒有的名字、不是字串的）一律是沒指定模組的那一份；start 不另外去找
+    api, _ = start_api(load, tmp_path, monkeypatch)
+    blank = api.start("")
+    for name in ("王小明_B11201234", "不存在", None, ["科學計算"]):
+        api.start("科學計算")
+        assert api.start(name) == blank, name
+    assert "王小明" not in blank["body"] and "- 模組：" not in blank["body"]
+
+
+@pytest.mark.parametrize("category", ["IDEA", "QA"])
+def test_api_go_opens_the_category(load, tmp_path, monkeypatch, opened, category):
+    forum = load("forum")
+    api, saved = make_api(load, tmp_path, monkeypatch, sample_rep(load), "回報", starts={}, short_env=ENV_LINE)
+    assert api.go(category) == {"ok": True, "url": ""}
+    u, = opened
+    assert u.startswith(forum.FORUM + "/new?")
+    assert query(u) == {"category": forum.CATEGORIES[category], "title": "", "body": "\n\n---\n" + ENV_LINE}
+    monkeypatch.setattr(webbrowser, "open", lambda u, *a, **k: False)  # 開不成：網址交給頁面，讓人自己複製
+    assert api.go(category) == {"ok": False, "url": u}
+    assert saved == [] and not (tmp_path / "回報").exists()  # 不存檔
+
+
+def test_api_go_refuses_other_categories(load, tmp_path, monkeypatch, opened):
+    # 公告（NEWS）是研究助理自己發的；回報問題（BUG）走 start 的預覽頁
+    api, _ = make_api(load, tmp_path, monkeypatch, sample_rep(load), "回報", starts={}, short_env=ENV_LINE)
+    for category in ("NEWS", "x", "BUG", None, ["IDEA"]):
+        assert api.go(category)["ok"] is False, category
+    assert opened == []
+
+
+def test_api_open_forum(load, tmp_path, monkeypatch, opened):
+    forum = load("forum")
+    api, _ = make_api(load, tmp_path, monkeypatch, sample_rep(load))
+    assert api.open_forum() == {"ok": True, "url": ""} and opened == [forum.FORUM]
+
+    def broken(u, *a, **k):
+        raise webbrowser.Error("找不到瀏覽器")
+
+    monkeypatch.setattr(webbrowser, "open", broken)
+    assert api.open_forum() == {"ok": False, "url": forum.FORUM}  # 不丟例外
+
+
+def test_menu_fills_the_edit_page_then_measures():
+    # 「回報問題」：start 回來的標題、內文用 .value 放進去，不會觸發 input 事件——不自己量一次的話 #full 還是空的，
+    # 按「在瀏覽器打開」複製出去的是空的。放進去之後才 measure（按鈕先變灰、最新的那一次回來才亮）
+    page = PAGE.read_text(encoding="utf-8")
+    tree = Tree(page)
+    assert tree.ids["menu"][0] == "section" and tree.ids["edit"][0] == "section"
+    for button, text in (("report", "回報問題"), ("idea", "提建議"), ("qa", "問問題"), ("forum", "看論壇")):
+        tag, attrs, parents = tree.ids[button]
+        assert tag == "button" and "disabled" in attrs and ("section", {"id": "menu"}) in parents, button
+        assert f'id="{button}" type="button" disabled>{text}</button>' in page, button
+    assert tree.ids["module"][0] == "select" and '<option value="">（不指定模組）</option>' in page
+    assert 'createElement("option")' in page and ".textContent = name" in page  # 模組的名字當文字放
+    assert '$("menu").hidden = data.mode !== "menu"' in page
+    body = handler(page, "report")
+    start = body.index('.start($("module").value)')
+    then = body.index(".then(", start)
+    title, text = body.index('$("title").value = r.title', then), body.index('$("body").value = r.body', then)
+    assert then < title and then < text < body.index("measure();", max(title, text))
+    assert re.search(r'\$\("edit"\)\.hidden = false', body) and re.search(r'\$\("menu"\)\.hidden = true', body)
+
+
+@pytest.mark.parametrize("answer, want", [("1", "edit"), ("2", "IDEA"), ("3", "QA"), ("4", "forum"), (None, None),
+                                          ("x", "log")])
+def test_run_in_tk_asks_first(load, tmp_path, tk, opened, answer, want):
+    # 後備的 tkinter 面板沒有頁面：問一次（設計第 9 節）。「1」走跟「回報這個問題」一樣的草稿檔
+    home = tmp_path / "iPLoT"
+    view = View()
+    view.answer = answer
+    view.answers = [False]  # 「1」：草稿那一步按「取消」，不送
+    result, _ = press(home, view, "run")
+    assert result.ok, result.error
+    forum = load("forum")  # run_module 跑完才匯：不然模組匯到的是 repo 那一份
+    assert view.asks == [MENU]
+    assert not [e for e in view.events if e[0] in ("page", "page-open")]
+    edits = [e[2] for e in view.events if e[:2] == ("action", "edit")]
+    if want == "edit":
+        draft, = edits
+        assert draft.parent == (home / "modules" / "回報與討論" / "回報").resolve() and draft.name.endswith("-回報.md")
+        text = draft.read_text(encoding="utf-8")
+        assert text.startswith("[回報] \n\n### 發生了什麼\n") and "- iPLoT：" in text and "### 錯誤" not in text
+        assert view.logs[-1] == f"沒有送出；草稿留在 回報/{draft.name}"
+    else:
+        assert edits == []
+    if want in ("IDEA", "QA"):
+        u, = opened
+        q = query(u)
+        assert (q["category"], q["title"]) == (forum.CATEGORIES[want], "") and q["body"].startswith("\n\n---\niPLoT ")
+    elif want == "forum":
+        assert opened == [forum.FORUM]
+    else:
+        assert opened == []
+    if want in ("IDEA", "QA", "forum"):
+        assert view.logs == []
+    elif want == "log":
+        assert view.logs == ["請輸入 1 到 4"]
+    elif want is None:
+        assert view.events == [("ask", MENU)]  # 按了取消：什麼都不做
+
+
+def test_run_in_tk_gives_the_url_when_the_browser_fails(load, tmp_path, tk, monkeypatch):
+    # 找不到瀏覽器不變成這個模組的錯誤：網址寫在訊息區，讓人自己複製
+    def broken(u, *a, **k):
+        raise webbrowser.Error("找不到瀏覽器")
+
+    monkeypatch.setattr(webbrowser, "open", broken)
+    home = tmp_path / "iPLoT"
+    view = View()
+    view.answer = "4"
+    result, _ = press(home, view, "run")
+    assert result.ok, result.error
+    assert view.logs == [f"瀏覽器打不開。把這串網址整個複製到瀏覽器的網址列：{load('forum').FORUM}"]

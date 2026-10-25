@@ -46,6 +46,9 @@ TK_CUT_SAVED = ("內容太長，網址裡的 traceback 中間截掉了；回報/
                 "iPLoT 會指給你看。")  # tkinter 面板：截過的檔馬上就指，沒有「關掉這個視窗之後」
 UNENCODABLE = "有沒辦法存成 UTF-8 的字"  # 孤立的代理字元：UnicodeEncodeError 的字不給人看（見 _cannot）
 NOT_OPENED = "瀏覽器打不開。把下面這串網址整個複製到瀏覽器的網址列；{where}"
+TK_NOT_OPENED = "瀏覽器打不開。{cut}把這串網址整個複製到瀏覽器的網址列：{url}"  # tkinter 面板的訊息區；cut 見 _tk_cut
+MENU = "要做什麼？輸入 1 回報問題、2 提建議、3 問問題、4 看論壇"  # tkinter 面板沒有頁面：run 問這一句（設計第 9 節）
+ASKS = ("IDEA", "QA")  # 提建議、問問題：直接開新增頁，內文只帶 short_env（回報問題 BUG 走預覽；公告 NEWS 不給人開）
 
 
 def stamp() -> str:
@@ -96,6 +99,17 @@ def _open(u: str) -> bool:
         return False
 
 
+def _ask_url(category: str, env: str) -> str:
+    """提建議、問問題的新增頁：標題空著，內文是一條分隔線與 short_env（沒有路徑、沒有帳號名，不用遮）。"""
+    return report.url(category, "", "\n\n---\n" + env)
+
+
+def _browse(u: str) -> dict:
+    """go、open_forum 回給頁面的：開成了 {"ok": True, "url": ""}；開不成把網址交給頁面，讓人自己複製。"""
+    ok = _open(u)
+    return {"ok": ok, "url": "" if ok else u}
+
+
 def _sentence(ok: bool, cut: bool, f: Path | None, err: Exception | None, ctx: redact.Ctx) -> str:
     """send 回給頁面的那一句：只講檔案與網址（剪貼簿成不成，頁面自己知道，那一句由頁面加）。截過的話，開成了、
     開不成都接截斷的那一句：只叫人複製網址的話，人不知道網址裡的 traceback 少了一段。"""
@@ -114,13 +128,36 @@ def _sentence(ok: bool, cut: bool, f: Path | None, err: Exception | None, ctx: r
 
 
 class Api:
-    """預覽頁的 JS 呼叫的入口（pywebview.api.measure／send），照「工作坊」的樣子：在 pywebview 的執行緒上跑，
-    只遮、組網址、存檔、開瀏覽器，不叫 app、不碰 core（設計第 17 節第 4 條）；屬性都以底線開頭，不丟例外。"""
+    """預覽頁的 JS 呼叫的入口（pywebview.api.measure／send；run 的那一頁另外有 start／go／open_forum），照「工作坊」
+    的樣子：在 pywebview 的執行緒上跑，只遮、組網址、存檔、開瀏覽器，不叫 app、不碰 core（設計第 17 節第 4 條）；
+    屬性都以底線開頭，不丟例外。on_error 只給前三個；starts、short_env 是 run 先算好的（start、go 不碰 app）。"""
 
-    def __init__(self, rep: report.Report, kind: str, saved: list[Path]):
-        self._rep, self._kind = rep, kind
-        self._saved = saved  # 截過、或瀏覽器打不開的那一次存的檔：on_error 在頁面關掉之後、拿著 _lock 看，指給人看
+    def __init__(self, rep: report.Report, kind: str, saved: list[Path],
+                 starts: dict[str, report.Report] | None = None, short_env: str = ""):
+        self._rep, self._kind = rep, kind  # _rep 是「目前這一份」：start 換掉它，measure、send 拿著鎖讀它
+        self._first = rep  # start 不認得的名字一律回到這一份（run 給的是沒指定模組的那一份）
+        self._starts = dict(starts or {})  # {最上層模組的名字: 那一份}：下一層模組的名字不在裡面（可能是學生的名字）
+        self._env = short_env
+        self._saved = saved  # 截過、或瀏覽器打不開的那一次存的檔：頁面關掉之後才拿著 _lock 看，指給人看（_reveal）
         self._lock = threading.Lock()  # pywebview 每一次 api 呼叫各一條執行緒；頁面關掉時 send 可能還拿著它
+
+    def start(self, module: str = "") -> dict:
+        """「回報問題」：換成那個模組的那一份（不在 starts 裡的，包括下一層模組的名字與 ""，一律是沒指定模組的那一份），
+        之後 measure、send 用它的分類與 ctx。只查表，不碰 app。"""
+        rep = self._starts.get(module, self._first) if isinstance(module, str) else self._first
+        with self._lock:
+            self._rep = rep
+        return {"title": rep.title, "body": rep.body, "notice": rep.notice}
+
+    def go(self, category: str) -> dict:
+        """「提建議」「問問題」：開那個分類的新增頁（ASKS 以外的分類不開）。不存檔：內文沒有使用者寫的東西。"""
+        if category not in ASKS:
+            return {"ok": False, "url": ""}
+        return _browse(_ask_url(category, self._env))
+
+    def open_forum(self) -> dict:
+        """「看論壇」。"""
+        return _browse(forum.FORUM)
 
     def measure(self, title: str, body: str) -> dict:
         """長度那一行與 full：頁面把 full 放進 #full，按下去時複製的就是它（跟 send 存的檔一字不差）。"""
@@ -155,7 +192,17 @@ class Api:
 
 
 def run(app):
-    app.log(f"還沒做好：{forum.FORUM}")
+    """面板上的「回報與討論」這一格（D114，設計第 5、9 節）：回報問題、提建議、問問題、看論壇。回報問題可以指定一個
+    最上層的模組（下一層模組的名字可能是學生的名字，不列）；每一份都在這裡先算好，頁面那一頭只查表、不碰 app。"""
+    if report.panel_kind() == "tkinter":
+        return _menu_by_ask(app)
+    env = report.short_env(app)
+    names = [m.name for m in app.modules if m.level != "child"]
+    saved = []
+    data = {"mode": "menu", "modules": names, "short_env": env, "hint": report.HINT}
+    api = Api(report.blank(app, "BUG"), "回報", saved, {n: report.blank(app, "BUG", n) for n in names}, env)
+    app.page("回報與討論", render(data), api)
+    _reveal(app, api)
 
 
 def on_error(app, error):
@@ -168,10 +215,39 @@ def on_error(app, error):
     data = {"mode": "edit", "title": rep.title, "body": rep.body, "notice": rep.notice, "hint": report.HINT}
     api = Api(rep, error.kind, saved)
     app.page("回報這個問題", render(data), api)
-    with api._lock:  # 頁面關掉的時候 send 可能還在 pywebview 的執行緒上跑（例如卡在 webbrowser.open）：等它做完再看
-        files = list(saved)
+    _reveal(app, api)
+
+
+def _reveal(app, api: Api) -> None:
+    """頁面關掉之後，指出 send 記下的檔。頁面關掉的時候 send 可能還在 pywebview 的執行緒上跑（例如卡在
+    webbrowser.open）：拿著它的鎖、等它做完再看。"""
+    with api._lock:
+        files = list(api._saved)
     for p in files:
         app.reveal(p)
+
+
+def _menu_by_ask(app) -> None:
+    """tkinter 面板沒有頁面（設計第 9 節）：問一次。1 走跟「回報這個問題」一樣的草稿檔（沒有錯誤、不指定模組），
+    2、3、4 直接開瀏覽器，開不成就把網址寫在訊息區；按取消什麼都不做。"""
+    answer = app.ask(MENU)
+    if answer is None:
+        return
+    answer = answer.strip()
+    if answer == "1":
+        _by_file(app, report.blank(app, "BUG"), "回報")
+    elif answer in ("2", "3"):
+        _open_or_log(app, _ask_url({"2": "IDEA", "3": "QA"}[answer], report.short_env(app)))
+    elif answer == "4":
+        _open_or_log(app, forum.FORUM)
+    else:
+        app.log("請輸入 1 到 4")
+
+
+def _open_or_log(app, u: str) -> None:
+    """tkinter 面板開瀏覽器：找不到瀏覽器不變成這個模組的錯誤，網址寫在訊息區讓人自己複製。"""
+    if not _open(u):
+        app.log(TK_NOT_OPENED.format(cut="", url=u))
 
 
 def _by_file(app, rep: report.Report, kind: str) -> None:
@@ -210,7 +286,7 @@ def _by_file(app, rep: report.Report, kind: str) -> None:
     if p is None and not copied:  # 遮過的全文只剩訊息區這一份（草稿沒有再遮過，不叫人從草稿貼）
         app.log(full)
     if not ok:
-        app.log(f"瀏覽器打不開。{said}把這串網址整個複製到瀏覽器的網址列：{u}")
+        app.log(TK_NOT_OPENED.format(cut=said, url=u))
     if p is not None and (cut or not ok):
         app.reveal(p)
 
