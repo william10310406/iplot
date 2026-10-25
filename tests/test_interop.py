@@ -816,19 +816,27 @@ def test_why_not_names_the_reason(load, home, tmp_path):
 
 @pytest.fixture
 def entry(load, home, monkeypatch):
-    """run.main 的測試環境：Python 一律算對、同步與提示框只記錄、webview 是假的；互通的紀錄寫在 home/modules/互通。"""
+    """run.main 的測試環境：Python 一律算對、同步與提示框只記錄、webview 是假的；互通的紀錄寫在 home/modules/互通。
+    同一個測試 go 好幾次也一樣：每一次 go 都只記錄同步，不會真的做捷徑。"""
     from conftest import FakeWebview
 
-    run, boot, sync = load("run"), load("boot"), load("sync")
+    run, boot = load("run"), load("boot")
     synced, alerts, wv = [], [], FakeWebview()
+
+    def record_sync():
+        """把 sys.modules 裡的那一份 sync 的 sync 換成只記錄。run._run 跑完會把 sync 從 sys.modules 拿掉（OURS），
+        下一次 import sync 拿到的是新的一份、真的 sync.sync：所以每一次 go 之前都要再換一次。"""
+        monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: synced.append(a) or [])
+
     monkeypatch.setattr(boot, "ensure_python", lambda *a, **k: None)
-    monkeypatch.setattr(sync, "sync", lambda *a, **k: synced.append(a) or [])
+    record_sync()
     monkeypatch.setattr(boot, "alert", lambda title, message, **k: alerts.append((title, message)))
     folder = home / "modules" / "互通"
     folder.mkdir()
 
     def go(argv, cwd=None, **kw):
         kw.setdefault("home", home)
+        record_sync()
         return run.main(argv, folder=folder, webview=wv, cwd=cwd or home, **kw)
 
     return types.SimpleNamespace(run=run, go=go, wv=wv, synced=synced, alerts=alerts, folder=folder)
@@ -1254,6 +1262,7 @@ def test_the_same_interop_runs_before_and_after_updating_from_0_5_2_to_0_6_0(ent
             assert entry.go(["A", "~/g.txt", "x.txt"], cwd=tmp_path) == 0, version
             assert hasattr(scan, "home_path") == (version == "0.6.0")
         assert want in entry.wv.windows[0].calls("log") and entry.alerts == [], version
+    assert len(entry.synced) == 2  # 兩次都只記錄：第二次 go 也沒有真的同步、做捷徑
 
 
 def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
@@ -1345,6 +1354,7 @@ def test_main_offers_the_panel_only_when_there_is_one_and_it_is_not_the_target(e
         entry.go([target])
         [[got, _, offer]] = entry.wv.windows[0].calls("done")
         assert (got, offer) == (outcome, "主控面板" if target != "主控面板" else None), target
+    assert len(entry.synced) == 4  # 四次 go 都只記錄同步
 
 
 def test_pressing_the_panel_keeps_the_modules_exit_code(entry, home):
@@ -1394,6 +1404,7 @@ def test_running_the_calendar_itself_offers_the_panel(entry, home):
     entry.wv.windows.clear()
     entry.go(["行事曆"])
     assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
+    assert len(entry.synced) == 2  # 兩次 go 都只記錄同步
 
 
 def test_the_back_button_runs_the_named_module_and_closes(popup, home):
