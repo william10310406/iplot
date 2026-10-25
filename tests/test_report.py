@@ -3,7 +3,9 @@
 
 import getpass
 import importlib
+import inspect
 import itertools
+import json
 import os
 import platform
 import re
@@ -11,6 +13,7 @@ import shutil
 import sys
 import types
 import webbrowser
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -923,3 +926,481 @@ def test_save_writes_utf8_with_stamp_and_kind(load, tmp_path):
     path = load("report").save(tmp_path / "回報", "20261023-201500", "NameError", "王小明\n")
     assert path == tmp_path / "回報" / "20261023-201500-NameError.txt"
     assert path.read_bytes() == "王小明\n".encode()  # UTF-8、換行是 \n（Windows 也一樣）
+
+
+# ── 預覽頁與 on_error（iplot.py、page.html）──
+
+PAGE = MODULE / "page.html"
+STUDENT = "/Users/laoban/課程/王小明.py"  # 使用者自己貼進內文的路徑（配 MAC 的假 Ctx 是家目錄底下）
+
+
+class View(FakeView):
+    """View(hook=None, on_confirm=None)：page 被叫的時候先記一筆 ("page-open", title, html)，叫 hook(html, api)，
+    再記一筆 ("page-closed",)；confirm 被叫的時候 on_confirm 有值就先叫 on_confirm(self)，再照 FakeView 用 answers 回。"""
+
+    def __init__(self, hook=None, on_confirm=None):
+        super().__init__()
+        self.hook, self.on_confirm = hook, on_confirm
+
+    def page(self, title, html, api):
+        self.events.append(("page-open", title, html))
+        if self.hook is not None:
+            self.hook(html, api)
+        self.events.append(("page-closed",))
+
+    def confirm(self, prompt):
+        if self.on_confirm is not None:
+            self.on_confirm(self)
+        return super().confirm(prompt)
+
+
+def press(home, view, handler, *args, core=None):
+    """真的 run_module(info, App(core, info), handler, args)（模組先複製到 home/modules），回 (result, core)。
+    core.calls 就是 view.events：page-open／page-closed 與 app.reveal、app.edit 記的 action 才比得出先後。"""
+    core = core or FakeCore(home, DEFAULT_CONFIG, view)
+    core.calls = view.events
+    info = copied(home)
+    return run_module(info, App(core, info), handler, args), core
+
+
+def make_api(load, tmp_path, monkeypatch, rep, kind="KeyError"):
+    """直接建 iplot.Api 的測試一律經過它：OUTBOX 先指到 tmp_path/回報（用 load 匯進來的 iplot，OUTBOX 指的是
+    repo 裡的 modules/回報與討論/回報）。回 (api, saved)。"""
+    iplot = load("iplot")
+    monkeypatch.setattr(iplot, "OUTBOX", tmp_path / "回報")
+    saved = []
+    return iplot.Api(rep, kind, saved), saved
+
+
+def sample_error(home):
+    """在 home/modules 做一個「科學計算」，裡面的 hk.py 丟 KeyError；用真的 run_module 拿它的 ErrorInfo。"""
+    folder = make_module(home / "modules", "科學計算", "import hk\n\n\ndef run(app):\n    hk.grade({})\n")
+    (folder / "hk.py").write_text('def grade(row):\n    return row["score"]\n', encoding="utf-8", newline="\n")
+    error = run_module(module_info(folder, (home / "modules").resolve(), "here"), FakeApp(home)).error
+    assert error is not None and error.kind == "KeyError"
+    return error
+
+
+def sample_rep(load, body="### 發生了什麼\n按了「批改」\n"):
+    """遮過的回報（假的 MAC Ctx）：直接建 Api 的測試用。"""
+    report, redact = load("report"), load("redact")
+    return report.Report("BUG", "[回報] 科學計算：KeyError（iPLoT 0.6.0）", body, "已自動遮蔽：1 個路徑。",
+                         redact.Ctx(**MAC))
+
+
+def page_data(html):
+    """render 放進頁面的資料（<script type="application/json" id="data"> 裡那一段）。"""
+    return json.loads(re.search(r'<script type="application/json" id="data">(.*?)</script>', html, re.S)[1])
+
+
+def click_send(html, api):
+    """頁面上什麼都不改，按「在瀏覽器打開」。"""
+    data = page_data(html)
+    api.send(data["title"], data["body"])
+
+
+class Tree(HTMLParser):
+    """每個有 id 的元素：(標籤, 屬性, 祖先的 [(標籤, 屬性)])；body 底下那一層的標籤與 id，照順序。"""
+
+    VOID = {"meta", "input", "br", "img", "link", "hr"}
+
+    def __init__(self, page):
+        super().__init__()
+        self.stack, self.ids, self.top = [], {}, []
+        self.feed(page)
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if "id" in a:
+            self.ids[a["id"]] = (tag, a, list(self.stack))
+        if [t for t, _ in self.stack] == ["html", "body"]:
+            self.top.append((tag, a.get("id")))
+        if tag not in self.VOID:
+            self.stack.append((tag, a))
+
+    def handle_endtag(self, tag):
+        while self.stack and self.stack.pop()[0] != tag:
+            pass
+
+
+def handler(page, button):
+    """page.html 裡 $("<button>").addEventListener("click", … 那個函式的本體（到頂層的 }); 為止）。"""
+    head = f'$("{button}").addEventListener("click"'
+    assert page.count(head) == 1, button
+    return page.split(head, 1)[1].split("\n});", 1)[0]
+
+
+def test_api_takes_no_app(load):
+    # 頁面那一頭在 pywebview 的執行緒上跑：拿得到 app 就可能叫它（設計第 17 節第 4 條）
+    ps = list(inspect.signature(load("iplot").Api).parameters)
+    assert "app" not in ps and ps[:3] == ["rep", "kind", "saved"]
+
+
+def test_api_exposes_only_measure_and_send(load, tmp_path, monkeypatch):
+    api, _ = make_api(load, tmp_path, monkeypatch, sample_rep(load))
+    assert [n for n in dir(api) if not n.startswith("_")] == ["measure", "send"]
+
+
+def test_send_redacts_again(load, tmp_path, monkeypatch, opened):
+    # 使用者在預覽頁上自己貼了路徑：按送出時用同一個 ctx 再遮一次（標題、內文都是）
+    api, _ = make_api(load, tmp_path, monkeypatch, sample_rep(load))
+    api.send(f"[回報] {STUDENT}", f"### 發生了什麼\n我的檔是 {STUDENT}\n")
+    q = query(opened[0])
+    assert "<HOME>/.../<檔名已遮蔽>.py" in q["body"] and "<HOME>/.../<檔名已遮蔽>.py" in q["title"]
+    assert "王小明" not in q["body"] and "王小明" not in q["title"]
+
+
+def test_send_opens_the_browser_once_with_the_fitted_url(load, tmp_path, monkeypatch, opened):
+    report = load("report")
+    rep = sample_rep(load)
+    api, _ = make_api(load, tmp_path, monkeypatch, rep)
+    long = report.body("x", ENV, SENTENCE, long_tb(300))
+    r = api.send(rep.title, long)
+    assert r["cut"] and len(opened) == 1
+    assert opened[0] == report.fit("BUG", rep.title, long, report.max_url())[0]
+
+
+def test_send_always_saves_the_full_text_before_opening_the_browser(load, tmp_path, monkeypatch):
+    # 研究助理 Task 0：沒登入的瀏覽器登入之後 GitHub 回 500——開瀏覽器的那一刻，遮過的全文一定已經在 回報/ 裡
+    redact, report = load("redact"), load("report")
+    seen, outbox = [], []
+
+    def browser(u, *a, **k):
+        seen.append(sorted(p.read_text(encoding="utf-8") for p in outbox[-1].glob("*.txt")))
+        return True
+
+    monkeypatch.setattr(webbrowser, "open", browser)
+    rep = sample_rep(load)
+    short = f"{rep.body}我的檔是 {STUDENT}\n"
+    outbox.append(tmp_path / "短" / "回報")
+    api, saved = make_api(load, tmp_path / "短", monkeypatch, rep)
+    r = api.send(rep.title, short)
+    full = f"{rep.title}\n\n{redact.redact(short, rep.ctx)[0]}"
+    assert seen == [[full]] and "王小明" not in full and report.HINT not in full
+    assert (r["ok"], r["cut"], saved) == (True, False, [])  # 沒截、開成了：不用指給人看
+    assert r["file"] == next(outbox[-1].glob("*.txt")).name
+    long = report.body("x", ENV, SENTENCE, long_tb(300))
+    outbox.append(tmp_path / "長" / "回報")
+    api, saved = make_api(load, tmp_path / "長", monkeypatch, rep)
+    r = api.send(rep.title, long)
+    full = f"{rep.title}\n\n{redact.redact(long, rep.ctx)[0]}"
+    assert seen[-1] == [full] and r["cut"]
+    assert [p.name for p in saved] == [r["file"]] and saved[0].read_text(encoding="utf-8") == full  # 沒截的全文
+    assert report.HINT not in full
+
+
+@pytest.mark.parametrize("fail", ["false", "error", "oserror"])
+def test_send_when_the_browser_fails_returns_the_url(load, tmp_path, monkeypatch, fail):
+    def browser(u, *a, **k):
+        if fail == "error":
+            raise webbrowser.Error("找不到瀏覽器")
+        if fail == "oserror":
+            raise OSError("ShellExecute 失敗")
+        return False
+
+    monkeypatch.setattr(webbrowser, "open", browser)
+    report = load("report")
+    rep = sample_rep(load)
+    api, saved = make_api(load, tmp_path, monkeypatch, rep)
+    r = api.send(rep.title, rep.body)
+    assert r["ok"] is False and r["url"] == report.fit("BUG", rep.title, rep.body, report.max_url())[0]
+    assert r["sentence"].startswith("瀏覽器打不開")
+    assert [p.name for p in saved] == [r["file"]] and saved[0].parent == tmp_path / "回報"
+
+
+def test_measure_reports_length_and_limit(load, tmp_path, monkeypatch):
+    report = load("report")
+    rep = sample_rep(load)
+    api, _ = make_api(load, tmp_path, monkeypatch, rep)
+    r = api.measure(rep.title, rep.body)
+    want = len(report.url("BUG", rep.title, report.with_hint(rep.body)))
+    assert (r["length"], r["limit"]) == (want, report.max_url())
+    assert r["sentence"] == f"網址長度 {want}／{report.max_url()}"
+    r = api.measure(rep.title, report.body("x", ENV, SENTENCE, long_tb(300)))
+    assert r["length"] > r["limit"]
+    assert r["sentence"].startswith(f"網址長度 {r['length']}／{r['limit']}")
+    assert "traceback 會從中間截斷；完整的會在剪貼簿與檔案裡" in r["sentence"]
+
+
+def test_measure_gives_the_redacted_full_text(load, tmp_path, monkeypatch):
+    # 頁面複製的就是這一份：要跟按下去之後存的檔一字不差
+    rep = sample_rep(load)
+    api, _ = make_api(load, tmp_path, monkeypatch, rep)
+    b = f"{rep.body}我的檔是 {STUDENT}\n"
+    full = api.measure(rep.title, b)["full"]
+    assert "<HOME>/.../<檔名已遮蔽>.py" in full and "王小明" not in full
+    assert full.startswith(rep.title + "\n\n")
+    r = api.send(rep.title, b)
+    assert (tmp_path / "回報" / r["file"]).read_text(encoding="utf-8") == full
+
+
+def test_page_html_is_self_contained():
+    page = PAGE.read_text(encoding="utf-8")
+    for bad in ("http://", "https://", "innerHTML", "<a "):
+        assert bad not in page, bad
+    assert "prefers-color-scheme: dark" in page and "pywebviewready" in page
+    assert page.count("__DATA__") == 1
+
+
+def test_data_reaches_the_page_as_json_not_markup(load):
+    out = load("iplot").render({"title": "<b>x</b>"})
+    assert "\\u003cb>x" in out and "<b>x</b>" not in out
+
+
+def test_page_copies_before_it_sends():
+    # 瀏覽器只讓使用者按下去的那一下複製：複製在 click 裡、叫 send 之前，不在 send 回來之後
+    page = PAGE.read_text(encoding="utf-8")
+    body = handler(page, "open")
+    copy, send = body.index('execCommand("copy")'), body.index(".send(")
+    assert copy < send and ".then(" not in body[copy:send]
+    assert 'execCommand("copy")' in handler(page, "again")
+    tree = Tree(page)
+    tag, attrs, parents = tree.ids["full"]
+    assert tag == "textarea" and "readonly" in attrs and "hidden" not in attrs  # 藏起來的選不起來、複製不了
+    assert [t for t, _ in parents] == ["html", "body"]  # 直接在 <body> 底下：不在 #edit／#menu 裡
+    assert not any("hidden" in a for _, a in parents)
+    assert re.search(r"#full\s*\{[^}]*position:\s*absolute;[^}]*left:\s*-9999px", page)
+
+
+def test_page_copies_only_the_redacted_full_text(load, tmp_path, web):
+    # 剪貼簿裡絕對不能是沒遮過的版本（研究助理 2026-10-25）：只複製 measure 回來的 full
+    page = PAGE.read_text(encoding="utf-8")
+    sets = re.findall(r'\$\("full"\)\.value = ([^;\n]*);', page)
+    assert len(sets) == 1 and sets[0].endswith(".full")
+    copies = [m.start() for m in re.finditer(r'execCommand\("copy"\)', page)]
+    assert len(copies) == 2  # 「在瀏覽器打開」與「再複製一次」
+    for at in copies:
+        before = page[:at]
+        assert before[:before.rindex(".select()")].endswith('$("full")')
+    assert page.count(".select()") == page.count('$("full").select()')  # 標題、內文那兩格從不 select()
+    # 頁面最後一行是 HINT：字由 render 的資料帶進來，page.html 不另抄一份
+    report = load("report")
+    assert report.HINT not in page and '$("hint").textContent = data.hint' in page
+    tree = Tree(page)
+    assert tree.top[-3:] == [("p", "hint"), ("script", "data"), ("script", None)]  # 最後一行（#full 在畫面外）
+    home = tmp_path / "iPLoT"
+    view = View()
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert page_data(view.events[0][2])["hint"] == report.HINT
+
+
+def test_page_reminds_to_log_in_and_paste(load, tmp_path, monkeypatch, opened):
+    page = PAGE.read_text(encoding="utf-8")
+    for part in ("已經登入 GitHub", "直接貼上", "再複製一次"):
+        assert part in page, part
+    rep = sample_rep(load)
+    api, _ = make_api(load, tmp_path, monkeypatch, rep)
+    r = api.send(rep.title, rep.body)
+    for part in ("直接貼上", f"回報/{r['file']}", "再按一次"):
+        assert part in r["sentence"], part
+    blocker = tmp_path / "是一個檔"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(load("iplot"), "OUTBOX", blocker)  # 存不了檔：照樣開瀏覽器，不丟例外
+    opened.clear()
+    r = api.send(rep.title, rep.body)
+    assert (r["ok"], len(opened), r["file"]) == (True, 1, "")
+    assert "存不了檔" in r["sentence"] and "完整的回報只在剪貼簿裡" in r["sentence"]
+
+
+def test_on_error_opens_the_preview_page(tmp_path, web, opened):
+    home = tmp_path / "iPLoT"
+    view = View()
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    pages = [e for e in view.events if e[0] == "page-open"]
+    assert len(pages) == 1 and pages[0][1] == "回報這個問題"
+    data = page_data(pages[0][2])
+    assert data["mode"] == "edit" and "[回報] 科學計算：KeyError" in data["title"]
+    assert "### 錯誤" in data["body"] and data["notice"].startswith(("已自動遮蔽", "沒有找到"))
+    assert opened == []
+
+
+def test_on_error_reveals_the_saved_file_after_the_page_closes(tmp_path, web, opened):
+    # reveal 經過 Core.press：在 api 裡（pywebview 的執行緒）叫會弄壞整個程序的 cwd、stdout（設計第 17 節第 4 條）
+    home = tmp_path / "iPLoT"
+
+    def hook(html, api):
+        assert api.send(page_data(html)["title"], "x\n" + long_tb(300))["cut"]
+
+    view = View(hook=hook)
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert [e[0] for e in view.events] == ["page-open", "page-closed", "action"]
+    action = view.events[2]
+    assert action[:2] == ("action", "reveal") and action[2].suffix == ".txt"
+    assert action[2].parent == (home / "modules" / "回報與討論" / "回報").resolve()
+    assert len(opened) == 1
+
+
+def test_on_error_outside_the_panel_uses_the_page(tmp_path, monkeypatch, opened):
+    # 互通的小視窗：兩個都不在，app.page 在那裡能用
+    monkeypatch.delitem(sys.modules, "ui.tk", raising=False)
+    monkeypatch.delitem(sys.modules, "ui.web", raising=False)
+    home = tmp_path / "iPLoT"
+    view = View()
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert [e[1] for e in view.events if e[0] == "page-open"] == ["回報這個問題"]
+    assert opened == []
+
+
+def test_on_error_in_tk_uses_a_file(tmp_path, tk, opened):
+    # 後備的 tkinter 面板（ui.tk 與 ui.web 都在）：沒有頁面，走草稿檔（設計第 5.2 節、第 17 節第 7 條）
+    home = tmp_path / "iPLoT"
+    view = View()
+    view.answers = [True]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert not [e for e in view.events if e[0] in ("page", "page-open")]
+    outbox = (home / "modules" / "回報與討論" / "回報").resolve()
+    draft, = outbox.glob("*.md")
+    assert [e for e in view.events if e[:2] == ("action", "edit")] == [("action", "edit", draft, None, None)]
+    assert draft.read_text(encoding="utf-8").split("\n")[0].startswith("[回報] 科學計算：KeyError")
+    assert "草稿在 回報/" in view.confirmed[0]
+    assert len(opened) == 1
+
+
+def test_on_error_in_tk_copies_and_saves_before_opening(tmp_path, tk, monkeypatch):
+    tkinter = pytest.importorskip("tkinter")
+    mine = str(Path.home() / "課程" / "王小明.py")  # 真的 Ctx（這台的家目錄）底下的一個路徑：遮成 <HOME>/…
+
+    class Root:
+        """tkinter 面板自己的那個 Tk 的替身：記下剪貼簿裡的字。"""
+        text = None
+
+        def clipboard_clear(self):
+            self.text = ""
+
+        def clipboard_append(self, s):
+            self.text += s
+
+        def update_idletasks(self):
+            pass
+
+    order = []
+    outbox = []
+
+    def browser(u, *a, **k):  # 開瀏覽器的那一刻：剪貼簿與 回報/ 的 .txt 都已經是遮過的全文
+        texts = sorted(p.read_text(encoding="utf-8") for p in outbox[-1].glob("*.txt"))
+        order.append((root.text if root else None, texts))
+        return True
+
+    def add(view):  # 按「確定」之前，使用者在草稿裡貼了一個路徑
+        draft = next(e[2] for e in view.events if e[:2] == ("action", "edit"))
+        draft.write_text(draft.read_text(encoding="utf-8") + f"\n我的檔是 {mine}\n", encoding="utf-8", newline="\n")
+
+    monkeypatch.setattr(webbrowser, "open", browser)
+    root = Root()
+    monkeypatch.setattr(tkinter, "_default_root", root, raising=False)
+    home = tmp_path / "一" / "iPLoT"
+    outbox.append(home / "modules" / "回報與討論" / "回報")
+    view = View(on_confirm=add)
+    view.answers = [True]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    (text, files), = order
+    assert text and files == [text]  # 短的也存
+    assert "<HOME>/.../<檔名已遮蔽>.py" in text and "王小明" not in text
+    assert any("已經複製到剪貼簿" in s for s in view.logs) and any("⌘V／Ctrl+V" in s for s in view.logs)
+    # tkinter 自己的 Tk 拿不到：照樣存檔、開瀏覽器
+    root = None
+    monkeypatch.setattr(tkinter, "_default_root", None, raising=False)
+    home = tmp_path / "二" / "iPLoT"
+    outbox.append(home / "modules" / "回報與討論" / "回報")
+    view = View(on_confirm=add)
+    view.answers = [True]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert len(order) == 2 and len(order[1][1]) == 1 and "王小明" not in order[1][1][0]
+    assert any("剪貼簿沒有複製成功" in s for s in view.logs)
+    # report.save 丟 OSError（磁碟滿、沒有權限）：照 send 的做法，照樣複製、開瀏覽器，那一句說存不了檔
+    root = Root()
+    monkeypatch.setattr(tkinter, "_default_root", root, raising=False)
+    home = tmp_path / "三" / "iPLoT"
+    outbox.append(home / "modules" / "回報與討論" / "回報")
+
+    def refuse(*a):
+        raise OSError("磁碟滿了")
+
+    def full_disk(view):
+        add(view)
+        assert Path(sys.modules["report"].__file__).resolve().parent == outbox[-1].parent.resolve()  # tmp 的那一份
+        monkeypatch.setattr(sys.modules["report"], "save", refuse)
+
+    view = View(on_confirm=full_disk)
+    view.answers = [True]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert len(order) == 3 and order[2] == (root.text, []) and "王小明" not in root.text
+    assert any("存不了檔（磁碟滿了）" in s and "已經複製到剪貼簿" in s for s in view.logs)
+    assert not [e for e in view.events if e[:2] == ("action", "reveal")]
+
+
+def test_on_error_in_tk_cancel_keeps_the_draft(tmp_path, tk, opened):
+    home = tmp_path / "iPLoT"
+    view = View()
+    view.answers = [False]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert opened == []
+    assert any(s.startswith("沒有送出；草稿留在 回報/") for s in view.logs)
+    outbox = home / "modules" / "回報與討論" / "回報"
+    assert len(list(outbox.glob("*.md"))) == 1 and not list(outbox.glob("*.txt"))
+
+
+def test_on_error_in_tk_reveals_a_redacted_txt_when_cut(tmp_path, tk, opened):
+    # 草稿沒有再遮過（使用者可能貼了路徑）：指給人看、拿去貼、拖去當附件的是遮過的 .txt
+    def add(view):
+        draft = next(e[2] for e in view.events if e[:2] == ("action", "edit"))
+        extra = f"\n我的檔是 {STUDENT}\n" + "很長的一段字。" * 400 + "\n"
+        draft.write_text(draft.read_text(encoding="utf-8") + extra, encoding="utf-8", newline="\n")
+
+    home = tmp_path / "iPLoT"
+    view = View(on_confirm=add)
+    view.answers = [True]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    reveals = [e for e in view.events if e[:2] == ("action", "reveal")]
+    assert len(reveals) == 1 and reveals[0][2].suffix == ".txt"
+    text = reveals[0][2].read_text(encoding="utf-8")
+    assert "王小明" not in text and "<檔名已遮蔽>.py" in text and "很長的一段字。" * 400 in text
+    assert len(opened) == 1 and len(opened[0]) <= 2000
+
+
+def test_on_error_for_a_child_module_hides_its_name(tmp_path, web, opened):
+    home = tmp_path / "iPLoT"
+    deep = child_tree(home)
+    (deep / "iplot.py").write_text('def run(app):\n    {}["score"]\n', encoding="utf-8", newline="\n")
+    error = run_module(module_info(deep, (home / "modules").resolve(), "child"), FakeApp(home)).error
+    assert error.module == "王小明_B11201234"
+    result, _ = press(home, View(hook=click_send), "on_error", error)
+    assert result.ok, result.error
+    q = query(opened[0])
+    assert q["title"].startswith("[回報] 科學計算：KeyError")
+    for leak in ("王小明", "B11201234"):
+        assert leak not in q["title"] and leak not in q["body"]
+
+
+def test_on_error_end_to_end_leaks_nothing(tmp_path, web, opened):
+    # 不用假的 Ctx：tmp 的 iPLoT、真的 run_module 拿到的錯誤（macOS 的 tmp_path 帶著帳號名）、按送出、拆回網址
+    student = tmp_path / "課程" / "王小明_B11201234" / "作業.py"
+    student.parent.mkdir(parents=True)
+    student.write_text(f"open(r'{student.parent / '成績.csv'}')\n", encoding="utf-8", newline="\n")
+    home = tmp_path / "iPLoT"
+    folder = make_module(home / "modules", "科學計算", f"import runpy\nrunpy.run_path(r'{student}', run_name='作業')\n")
+    error = run_module(module_info(folder, (home / "modules").resolve(), "here"), FakeApp(home)).error
+    assert error.kind == "FileNotFoundError" and "王小明" in error.traceback_text
+    result, _ = press(home, View(hook=click_send), "on_error", error)
+    assert result.ok, result.error
+    q = query(opened[0])
+    out = q["title"] + "\n" + q["body"]
+    for leak in (str(tmp_path), os.path.realpath(tmp_path), "王小明", "B11201234"):
+        assert leak not in out
+    try:
+        user = getpass.getuser()
+    except (ImportError, KeyError, OSError):
+        user = ""
+    if len(user) >= 3:
+        assert user not in out
+    assert "FileNotFoundError" in q["title"] and "### 錯誤" in q["body"]
