@@ -229,11 +229,11 @@ def _reveal(app, api: Api) -> None:
 
 def _menu_by_ask(app) -> None:
     """tkinter 面板沒有頁面（設計第 9 節）：問一次。1 走跟「回報這個問題」一樣的草稿檔（沒有錯誤、不指定模組），
-    2、3、4 直接開瀏覽器，開不成就把網址寫在訊息區；按取消什麼都不做。"""
+    2、3、4 直接開瀏覽器，開不成就把網址寫在訊息區；按取消什麼都不做。只認剛好 "1"–"4"（工作單）："1 "、" 4" 之類
+    的也是「請輸入 1 到 4」。"""
     answer = app.ask(MENU)
     if answer is None:
         return
-    answer = answer.strip()
     if answer == "1":
         _by_file(app, report.blank(app, "BUG"), "回報")
     elif answer in ("2", "3"):

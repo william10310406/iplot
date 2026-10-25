@@ -1905,7 +1905,7 @@ def test_menu_fills_the_edit_page_then_measures():
 
 
 @pytest.mark.parametrize("answer, want", [("1", "edit"), ("2", "IDEA"), ("3", "QA"), ("4", "forum"), (None, None),
-                                          ("x", "log")])
+                                          ("x", "log"), ("1 ", "log"), (" 4", "log")])  # 只認剛好 "1"–"4"（工作單）
 def test_run_in_tk_asks_first(load, tmp_path, tk, opened, answer, want):
     # 後備的 tkinter 面板沒有頁面：問一次（設計第 9 節）。「1」走跟「回報這個問題」一樣的草稿檔
     home = tmp_path / "iPLoT"
