@@ -1,6 +1,7 @@
 """隨附模組「回報與討論」（modules/回報與討論）：遮蔽、內文、網址、截斷、預覽頁與面板的流程（M8、D110–D116）。
 不開瀏覽器（autouse 的替身）、不連網、不寫進 repo（跑模組的流程先複製到 tmp）；遮蔽的表用假的 Ctx，只有端對端的兩個用這台機器。"""
 
+import dataclasses
 import errno
 import getpass
 import importlib
@@ -1443,11 +1444,12 @@ def refusing(monkeypatch, exc, before=None):
     return swap
 
 
-def press_tk(home, on_confirm):
-    """後備的 tkinter 面板上按「回報這個問題」、在草稿那一步按「確定」（之前先叫 on_confirm(view)）；回 view。"""
+def press_tk(home, on_confirm, error=None):
+    """後備的 tkinter 面板上按「回報這個問題」、在草稿那一步按「確定」（之前先叫 on_confirm(view)）；回 view。
+    error 沒給就用 sample_error(home)。"""
     view = View(on_confirm=on_confirm)
     view.answers = [True]
-    result, _ = press(home, view, "on_error", sample_error(home))
+    result, _ = press(home, view, "on_error", error or sample_error(home))
     assert result.ok, result.error
     return view
 
@@ -1488,7 +1490,10 @@ def test_send_survives_a_lone_surrogate(load, tmp_path, monkeypatch, opened):
     api, saved = make_api(load, tmp_path, monkeypatch, rep)
     r = api.send("[回報] 科學計算\udce9：KeyError", rep.body)
     assert (r["ok"], r["file"], saved, len(opened)) == (True, "", [], 1)
-    assert "存不了檔" in r["sentence"] and "完整的回報只在剪貼簿裡" in r["sentence"]
+    # UnicodeEncodeError 的字裡有 '\udce9' 這種跳脫，redact 會把它當成路徑：不給人看那串字，只說一句短的
+    assert "存不了檔（有沒辦法存成 UTF-8 的字）；完整的回報只在剪貼簿裡。" in r["sentence"]
+    assert "<PATH>" not in r["sentence"] and "codec" not in r["sentence"]
+    assert list((tmp_path / "回報").iterdir()) == []  # report.save 寫到一半丟的：不留 0 位元組的 .txt
 
 
 @pytest.mark.parametrize("save", ["saved", "unsaved"])
@@ -1616,3 +1621,111 @@ def test_on_error_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, h
     assert opened == []
     assert not list((home / "modules" / "回報與討論" / "回報").glob("*.txt"))
     assert not [e for e in view.events if e[:2] == ("action", "reveal")]
+
+
+# ── 草稿存不了、寫到一半的檔、tkinter 那一頭截過時也說（Task 7 修補第 2 輪）──
+
+def test_save_leaves_no_file_when_writing_fails(load, tmp_path, monkeypatch):
+    # write_text 先建檔再編碼：孤立的代理字元丟 UnicodeEncodeError 時，回報/ 裡不能留一個 0 位元組的 <時間>-<kind>.txt
+    report = load("report")
+    with pytest.raises(UnicodeEncodeError):
+        report.save(tmp_path / "回報", "20261025-120000", "KeyError", "[回報] 科學計算\udce9：KeyError\n")
+    assert list((tmp_path / "回報").iterdir()) == []
+    # 開不了的（同一秒存過、沒有權限）不刪：那個檔不是這一次寫的
+    old = tmp_path / "回報" / "20261025-120001-KeyError.txt"
+    old.write_text("上一次的", encoding="utf-8", newline="\n")
+    real_open = Path.open
+
+    def refuse(self, *a, **k):
+        if self == old:
+            raise denied(old)
+        return real_open(self, *a, **k)
+
+    monkeypatch.setattr(Path, "open", refuse)
+    with pytest.raises(PermissionError):
+        report.save(tmp_path / "回報", "20261025-120001", "KeyError", "這一次的")
+    with open(old, encoding="utf-8") as fh:  # 內建的 open：Path.open 還是替身
+        assert fh.read() == "上一次的"
+
+
+@pytest.mark.parametrize("how", ["mkdir", "write", "surrogate"])
+def test_on_error_in_tk_draft_that_cannot_be_written_is_one_sentence(tmp_path, tk, monkeypatch, opened, how):
+    # 草稿那一步就存不了（回報/ 建不了、草稿寫不進去、標題裡有孤立的代理字元）：一句話，不問、不開編輯器、不開瀏覽器，
+    # 不變成「回報與討論」自己的錯誤（那個錯誤又會帶一顆「回報這個問題」）
+    where = Path.home() / "課程" / "王小明" / "回報"  # 真的 Ctx：這台的家目錄底下（執行時才算，不寫進檔）
+    if how == "mkdir":
+        real_mkdir = Path.mkdir
+
+        def mkdir(self, *a, **k):
+            if self.name == "回報" and self.parent.name == MODULE.name:
+                raise denied(where)
+            return real_mkdir(self, *a, **k)
+
+        monkeypatch.setattr(Path, "mkdir", mkdir)
+    elif how == "write":
+        real_write = Path.write_text
+
+        def write_text(self, *a, **k):
+            if self.suffix == ".md" and self.parent.name == "回報":
+                raise denied(where / "x.md")
+            return real_write(self, *a, **k)
+
+        monkeypatch.setattr(Path, "write_text", write_text)
+    else:  # 孤立的代理字元從 App.version 帶進標題（Linux 上解不開的資料夾名字也是這樣進到標題裡的）
+        monkeypatch.setattr(App, "version", "0.6.0\udce9")
+    home = tmp_path / "iPLoT"
+    view = View()
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    line, = view.logs
+    assert line.startswith("草稿存不了（") and line.endswith("），沒有送出。")
+    if how == "surrogate":
+        assert line == "草稿存不了（有沒辦法存成 UTF-8 的字），沒有送出。"
+    else:
+        assert "Permission denied" in line and "<HOME>/.../<檔名已遮蔽>" in line
+    assert "<PATH>" not in line
+    assert_no_leak(view.logs)
+    assert view.confirmed == [] and opened == []
+    assert not [e for e in view.events if e[0] == "action"]  # 沒有 edit、沒有 reveal
+    outbox = home / "modules" / "回報與討論" / "回報"
+    assert not outbox.exists() or list(outbox.iterdir()) == []  # 也不留一個空的草稿
+
+
+TK_CUT_CASES = [("opened", "saved"), ("failed", "saved"), ("opened", "copied"), ("failed", "copied"),
+                ("opened", "unsaved"), ("failed", "unsaved")]
+
+
+@pytest.mark.parametrize("browser, save", TK_CUT_CASES, ids=["-".join(c) for c in TK_CUT_CASES])
+def test_on_error_in_tk_says_when_the_url_was_cut(tmp_path, tk, monkeypatch, browser, save):
+    # tkinter 那一頭截過時也要說（網頁那一頭是 CUT_SAVED／CUT_UNSAVED）：只給人網址的話，人不知道網址裡的 traceback
+    # 少了一段。開成了說在訊息區那一句裡、開不成說在給網址的那一行裡，只說一次；檔案一定會指給人看
+    calls = []
+    monkeypatch.setattr(webbrowser, "open", lambda u, *a, **k: calls.append(u) or browser == "opened")
+    if save == "copied":
+        tkinter = pytest.importorskip("tkinter")
+        monkeypatch.setattr(tkinter, "_default_root", Clipboard(), raising=False)
+    home = tmp_path / "iPLoT"
+    error = dataclasses.replace(sample_error(home), traceback_text=long_tb(300))  # 網址放不下：從 traceback 中間截
+    unsaved = refusing(monkeypatch, denied(Path.home() / "課程" / "王小明" / "x.txt"))
+    view = press_tk(home, unsaved if save == "unsaved" else None, error)
+    assert len(calls) == 1 and len(calls[0]) <= 2000
+    reveals = [e[2] for e in view.events if e[:2] == ("action", "reveal")]
+    if save == "unsaved":
+        assert reveals == []
+        cut = "內容太長，網址裡的 traceback 中間截掉了。"
+    else:
+        p, = reveals
+        assert p.suffix == ".txt" and "Traceback (most recent call last):" in p.read_text(encoding="utf-8")
+        cut = (f"內容太長，網址裡的 traceback 中間截掉了；回報/{p.name} 是完整的，貼上之後也可以把它拖進留言框當附件。"
+               "iPLoT 會指給你看。")
+    assert sum(s.count("網址裡的 traceback 中間截掉了") for s in view.logs) == 1
+    first, = [s for s in view.logs if "如果 GitHub 出錯" in s]
+    failed = [s for s in view.logs if s.startswith("瀏覽器打不開")]
+    hint = "完整報告已複製，GitHub 出錯或內容被截斷時，按 ⌘V／Ctrl+V 貼上。"
+    if browser == "opened":
+        assert failed == []
+        assert first.endswith(cut + hint) if save == "copied" else first.endswith(cut)  # HINT 一樣是最後一句
+    else:
+        assert failed == [f"瀏覽器打不開。{cut}把這串網址整個複製到瀏覽器的網址列：{calls[0]}"]
+        assert cut not in first and first.endswith(hint if save == "copied" else "直接貼上。")
+    assert_no_leak(view.logs)

@@ -42,6 +42,9 @@ OPENED = ("已經在瀏覽器打開了。登入 GitHub、按 Start discussion �
 CUT_SAVED = ("內容太長，網址裡的 traceback 中間截掉了；那個檔是完整的，貼上之後也可以把它拖進留言框當附件。"
              "關掉這個視窗之後 iPLoT 會指給你看。")
 CUT_UNSAVED = "內容太長，網址裡的 traceback 中間截掉了。"  # 存不了檔：沒有「那個檔」可以指
+TK_CUT_SAVED = ("內容太長，網址裡的 traceback 中間截掉了；回報/{name} 是完整的，貼上之後也可以把它拖進留言框當附件。"
+                "iPLoT 會指給你看。")  # tkinter 面板：截過的檔馬上就指，沒有「關掉這個視窗之後」
+UNENCODABLE = "有沒辦法存成 UTF-8 的字"  # 孤立的代理字元：UnicodeEncodeError 的字不給人看（見 _cannot）
 NOT_OPENED = "瀏覽器打不開。把下面這串網址整個複製到瀏覽器的網址列；{where}"
 
 
@@ -65,16 +68,24 @@ def _again(rep: report.Report, title: str, body: str) -> tuple[str, str, str]:
 
 def _save(kind: str, full: str) -> tuple[Path | None, Exception | None]:
     """把完整的回報存進 OUTBOX（一律存，不只截過的時候）；存不了回 (None, 錯誤)，照樣往下走。
-    ValueError：full 裡有孤立的代理字元（Linux 上解不開的資料夾名字）時，write_text 丟 UnicodeEncodeError。"""
+    ValueError：full 裡有孤立的代理字元（Linux 上解不開的資料夾名字）時，寫檔丟 UnicodeEncodeError
+    （report.save 不留下寫壞的檔）。"""
     try:
         return report.save(OUTBOX, stamp(), kind, full), None
     except (OSError, ValueError) as exc:
         return None, exc
 
 
-def _why(exc: BaseException | None, ctx: redact.Ctx) -> str:
-    """句子裡的錯誤訊息：OSError 的字帶著完整的路徑（家目錄、帳號名），而那一句可能被複製進公開的貼文，先用同一個 ctx 遮過。"""
+def _why(exc: OSError, ctx: redact.Ctx) -> str:
+    """句子裡的 OSError：它的字帶著完整的路徑（家目錄、帳號名），而那一句可能被複製進公開的貼文，先用同一個 ctx 遮過。
+    只給 OSError：別的例外的字（例如 UnicodeEncodeError 裡 '\\udce9' 那種跳脫）redact 會讀成路徑、遮成 <PATH>/…。"""
     return redact.redact(str(exc), ctx)[0]
+
+
+def _cannot(exc: Exception | None, ctx: redact.Ctx) -> str:
+    """「存不了檔（…）」「草稿存不了（…）」括號裡的字：OSError 的字遮過；ValueError（孤立的代理字元的
+    UnicodeEncodeError）一律是 UNENCODABLE。"""
+    return _why(exc, ctx) if isinstance(exc, OSError) else UNENCODABLE
 
 
 def _open(u: str) -> bool:
@@ -89,7 +100,7 @@ def _sentence(ok: bool, cut: bool, f: Path | None, err: Exception | None, ctx: r
     """send 回給頁面的那一句：只講檔案與網址（剪貼簿成不成，頁面自己知道，那一句由頁面加）。截過的話，開成了、
     開不成都接截斷的那一句：只叫人複製網址的話，人不知道網址裡的 traceback 少了一段。"""
     if f is None:
-        where = f"存不了檔（{_why(err, ctx)}）；完整的回報只在剪貼簿裡。"
+        where = f"存不了檔（{_cannot(err, ctx)}）；完整的回報只在剪貼簿裡。"
     elif ok:
         where = f"完整的回報也存在 回報/{f.name}。"
     elif cut:  # 「關掉這個視窗之後 iPLoT 會指給你看」由後面的 CUT_SAVED 說，不說兩次
@@ -166,9 +177,14 @@ def on_error(app, error):
 def _by_file(app, rep: report.Report, kind: str) -> None:
     """tkinter 面板沒有頁面（設計第 5.2 節）：草稿用編輯器打開，改好按「確定」才送。草稿沒有再遮過、只留在這台電腦；
     拿去貼、拖去當附件的是讀回來再遮過、存成 .txt 的那一份。tkinter 的模組在主執行緒上跑，這裡叫 app 沒問題。"""
-    OUTBOX.mkdir(parents=True, exist_ok=True)
-    draft = OUTBOX / f"{stamp()}-{kind}.md"
-    draft.write_text(f"{rep.title}\n\n{rep.body}", encoding="utf-8", newline="\n")
+    draft, content = OUTBOX / f"{stamp()}-{kind}.md", f"{rep.title}\n\n{rep.body}"
+    try:
+        content.encode("utf-8")  # 孤立的代理字元在建檔之前就丟：write_text 先建檔再編碼，會留下一個空的草稿
+        OUTBOX.mkdir(parents=True, exist_ok=True)
+        draft.write_text(content, encoding="utf-8", newline="\n")
+    except (OSError, ValueError) as exc:  # 回報/ 寫不進去、標題裡有孤立的代理字元：一句話，不變成這個模組自己的錯誤
+        app.log(f"草稿存不了（{_cannot(exc, rep.ctx)}），沒有送出。")
+        return
     app.log(rep.notice)
     app.edit(draft)
     if not app.confirm(f"草稿在 回報/{draft.name}，已經用編輯器打開。改好、存檔之後按「確定」就用瀏覽器打開；"
@@ -189,39 +205,50 @@ def _by_file(app, rep: report.Report, kind: str) -> None:
     copied = _copy_tk(full)
     u, cut = report.fit(rep.category, title, body, report.max_url())
     ok = _open(u)
-    app.log(_tk_sentence(p, err, copied, report.url(rep.category, "", ""), rep.ctx))
+    said = _tk_cut(p, cut)  # 截過的那一句：開成了接在下面這一句裡，開不成跟網址寫在同一行（只說一次）
+    app.log(_tk_sentence(p, err, copied, report.url(rep.category, "", ""), rep.ctx, said if ok else ""))
     if p is None and not copied:  # 遮過的全文只剩訊息區這一份（草稿沒有再遮過，不叫人從草稿貼）
         app.log(full)
     if not ok:
-        app.log(f"瀏覽器打不開。把這串網址整個複製到瀏覽器的網址列：{u}")
+        app.log(f"瀏覽器打不開。{said}把這串網址整個複製到瀏覽器的網址列：{u}")
     if p is not None and (cut or not ok):
         app.reveal(p)
 
 
 def _unreadable(exc: Exception, draft: str, ctx: redact.Ctx) -> str:
     """草稿讀不回來時訊息區的那一句（不開瀏覽器）：編碼不對的草稿還在，叫人這次存成 UTF-8；刪掉了的就只叫人再按一次。"""
-    if isinstance(exc, UnicodeDecodeError):
-        return (f"讀不回草稿（{_why(exc, ctx)}），沒有送出；改過的草稿留在 回報/{draft}，再按一次「回報這個問題」"
+    if isinstance(exc, UnicodeDecodeError):  # 它的字只有編碼的名字、那個位元組與位置，沒有路徑：不經過 _why
+        return (f"讀不回草稿（{exc}），沒有送出；改過的草稿留在 回報/{draft}，再按一次「回報這個問題」"
                 "會開新的一份，這次請存成 UTF-8。")
     return f"讀不回草稿（{_why(exc, ctx)}），沒有送出；請再按一次「回報這個問題」。"
 
 
-def _tk_sentence(p: Path | None, err: Exception | None, copied: bool, new_url: str, ctx: redact.Ctx) -> str:
+def _tk_sentence(p: Path | None, err: Exception | None, copied: bool, new_url: str, ctx: redact.Ctx,
+                 cut: str = "") -> str:
     """tkinter 面板開了瀏覽器之後訊息區的那一句：完整的回報在哪裡、GitHub 出錯時怎麼貼。存不了檔、也沒複製成的話，
-    遮過的全文由 _by_file 接在這一句的下一則（草稿沒有再遮過，不是拿去貼的那一份）。"""
+    遮過的全文由 _by_file 接在這一句的下一則（草稿沒有再遮過，不是拿去貼的那一份）。cut 是截過時的那一句（_tk_cut），
+    接在後面；複製成了的話 HINT 照樣是最後一句。"""
     if p is None and copied:
-        return (f"完整的回報已經複製到剪貼簿；存不了檔（{_why(err, ctx)}），完整的回報只在剪貼簿裡。如果 GitHub 出錯"
+        text = (f"完整的回報已經複製到剪貼簿；存不了檔（{_cannot(err, ctx)}），完整的回報只在剪貼簿裡。如果 GitHub 出錯"
                 f"（例如顯示 500）：確認瀏覽器已經登入之後再選一次；還是不行，就打開 {new_url}、直接貼上（複製這個網址會蓋掉"
-                "剪貼簿）。" + report.HINT)
-    if p is None:
-        return (f"存不了檔（{_why(err, ctx)}），剪貼簿也沒有複製成功：完整的回報（遮過的）是下面那一則訊息。如果 GitHub 出錯，"
-                f"打開 {new_url}，再從訊息區複製下面那一則、直接貼上。")
-    if copied:
-        return (f"完整的回報已經複製到剪貼簿，也存在 回報/{p.name}。如果 GitHub 出錯（例如顯示 500）：確認瀏覽器已經登入之後"
-                f"再選一次；還是不行，就打開 {new_url}（複製這個網址會蓋掉剪貼簿），再從 回報/{p.name} 複製全文、直接貼上。"
-                + report.HINT)
-    return (f"完整的回報存在 回報/{p.name}（剪貼簿沒有複製成功）：如果 GitHub 出錯，打開 {new_url}，"
-            "再從那個檔複製全文、直接貼上。")
+                "剪貼簿）。")
+    elif p is None:
+        text = (f"存不了檔（{_cannot(err, ctx)}），剪貼簿也沒有複製成功：完整的回報（遮過的）是下面那一則訊息。"
+                f"如果 GitHub 出錯，打開 {new_url}，再從訊息區複製下面那一則、直接貼上。")
+    elif copied:
+        text = (f"完整的回報已經複製到剪貼簿，也存在 回報/{p.name}。如果 GitHub 出錯（例如顯示 500）：確認瀏覽器已經登入之後"
+                f"再選一次；還是不行，就打開 {new_url}（複製這個網址會蓋掉剪貼簿），再從 回報/{p.name} 複製全文、直接貼上。")
+    else:
+        text = (f"完整的回報存在 回報/{p.name}（剪貼簿沒有複製成功）：如果 GitHub 出錯，打開 {new_url}，"
+                "再從那個檔複製全文、直接貼上。")
+    return text + cut + (report.HINT if copied else "")
+
+
+def _tk_cut(p: Path | None, cut: bool) -> str:
+    """tkinter 面板截過時的那一句（照網頁的 CUT_SAVED／CUT_UNSAVED）；沒截回 ""。存了檔的話 _by_file 接著就 reveal 它。"""
+    if not cut:
+        return ""
+    return CUT_UNSAVED if p is None else TK_CUT_SAVED.format(name=p.name)
 
 
 def _copy_tk(text: str) -> bool:

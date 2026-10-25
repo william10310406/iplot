@@ -2,6 +2,7 @@
 遮蔽一律交給 redact.redact，這裡不自己認路徑。core 只在函式裡 import（module_of、from_error）：直接執行
 （IPLOT_DIRECT=1）時 core 不在 sys.path 上。寫檔的只有 save。"""
 
+import contextlib
 import os
 import platform
 import re
@@ -371,8 +372,18 @@ def fit(category: str, title: str, body: str, limit: int) -> tuple[str, bool]:
 
 def save(folder: Path, stamp: str, kind: str, text: str) -> Path:
     """完整的回報（遮過、沒截、不帶 HINT）存成 folder/<stamp>-<kind>.txt（UTF-8、換行 \\n）；folder 不在就建。
-    回寫好的那個檔。"""
+    回寫好的那個檔。檔開了之後才失敗的（孤立的代理字元的 UnicodeEncodeError、磁碟滿了）先把那個檔刪掉再丟出去：
+    回報/ 裡不留空的或寫一半的檔。開不了的（沒有權限）不刪：這一次什麼都還沒寫。"""
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{stamp}-{kind}.txt"
-    path.write_text(text, encoding="utf-8", newline="\n")
+    created = False
+    try:
+        with path.open("w", encoding="utf-8", newline="\n") as fh:
+            created = True
+            fh.write(text)
+    except BaseException:
+        if created:  # 關了檔才刪（Windows 刪不了開著的檔）；刪不掉就算了，丟出去的是原來那個錯誤
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+        raise
     return path
