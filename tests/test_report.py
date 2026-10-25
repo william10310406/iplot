@@ -2082,18 +2082,20 @@ def test_on_error_in_tk_says_when_the_url_was_cut(load, tmp_path, tk, monkeypatc
 
 def test_on_error_in_tk_redacts_the_url_again(tmp_path, tk, opened):
     # 草稿沒有再遮過：使用者在草稿的標題那一行、內文都貼了路徑。開出去的網址（會變成公開的貼文）的標題、內文
-    # 都是讀回來、再遮過的那一份（網頁那一頭是 test_send_redacts_again）
+    # 都是讀回來、再遮過的那一份（網頁那一頭是 test_send_redacts_again）。內文只留使用者貼的那一行（草稿裡其他的
+    # 可以刪）：整份 traceback 留著的話網址會截，截到哪裡看這台的作業系統那一行有多長，Ubuntu 上剛好截掉那一行
     mine = Path.home() / "課程" / "王小明.py"  # 真的 Ctx：這台的家目錄底下（執行時才算，不寫進檔）
 
     def add(view):
         draft = next(e[2] for e in view.events if e[:2] == ("action", "edit"))
-        first, rest = draft.read_text(encoding="utf-8").split("\n", 1)
-        draft.write_text(f"{first} {mine}\n{rest}\n我的檔是 {mine}\n", encoding="utf-8", newline="\n")
+        first = draft.read_text(encoding="utf-8").split("\n", 1)[0]
+        draft.write_text(f"{first} {mine}\n\n我的檔是 {mine}\n", encoding="utf-8", newline="\n")
 
     press_tk(tmp_path / "iPLoT", add)
     u, = opened
     q = query(u)
     assert q["title"].startswith("[回報] 科學計算：KeyError")
+    assert "太長" not in q["body"]  # 沒有截：下面看的是整份
     for part in ("title", "body"):
         assert "王小明" not in q[part] and "<HOME>/.../<檔名已遮蔽>.py" in q[part], part
     assert "我的檔是 <HOME>/.../<檔名已遮蔽>.py" in q["body"]
