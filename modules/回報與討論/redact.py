@@ -20,8 +20,11 @@ FROZEN = re.compile(r"<frozen [^\n]*>")
 # 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到同一種引號為止：Can't 的撇號配不錯、路徑裡可以有空白
 QUOTED_ABS = re.compile(r"(?P<q>['\"])(?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)(?:(?!(?P=q))[^\n])*)(?P=q)")
 # 其他引號裡的字（同一行）；裡面含 / 或 \ 的才當路徑。單引號前面緊貼 ASCII 英數字的是撇號（Can't、couldn't），
-# 不當開頭：不然它跟路徑開頭的那個引號配成一對，Can't read 'HK2/王小明/…' 的相對路徑就漏了
-QUOTED = re.compile(r"(?<![A-Za-z0-9])'[^'\n]*'|\"[^\"\n]*\"")
+# 不當開頭：不然它跟路徑開頭的那個引號配成一對，Can't read 'HK2/王小明/…' 的相對路徑就漏了。
+# 例外是字串的前綴：前面是一個 b r u f（大小寫）或兩個 b r（rb、br…），而前綴本身前面不是 ASCII 英數字的，
+# 照樣當開頭——bytes／raw 的 repr：No such file or directory: b'HK2/王小明/a.txt'
+QUOTED = re.compile(r"(?:(?<![A-Za-z0-9])|(?<=(?<![A-Za-z0-9])[bBrRuUfF])|(?<=(?<![A-Za-z0-9])[bBrR][bBrR]))"
+                    r"'[^'\n]*'|\"[^\"\n]*\"")
 # 括號裡的絕對路徑，整段（可以有空白）：ImportError 的 (…/My Drive/…/工具.py)
 PAREN_ABS = re.compile(r"\((?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)[^()\n]*)\)")
 # 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 的最後一個 / 或 \，最後一段到空白、引號、括號為止

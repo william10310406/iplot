@@ -224,6 +224,8 @@ CASES = [
      "Can't read 'HK2/王小明/成績.csv'", "Can't read '.../<檔名已遮蔽>.csv'"),
     ("secret_named_core", {"secrets": ("core",)}, RUNNER,  # 下一層模組剛好叫 core：遮第二次也不能把原始碼拿掉
      '  File "<IPLOT>/<下一層模組>/runner.py", line 72, in run_module\n    exec(code, ns)\n    ~~~~^^^^^^^^^^\n'),
+    ("bytes_repr_relative", {},  # bytes 的 repr：b 緊貼開頭的引號，不是撇號，裡面的相對路徑照樣遮
+     "No such file or directory: b'HK2/王小明/a.txt'", "No such file or directory: b'.../<檔名已遮蔽>.txt'"),
 ]
 
 # 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
