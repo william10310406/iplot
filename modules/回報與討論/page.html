@@ -1,7 +1,8 @@
 <!doctype html>
 <!-- 「回報與討論」的預覽頁（iplot.py 的 render 把資料以 JSON 放進最下面那個 application/json）。
      mode 是 "edit"（on_error）：一開始就是 #edit；"menu"（run）：先是 #menu 的四個入口，「回報問題」叫 start 換到 #edit。
-     最後一行的 #hint（「完整報告已複製…」）只跟著 #edit 顯示（show）：#menu 上什麼都還沒複製。
+     最後一行的 #hint（「完整報告已複製…」）只跟著 #edit 顯示（show）：#menu 上什麼都還沒複製。按下去之後換成 send 回來的
+     r.hint（網址內文最後也是它）：沒複製成的話指向 回報/ 的 .txt 或下面那一格，不說「已複製」；「再複製一次」照那一下換。
      頁面 → Python：pywebview.api.measure（量網址長度、拿 Python 遮過的全文）、send（再遮一次、存檔、開瀏覽器）；
      #menu 另外叫 start（拿那一份回報）、go（提建議、問問題）、open_forum（看論壇）。
      剪貼簿：按鈕的 click 裡、叫 send 之前，用 execCommand 複製 #full 那一格；#full 只放 measure 回來的、遮過的全文，
@@ -81,6 +82,7 @@ let seq = 0;        // 每一次輸入、每一次 measure 都加一：回來的
 let timer = 0;
 let started = false;
 let sentence = "";  // send 回來的那一句；「再複製一次」只換後面講剪貼簿的那一段
+let uncopied = "";  // send 回來的、沒複製成時 #hint 的那一句：「再複製一次」沒成的時候用
 
 function why(e) {
   return (e && e.message) || String(e);
@@ -129,9 +131,11 @@ $("open").addEventListener("click", () => {
   const copied = document.execCommand("copy");  // 同步、在 click 裡、叫 send 之前：瀏覽器只讓按下去的那一下複製
   const n = seq;
   ready(false);
-  window.pywebview.api.send($("title").value, $("body").value).then((r) => {
+  window.pywebview.api.send($("title").value, $("body").value, copied).then((r) => {  // 成不成交給 Python：網址的最後一句
     sentence = r.sentence;
+    uncopied = r.uncopied;
     $("result").textContent = sentence + clip(copied, false);
+    $("hint").textContent = r.hint;
     $("url").value = r.url;
     $("url").hidden = !r.url;
     $("newUrl").value = r.new_url;
@@ -148,6 +152,7 @@ $("again").addEventListener("click", () => {
   $("full").select();
   const copied = document.execCommand("copy");
   $("result").textContent = sentence + clip(copied, true);
+  $("hint").textContent = copied ? data.hint : uncopied;
 });
 
 // 顯示 #menu 或 #edit。#hint 跟著 #edit：它說「完整報告已複製」，#menu 上什麼都還沒複製（提建議、問問題、看論壇也從不複製）

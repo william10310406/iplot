@@ -471,18 +471,22 @@ def test_reportable_follows_the_report_module(panel, home, window):
 
 
 def test_report_error_hands_the_same_error_to_on_error(panel, home, bridge, monkeypatch):
-    """「回報這個問題」把面板上那一筆 ErrorInfo 原封不動交給「回報與討論」的 on_error，而且 quiet（設計第 17 節第 6 條）。"""
+    """「回報這個問題」把面板上那一筆 ErrorInfo 原封不動交給「回報與討論」的 on_error，而且 quiet（設計第 17 節第 6 條）。
+    兩筆錯誤、先按第二筆：驗完編號卻拿錯一筆的話抓得到。"""
     make_module(home / "modules", "回報與討論", REPORTER_SRC)
     seen = []
     monkeypatch.setattr(panel.core, "press", lambda info, handler="run", args=(), quiet=False:
                         seen.append((info, handler, args, quiet)))
     panel.report(NAME_ERROR)
+    panel.report(ErrorInfo("ZeroDivisionError", "division by zero", None, None, "", "module", "B"))
+    bridge.report_error(1)
     bridge.report_error(0)
     panel.wait()
-    [(info, handler, args, quiet)] = seen
-    assert info.folder == home / "modules" / "回報與討論"
-    assert (handler, quiet) == ("on_error", True)
-    assert len(args) == 1 and args[0] is panel.errors[0]
+    assert len(seen) == 2 and panel.errors[0] is not panel.errors[1]
+    for (info, handler, args, quiet), want in zip(seen, (panel.errors[1], panel.errors[0]), strict=True):
+        assert info.folder == home / "modules" / "回報與討論"
+        assert (handler, quiet) == ("on_error", True)
+        assert len(args) == 1 and args[0] is want
 
 
 def test_report_error_runs_on_error_quietly_with_busy(panel, home, bridge, window):

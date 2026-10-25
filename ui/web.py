@@ -78,7 +78,9 @@ def error_json(error: ErrorInfo) -> dict:
 
 class Bridge:
     """頁面的 JS 用 pywebview.api.<方法> 呼叫的入口。除了 state 與 answer，都只把工作排進工作執行緒、
-    立刻回傳。頁面傳來的 id、資料夾、動作名稱只認目前面板上有的，其餘一律當作「畫面過期了」重掃。
+    立刻回傳。頁面傳來的 id、資料夾、動作名稱只認目前面板上有的，其餘一律當作「畫面過期了」重掃。錯誤的編號
+    （open_error、report_error）只認 errors 裡有的，其餘什麼都不做；report_error 找「回報與討論」不看面板，照路徑找
+    modules/ 底下的那一個（bundled：面板停在下一層時也找得到），不在了才重掃。
     面板放在 _panel：pywebview 會把公開屬性一路攤開進 pywebview.api，底線讓攤出去的只有下面這些方法。
     這是整潔，不是安全邊界；真正的邊界是頁面不載入任何外來的內容（零外部資源、模組的輸出一律當文字）。"""
 

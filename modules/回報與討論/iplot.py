@@ -110,11 +110,20 @@ def _browse(u: str) -> dict:
     return {"ok": ok, "url": "" if ok else u}
 
 
-def _sentence(ok: bool, cut: bool, f: Path | None, err: Exception | None, ctx: redact.Ctx) -> str:
-    """send 回給頁面的那一句：只講檔案與網址（剪貼簿成不成，頁面自己知道，那一句由頁面加）。截過的話，開成了、
-    開不成都接截斷的那一句：只叫人複製網址的話，人不知道網址裡的 traceback 少了一段。"""
+def _uncopied(f: Path | None, nowhere: str) -> str:
+    """沒複製成時網址內文最後那一句：剪貼簿裡是之前複製的東西（可能是沒遮過的 traceback），不能叫人貼上，改成指向
+    回報/ 裡遮過的 .txt（report.HINT_FILE）；存不了檔的話是 nowhere——網頁是 HINT_PAGE（頁面下面那一格），
+    tkinter 是 HINT_LOG（訊息區）。複製成了才是 report.HINT（研究助理的原句）。"""
+    return report.HINT_FILE.format(name=f.name) if f is not None else nowhere
+
+
+def _sentence(ok: bool, cut: bool, f: Path | None, err: Exception | None, ctx: redact.Ctx, copied: bool) -> str:
+    """send 回給頁面的那一句：只講檔案與網址（剪貼簿成不成那一句由頁面加）。截過的話，開成了、開不成都接截斷的
+    那一句：只叫人複製網址的話，人不知道網址裡的 traceback 少了一段。存不了檔又沒複製成的話，完整的回報只在
+    頁面下面那一格（頁面接著說「剪貼簿沒有複製成功」，不說「只在剪貼簿裡」）。"""
     if f is None:
-        where = f"存不了檔（{_cannot(err, ctx)}）；完整的回報只在剪貼簿裡。"
+        only = "剪貼簿裡" if copied else "下面那一格"
+        where = f"存不了檔（{_cannot(err, ctx)}）；完整的回報只在{only}。"
     elif ok:
         where = f"完整的回報也存在 回報/{f.name}。"
     elif cut:  # 「關掉這個視窗之後 iPLoT 會指給你看」由後面的 CUT_SAVED 說，不說兩次
@@ -170,20 +179,27 @@ class Api:
                 sentence += "：traceback 會從中間截斷；完整的會在剪貼簿與檔案裡"
             return {"length": len(u), "limit": limit, "sentence": sentence, "full": full}
 
-    def send(self, title: str, body: str) -> dict:
-        """再遮一次、先存檔、再組網址開瀏覽器（研究助理 2026-10-24：登入之後 GitHub 可能回 500，不能只靠網址）。"""
+    def send(self, title: str, body: str, copied: bool = False) -> dict:
+        """再遮一次、先存檔、再組網址開瀏覽器（研究助理 2026-10-24：登入之後 GitHub 可能回 500，不能只靠網址）。
+        copied 是頁面在叫 send 之前那一下 execCommand("copy") 的結果：真的是 True 才算複製成了，網址內文最後才是
+        HINT；不然是 uncopied（_uncopied）。hint 是網址內文最後那一句，頁面把它放進 #hint；「再複製一次」沒成時頁面
+        換成 uncopied。"""
         with self._lock:
             rep = self._rep
             title, body, full = _again(rep, title, body)
             f, err = _save(self._kind, full)
-            u, cut = report.fit(rep.category, title, body, report.max_url())
+            copied = copied is True
+            uncopied = _uncopied(f, report.HINT_PAGE)
+            hint = report.HINT if copied else uncopied
+            u, cut = report.fit(rep.category, title, body, report.max_url(), hint)
             if cut:  # 截過的：開瀏覽器之前就記下（webbrowser.open 還沒回來，頁面就可能被關掉）
                 self._mark(f)
             ok = _open(u)
             if not ok:
                 self._mark(f)
-            return {"ok": ok, "url": "" if ok else u, "file": f.name if f else "", "cut": cut,
-                    "new_url": report.url(rep.category, "", ""), "sentence": _sentence(ok, cut, f, err, rep.ctx)}
+            return {"ok": ok, "url": "" if ok else u, "file": f.name if f else "", "cut": cut, "hint": hint,
+                    "uncopied": uncopied, "new_url": report.url(rep.category, "", ""),
+                    "sentence": _sentence(ok, cut, f, err, rep.ctx, copied)}
 
     def _mark(self, f: Path | None) -> None:
         """記下頁面關掉之後要指給人看的檔：存不了的不記；同一秒按兩次（檔名一樣）不記兩次。"""
@@ -280,7 +296,8 @@ def _by_file(app, rep: report.Report, kind: str) -> None:
     title, body, full = _again(rep, first, "\n".join(lines))
     p, err = _save(kind, full)  # 先存檔、複製，再開瀏覽器
     copied = _copy_tk(full)
-    u, cut = report.fit(rep.category, title, body, report.max_url())
+    hint = report.HINT if copied else _uncopied(p, report.HINT_LOG)  # 跟訊息區那一句（_tk_sentence）說的一樣
+    u, cut = report.fit(rep.category, title, body, report.max_url(), hint)
     ok = _open(u)
     said = _tk_cut(p, cut)  # 截過的那一句：開成了接在下面這一句裡，開不成跟網址寫在同一行（只說一次）
     app.log(_tk_sentence(p, err, copied, report.url(rep.category, "", ""), rep.ctx, said if ok else ""))

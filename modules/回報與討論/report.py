@@ -26,7 +26,12 @@ MAX_URL = 2000            # 保守值，每個平台都一樣（研究助理 202
 MAX_LOGIN_REDIRECT = 5600 # 沒登入時 GitHub 轉去登入的那條網址：量到 ≤ 5742 字才完整（2026-10-24），留一點餘裕
 LOGIN = "https://github.com/login?return_to="
 MAX_TITLE = 200           # 網址放不下時，標題超過這麼多字一律先截到這麼多、再截內文（設計第 8 節）
-HINT = "完整報告已複製，GitHub 出錯或內容被截斷時，按 ⌘V／Ctrl+V 貼上。"
+HINT = "完整報告已複製，GitHub 出錯或內容被截斷時，按 ⌘V／Ctrl+V 貼上。"  # 研究助理的原句：真的複製成了才用
+# 沒複製成時網址內文最後那一句（網頁那一頭也是頁面最後那一行）：剪貼簿裡是之前複製的東西，可能是沒遮過的，不叫人貼上。
+# 存了 .txt 指那個檔；存不了檔的話，網頁指頁面下面那一格（#full 放回畫面上），tkinter 指訊息區（遮過的全文寫在那裡）
+HINT_FILE = "剪貼簿沒有複製成功：完整報告存在 iPLoT 的 回報/{name}；GitHub 出錯或內容被截斷時，從那個檔複製全文、直接貼上。"
+HINT_PAGE = "剪貼簿沒有複製成功：完整報告在 iPLoT 那一頁下面那一格；GitHub 出錯或內容被截斷時，從那裡複製全文、直接貼上。"
+HINT_LOG = "剪貼簿沒有複製成功：完整報告在 iPLoT 的訊息區；GitHub 出錯或內容被截斷時，從那裡複製全文、直接貼上。"
 TRUNCATED = "…（中間 {n} 行太長，已截斷；完整報告在剪貼簿裡）…"
 CUT = "（太長，已截斷）"     # 「發生了什麼」或內文的尾巴截掉時，接在截剩的那一段後面的一行
 
@@ -226,9 +231,10 @@ def url(category: str, title: str, body: str) -> str:
     return f"{forum.FORUM}/new?category={_q(forum.CATEGORIES[category])}&title={_q(title)}&body={_q(body)}"
 
 
-def with_hint(body: str) -> str:
-    """網址裡的內文：最後一律是 HINT 那一句（剪貼簿與 .txt 那一份不帶它，設計第 17 節第 15 條）。"""
-    return body.rstrip("\n") + "\n\n" + HINT
+def with_hint(body: str, hint: str = HINT) -> str:
+    """網址裡的內文：最後一律是 hint 那一句——複製成了是 HINT，沒成是 HINT_FILE、HINT_PAGE、HINT_LOG 其中一句
+    （剪貼簿與 .txt 那一份不帶它，設計第 17 節第 15 條）。"""
+    return body.rstrip("\n") + "\n\n" + hint
 
 
 def fits(u: str, limit: int) -> bool:
@@ -327,14 +333,14 @@ def _what(body: str):
     return (lambda n: before + _tail(text, n) + after), 0, len(text)
 
 
-def _shorten(category: str, title: str, body: str, limit: int) -> str | None:
+def _shorten(category: str, title: str, body: str, limit: int, hint: str) -> str | None:
     """fit 的第 2、3 步，標題不動：回截到放得下的內文（不用截就是 body）；內文只剩 CUT 也放不下，回 None。
     每一步放不下時，下一步從比較短的那一份接著截（框裡只有 3 行時，換成 TRUNCATED 那一句反而比較長）。"""
     def ok(b: str) -> bool:
-        return fits(url(category, title, with_hint(b)), limit)
+        return fits(url(category, title, with_hint(b, hint)), limit)
 
     def size(b: str) -> int:
-        return len(url(category, title, with_hint(b)))
+        return len(url(category, title, with_hint(b, hint)))
 
     if ok(body):
         return body
@@ -349,25 +355,28 @@ def _shorten(category: str, title: str, body: str, limit: int) -> str | None:
     return _grow(ok, lambda n: _tail(body, n), 0, len(body))
 
 
-def fit(category: str, title: str, body: str, limit: int) -> tuple[str, bool]:
-    """預填的網址與有沒有截（設計第 8 節、第 17 節第 2、15 條）。內文最後一定是 HINT，截的時候也留著；
+def fit(category: str, title: str, body: str, limit: int, hint: str = HINT) -> tuple[str, bool]:
+    """預填的網址與有沒有截（設計第 8 節、第 17 節第 2、15 條）。內文最後一定是 hint（with_hint；預設 HINT，
+    沒複製成時呼叫的那一頭給 HINT_FILE、HINT_PAGE 或 HINT_LOG），截的時候也留著；
     limit 不比下限（見最後）短的話，回的網址 ≤ limit、轉去登入的那條 ≤ MAX_LOGIN_REDIRECT。順序：①放得下就照用
     （標題再長也不動）；放不下的話，標題超過 MAX_TITLE 字一律先截到 MAX_TITLE，再截內文：②traceback 的框留第一行與
     最後 k 行；③「發生了什麼」從後面截，還是放不下就從內文的尾巴截；④內文只剩 CUT 也放不下（標題本身就很長）就再截
     標題。都是在編碼之前以行或字為單位截，不會切在 %XX 中間。
-    下限是「標題空白、內文只剩一行 CUT 加 HINT」的那一條網址（現在 BUG、IDEA 433 字，QA、NEWS 415 字；body 本來就是
-    空字串的話內文只有 HINT：361、343 字）。整條放不下、limit 又比下限短時，沒有網址放得下：回的就是下限那一條與
-    True，它比 limit 長，fits(網址, limit) 是 False。MAX_URL 是 2000，走不到。"""
-    u = url(category, title, with_hint(body))
+    下限是「標題空白、內文只剩一行 CUT 加 hint」的那一條網址（HINT 的話現在 BUG、IDEA 433 字，QA、NEWS 415 字；body
+    本來就是空字串的話內文只有 HINT：361、343 字。BUG 的話 HINT_LOG 是 600、HINT_PAGE 636，HINT_FILE 看檔名，
+    20261025-143005-ZeroDivisionError.txt 是 652）。整條放不下、limit 又比下限短時，沒有網址放得下：回的就是下限那一條
+    與 True，它比 limit 長，fits(網址, limit) 是 False。MAX_URL 是 2000，走不到（HINT_FILE 的檔名裡錯誤的種類要長到
+    150 多個中文字、或 1300 多個英文字母才會）。"""
+    u = url(category, title, with_hint(body, hint))
     if fits(u, limit):
         return u, False
     t = title[:MAX_TITLE]
-    b = _shorten(category, t, body, limit)
+    b = _shorten(category, t, body, limit, hint)
     if b is not None:
-        return url(category, t, with_hint(b)), True
+        return url(category, t, with_hint(b, hint)), True
     b = _tail(body, 0) if body else body
-    n = _most(lambda n: fits(url(category, t[:n], with_hint(b)), limit), 0, len(t))
-    return url(category, t[:n], with_hint(b)), True
+    n = _most(lambda n: fits(url(category, t[:n], with_hint(b, hint)), limit), 0, len(t))
+    return url(category, t[:n], with_hint(b, hint)), True
 
 
 def save(folder: Path, stamp: str, kind: str, text: str) -> Path:

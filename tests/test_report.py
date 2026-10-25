@@ -1,6 +1,7 @@
 """隨附模組「回報與討論」（modules/回報與討論）：遮蔽、內文、網址、截斷、預覽頁與面板的流程（M8、D110–D116）。
 不開瀏覽器（autouse 的替身）、不連網、不寫進 repo（跑模組的流程先複製到 tmp）；遮蔽的表用假的 Ctx，只有端對端的兩個用這台機器。"""
 
+import ast
 import dataclasses
 import errno
 import getpass
@@ -89,6 +90,37 @@ def test_forum_has_four_categories(load):
     forum = load("forum")
     assert forum.CATEGORIES == {"BUG": "問題回報", "IDEA": "功能建議", "QA": "問答", "NEWS": "公告"}
     assert not any("%" in slug for slug in forum.CATEGORIES.values())  # 存解開 %XX 之後的樣子
+
+
+NETWORK = ("urllib.request", "http", "socket", "ssl", "requests", "urllib3", "httpx", "ftplib", "smtplib", "telnetlib")
+
+
+def network_imports(src):
+    """src 裡 import 的、屬於 NETWORK 的名字（含底下的，例如 http.client；from urllib import request 也算）。只看 import。"""
+    found = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names = [node.module, *(f"{node.module}.{a.name}" for a in node.names)]
+        else:
+            continue
+        found.update(n for n in names if any(n == b or n.startswith(b + ".") for b in NETWORK))
+    return found
+
+
+def test_module_imports_nothing_that_talks_to_the_network():
+    # 研究助理的第一條：iPLoT 不經手 GitHub 的密碼或 token、不發任何網路請求，只組網址交給瀏覽器（docs/07 第 7 節）。
+    # 只看 import（M8b 要讀公開的 JSON 時，刻意改這個測試）；先確定這個檢查抓得到
+    assert network_imports("import urllib.parse\nimport webbrowser\nfrom urllib.parse import quote\n") == set()
+    for src in ("import urllib.request", "from urllib import parse, request", "import http.client", "from http import client",
+                "import socket as s", "from ssl import create_default_context", "import requests",
+                "def f():\n    import httpx\n", "import os, smtplib"):
+        assert network_imports(src), src
+    files = sorted(MODULE.glob("*.py"))
+    assert {"forum.py", "redact.py", "report.py", "iplot.py"} <= {p.name for p in files}
+    for p in files:
+        assert network_imports(p.read_text(encoding="utf-8")) == set(), p.name
 
 
 def test_report_folder_is_ignored_by_git():
@@ -566,12 +598,18 @@ def test_module_of_top_level(load, tmp_path):
     (folder / "hk_tk.py").write_text("x = 1\n", encoding="utf-8", newline="\n")
     error = ErrorInfo("KeyError", "'score'", folder / "hk_tk.py", 3, "", "module", "科學計算")
     assert report.module_of(error) == (folder, ())
-    # 指到模組的符號連結：核心不當它是模組（core.scan.is_module），這裡也不認
+
+
+def test_module_of_ignores_a_symlink_to_a_module(load, tmp_path):
+    # 指到模組的符號連結：核心不當它是模組（core.scan.is_module），這裡也不認。建不了的話是 skip（CI 的 -rs 看得到）
+    report = load("report")
+    folder = make_module(tmp_path / "modules", "科學計算")
+    (folder / "hk_tk.py").write_text("x = 1\n", encoding="utf-8", newline="\n")
     link = tmp_path / "modules" / "連結"
     try:
-        link.symlink_to(folder, target_is_directory=True)
-    except OSError:  # Windows 沒有建符號連結的權限
-        return
+        os.symlink(folder, link, target_is_directory=True)
+    except (OSError, NotImplementedError):  # Windows 沒有建符號連結的權限
+        pytest.skip("沒有建符號連結的權限")
     error = ErrorInfo("KeyError", "'score'", link / "hk_tk.py", 3, "", "module", "連結")
     assert report.module_of(error) == (None, ())
 
@@ -769,6 +807,15 @@ def inside_a_fence(text):
     return mark is not None
 
 
+TXT = "20261025-143005-ZeroDivisionError.txt"  # HINT_FILE 的檔名：report.save 存的樣子（<日期>-<時間>-<種類>.txt）
+HINTS = ["HINT", "HINT_FILE", "HINT_PAGE", "HINT_LOG"]  # 網址內文最後那一句的四種：fit 的規則每一種都要成立
+
+
+def hint_of(report, key):
+    """report 的那一句：HINT（真的複製成了）；HINT_FILE（沒複製成，指 回報/TXT）；HINT_PAGE、HINT_LOG（也存不了檔）。"""
+    return getattr(report, key).format(name=TXT)
+
+
 @pytest.mark.parametrize("value", ["a&b=c#d", "100% +1", "第一行\n第二行", "~~~~text\nx\n~~~~", "王小明 💬",
                                    "a/b\\c\"d'e"])
 def test_url_roundtrips(load, value):
@@ -795,29 +842,48 @@ def test_max_url_is_the_conservative_2000_everywhere(load, platform):
     assert report.max_url(platform) == 2000 == report.MAX_URL
 
 
-def test_fit_leaves_a_short_report_alone(load):
+def test_hint_sentences_are_the_agreed_ones(load):
+    # 網址內文最後那一句：真的複製成了才是研究助理的原句（設計第 17 節第 15 條）；沒複製成的三句指向別的地方
+    # （最後審查 B 的裁定；用字請研究助理確認）。剪貼簿裡可能是之前複製的、沒遮過的東西：沒複製成時不叫人貼上
     report = load("report")
-    t, b = "[回報] 科學計算：KeyError（iPLoT 0.6.0）", report.body("x", ENV, SENTENCE, TB)
-    assert report.fit("BUG", t, b, report.MAX_URL) == (report.url("BUG", t, report.with_hint(b)), False)
+    assert report.HINT == "完整報告已複製，GitHub 出錯或內容被截斷時，按 ⌘V／Ctrl+V 貼上。"
+    assert report.HINT_FILE == ("剪貼簿沒有複製成功：完整報告存在 iPLoT 的 回報/{name}；GitHub 出錯或內容被截斷時，"
+                                "從那個檔複製全文、直接貼上。")
+    assert report.HINT_PAGE == ("剪貼簿沒有複製成功：完整報告在 iPLoT 那一頁下面那一格；GitHub 出錯或內容被截斷時，"
+                                "從那裡複製全文、直接貼上。")
+    assert report.HINT_LOG == ("剪貼簿沒有複製成功：完整報告在 iPLoT 的訊息區；GitHub 出錯或內容被截斷時，"
+                               "從那裡複製全文、直接貼上。")
+    assert ["⌘V" in hint_of(report, key) for key in HINTS] == [True, False, False, False]
 
 
-def test_fit_always_ends_the_body_with_the_hint(load):
-    # 短的、traceback 中間截的、「發生了什麼」截的、沒有框的：網址裡的內文最後一行都是 HINT
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_leaves_a_short_report_alone(load, key):
     report = load("report")
+    t, b, h = "[回報] 科學計算：KeyError（iPLoT 0.6.0）", report.body("x", ENV, SENTENCE, TB), hint_of(report, key)
+    assert report.fit("BUG", t, b, report.MAX_URL, h) == (report.url("BUG", t, report.with_hint(b, h)), False)
+    assert report.fit("BUG", t, b, report.MAX_URL) == report.fit("BUG", t, b, report.MAX_URL, report.HINT)  # 預設是 HINT
+
+
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_always_ends_the_body_with_the_hint(load, key):
+    # 短的、traceback 中間截的、「發生了什麼」截的、沒有框的：網址裡的內文最後一行都是給的那一句（預設 HINT）
+    report = load("report")
+    h = hint_of(report, key)
     bodies = [report.body("x", ENV, SENTENCE, TB), report.body("x", ENV, SENTENCE, long_tb(200)),
               report.body("中" * 1000, ENV, SENTENCE, TB), "中" * 2000]
     cuts = []
     for b in bodies:
-        u, cut = report.fit("BUG", "t", b, report.MAX_URL)
+        u, cut = report.fit("BUG", "t", b, report.MAX_URL, h)
         cuts.append(cut)
-        assert query(u)["body"].split("\n")[-1] == report.HINT
+        assert query(u)["body"].split("\n")[-1] == h
     assert cuts == [False, True, True, True]
 
 
-def test_fit_keeps_the_login_redirect_short(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_keeps_the_login_redirect_short(load, key):
     # 之後放寬 limit 時：沒登入的話 GitHub 把整條網址再編碼一次放進 return_to，中文多的會長成大約 5/3 倍
     report = load("report")
-    u, cut = report.fit("BUG", "t", "中" * 2000, 8000)
+    u, cut = report.fit("BUG", "t", "中" * 2000, 8000, hint_of(report, key))
     assert cut and len(u) <= 8000 and report.login_redirect(u) <= report.MAX_LOGIN_REDIRECT
     assert report.login_redirect(u) == len(report.LOGIN + quote(u, safe=""))
     # 式子對著量到的那一組（2026-10-24：內文全是 ASCII、5621 字的網址，轉去登入的那條 5742 字）。量的那一組沒有
@@ -828,20 +894,24 @@ def test_fit_keeps_the_login_redirect_short(load):
     assert (len(u), report.login_redirect(u)) == (5621, 5742)
 
 
-def test_fit_boundary(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_boundary(load, key):
     report = load("report")
+    h = hint_of(report, key)
     b = report.body("x", ENV, SENTENCE, long_tb(10))
-    whole = report.url("BUG", "t", report.with_hint(b))
+    whole = report.url("BUG", "t", report.with_hint(b, h))
     assert report.login_redirect(whole) <= report.MAX_LOGIN_REDIRECT  # 這裡只看 limit
-    assert report.fit("BUG", "t", b, len(whole)) == (whole, False)
-    u, cut = report.fit("BUG", "t", b, len(whole) - 1)
+    assert report.fit("BUG", "t", b, len(whole), h) == (whole, False)
+    u, cut = report.fit("BUG", "t", b, len(whole) - 1, h)
     assert cut and len(u) <= len(whole) - 1
 
 
-def test_fit_keeps_the_first_and_last_lines(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_keeps_the_first_and_last_lines(load, key):
     report = load("report")
+    h = hint_of(report, key)
     lines = long_tb(200).rstrip("\n").split("\n")
-    u, cut = report.fit("BUG", "t", report.body("x", ENV, SENTENCE, long_tb(200)), 3000)
+    u, cut = report.fit("BUG", "t", report.body("x", ENV, SENTENCE, long_tb(200)), 3000, h)
     assert cut and len(u) <= 3000
     out = query(u)["body"]
     inner = out.split("~~~~text\n", 1)[1].split("\n~~~~\n", 1)[0].split("\n")
@@ -852,14 +922,15 @@ def test_fit_keeps_the_first_and_last_lines(load):
     # 二分找的是最大的 k：再多留一行就放不下
     more = [lines[0], report.TRUNCATED.format(n=len(lines) - 2 - k), *lines[-k - 1:]]
     assert len(report.url("BUG", "t", out.replace("\n".join(inner), "\n".join(more)))) > 3000
-    assert out.endswith("\n\n" + report.HINT)
+    assert out.endswith("\n\n" + h)
 
 
-def test_fit_cuts_what_happened_when_one_line_is_too_long(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_cuts_what_happened_when_one_line_is_too_long(load, key):
     # 使用者在「發生了什麼」貼了一大段：traceback 只留最後一行也放不下，「發生了什麼」從後面截，其他照留
     report = load("report")
     tb = 'Traceback (most recent call last):\n  File "<模組:科學計算>/hk_tk.py", line 3, in run\nKeyError: \'score\'\n'
-    u, cut = report.fit("BUG", "t", report.body("中" * 1000, ENV, SENTENCE, tb), report.MAX_URL)
+    u, cut = report.fit("BUG", "t", report.body("中" * 1000, ENV, SENTENCE, tb), report.MAX_URL, hint_of(report, key))
     assert cut and len(u) <= report.MAX_URL
     out = query(u)["body"]
     what = out.split("### 發生了什麼\n", 1)[1].split("\n\n### 環境\n", 1)[0]
@@ -870,37 +941,43 @@ def test_fit_cuts_what_happened_when_one_line_is_too_long(load):
     assert len(report.url("BUG", "t", longer)) > report.MAX_URL
 
 
-def test_fit_without_a_fence_cuts_the_tail(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_without_a_fence_cuts_the_tail(load, key):
     # 使用者把框整個刪了、貼了一大段：從內文的尾巴截
     report = load("report")
+    h = hint_of(report, key)
     head = "### 發生了什麼\nx\n\n### 錯誤\n"
-    u, cut = report.fit("BUG", "t", head + "中" * 2000, report.MAX_URL)
+    u, cut = report.fit("BUG", "t", head + "中" * 2000, report.MAX_URL, h)
     assert cut and len(u) <= report.MAX_URL
     out = query(u)["body"]
     assert out.startswith(head + "中")
-    assert out.endswith("中\n（太長，已截斷）\n\n" + report.HINT)
+    assert out.endswith("中\n（太長，已截斷）\n\n" + h)
 
 
-def test_fit_closes_the_fence_it_cuts_into(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_closes_the_fence_it_cuts_into(load, key):
     # traceback 的最後一行就放不下：從尾巴截會截在框裡，補上關框的那一行，後面的字才不會被畫成程式碼
     report = load("report")
+    h = hint_of(report, key)
     tb = 'Traceback (most recent call last):\n  File "<模組:科學計算>/hk_tk.py", line 3, in run\nValueError: ' + "值" * 5000
-    u, cut = report.fit("BUG", "t", report.body("x", ENV, SENTENCE, tb), report.MAX_URL)
+    u, cut = report.fit("BUG", "t", report.body("x", ENV, SENTENCE, tb), report.MAX_URL, h)
     assert cut and len(u) <= report.MAX_URL
     out = query(u)["body"]
     assert "### 環境\n" + "\n".join(ENV) in out and "\n~~~~text\nTraceback (most recent call last):\n" in out
-    assert out.endswith("值\n~~~~\n（太長，已截斷）\n\n" + report.HINT)
+    assert out.endswith("值\n~~~~\n（太長，已截斷）\n\n" + h)
 
 
-def test_fit_never_leaves_half_a_fence_line(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_never_leaves_half_a_fence_line(load, key):
     # 從尾巴截、截在開框（~~~~text）或關框（~~~~）那一行的中間：那半行拿掉。~~~、~~~~tex 也會開框（CommonMark：~ 至少
-    # 3 個、後面帶什麼字都算），留著的話 CUT 與 HINT 都被畫成程式碼；~、~~ 只是半個框。limit 一個字一個字往上加，
+    # 3 個、後面帶什麼字都算），留著的話 CUT 與最後那一句都被畫成程式碼；~、~~ 只是半個框。limit 一個字一個字往上加，
     # 截的地方從框的前面走過開框那一行、框裡、關框那一行，一直到留下第一個「中」
     report = load("report")
-    end = "\n" + report.CUT + "\n\n" + report.HINT
+    h = hint_of(report, key)
+    end = "\n" + report.CUT + "\n\n" + h
 
     def size(head):  # 內文截成 head 加一行 CUT 時，網址多長
-        return len(report.url("BUG", "t", report.with_hint(head + "\n" + report.CUT)))
+        return len(report.url("BUG", "t", report.with_hint(head + "\n" + report.CUT, h)))
     half = {"~", "~~", "~~~", "~~~~t", "~~~~te", "~~~~tex"}
     top, box = "### 發生了什麼\nx\n\n### 錯誤\nzz", "\n\n~~~~text\n"
     cases = [(top + box + "中" * 300 + "\n~~~~", ["", box + "~~~~", box + "中\n~~~~"])]  # 審查的那一組
@@ -911,7 +988,7 @@ def test_fit_never_leaves_half_a_fence_line(load):
     for b, want in cases:
         seen = []
         for limit in range(low, low + 100):
-            u, cut = report.fit("BUG", "t", b, limit)
+            u, cut = report.fit("BUG", "t", b, limit, h)
             out = query(u)["body"]
             assert cut and len(u) <= limit and out.endswith(end), limit
             head = out[:-len(end)]
@@ -925,40 +1002,47 @@ def test_fit_never_leaves_half_a_fence_line(load):
         assert seen == want
 
 
-def test_fit_cuts_a_long_title(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_cuts_a_long_title(load, key):
     report = load("report")
+    h = hint_of(report, key)
     title = "標" * 500
-    u, cut = report.fit("BUG", title, report.body("x", ENV, SENTENCE, TB), report.MAX_URL)
+    u, cut = report.fit("BUG", title, report.body("x", ENV, SENTENCE, TB), report.MAX_URL, h)
     assert cut and len(u) <= report.MAX_URL
     assert len(query(u)["title"]) <= 200 and title.startswith(query(u)["title"])
     # 標題截到 200 字就放得下的話，內文照留
     title = "a" * 3000
-    u, cut = report.fit("BUG", title, report.body("x", ENV, SENTENCE, TB), report.MAX_URL)
+    u, cut = report.fit("BUG", title, report.body("x", ENV, SENTENCE, TB), report.MAX_URL, h)
     assert cut and len(u) <= report.MAX_URL
     assert query(u)["title"] == "a" * 200
     assert "### 環境\n" + "\n".join(ENV) in query(u)["body"]
 
 
-def test_fit_caps_the_title_whenever_it_cuts(load):
+@pytest.mark.parametrize("key", HINTS)
+def test_fit_caps_the_title_whenever_it_cuts(load, key):
     # 要截的時候，標題超過 200 字一律先截到 200 字，再截內文：不會留著 300、1500 字的標題，去截環境與 traceback
     report = load("report")
+    h = hint_of(report, key)
     b = report.body("x", ENV, SENTENCE, long_tb(10))
-    u, cut = report.fit("BUG", "a" * 300, b, report.MAX_URL)
+    u, cut = report.fit("BUG", "a" * 300, b, report.MAX_URL, h)
     assert cut and len(u) <= report.MAX_URL
     assert query(u)["title"] == "a" * 200
-    assert u == report.fit("BUG", "a" * 200, b, report.MAX_URL)[0]
+    assert u == report.fit("BUG", "a" * 200, b, report.MAX_URL, h)[0]
     assert "### 環境\n" + "\n".join(ENV) in query(u)["body"]
     # 標題截到 200 字內文就放得下的話，內文一個字都不截
     b = report.body("x", ENV, SENTENCE, TB)
-    u, cut = report.fit("BUG", "a" * 1500, b, report.MAX_URL)
-    assert cut and query(u)["title"] == "a" * 200 and query(u)["body"] == report.with_hint(b)
+    u, cut = report.fit("BUG", "a" * 1500, b, report.MAX_URL, h)
+    assert cut and query(u)["title"] == "a" * 200 and query(u)["body"] == report.with_hint(b, h)
     # 不用截就不動標題（第 1 步：放得下就照用）
-    assert report.fit("BUG", "a" * 250, b, report.MAX_URL) == (report.url("BUG", "a" * 250, report.with_hint(b)), False)
+    assert report.fit("BUG", "a" * 250, b, report.MAX_URL, h) == (report.url("BUG", "a" * 250, report.with_hint(b, h)),
+                                                                  False)
 
 
+@pytest.mark.parametrize("key", HINTS)
 @pytest.mark.parametrize("limit", [1500, 2000, 4000])
-def test_fit_never_exceeds_the_limit(load, limit):
+def test_fit_never_exceeds_the_limit(load, limit, key):
     report = load("report")
+    h = hint_of(report, key)
     huge = 'Traceback (most recent call last):\n  File "<模組:科學計算>/hk_tk.py", line 3, in run\nValueError: ' + "x" * 5000
     sick = {"很長的中文內文": ("[回報] 科學計算：KeyError", report.body("中" * 3000, ENV, SENTENCE, long_tb(300))),
             "一行 5000 字的 traceback": ("t", report.body("x", ENV, SENTENCE, huge)),
@@ -966,10 +1050,10 @@ def test_fit_never_exceeds_the_limit(load, limit):
             "標題 3000 字": ("標" * 3000, report.body("x", ENV, SENTENCE, TB)),
             "全部是 emoji": ("💬" * 500, "💬" * 5000)}
     for name, (title, b) in sick.items():
-        u, cut = report.fit("BUG", title, b, limit)
+        u, cut = report.fit("BUG", title, b, limit, h)
         assert cut, name
         assert len(u) <= limit and report.login_redirect(u) <= report.MAX_LOGIN_REDIRECT, name
-        assert query(u)["body"].endswith("\n\n" + report.HINT), name
+        assert query(u)["body"].endswith("\n\n" + h), name
 
 
 def test_save_writes_utf8_with_stamp_and_kind(load, tmp_path):
@@ -1106,7 +1190,7 @@ def test_send_opens_the_browser_once_with_the_fitted_url(load, tmp_path, monkeyp
     rep = sample_rep(load)
     api, _ = make_api(load, tmp_path, monkeypatch, rep)
     long = report.body("x", ENV, SENTENCE, long_tb(300))
-    r = api.send(rep.title, long)
+    r = api.send(rep.title, long, True)
     assert r["cut"] and len(opened) == 1
     assert opened[0] == report.fit("BUG", rep.title, long, report.max_url())[0]
 
@@ -1153,10 +1237,52 @@ def test_send_when_the_browser_fails_returns_the_url(load, tmp_path, monkeypatch
     report = load("report")
     rep = sample_rep(load)
     api, saved = make_api(load, tmp_path, monkeypatch, rep)
-    r = api.send(rep.title, rep.body)
+    r = api.send(rep.title, rep.body, True)
     assert r["ok"] is False and r["url"] == report.fit("BUG", rep.title, rep.body, report.max_url())[0]
     assert r["sentence"].startswith("瀏覽器打不開")
     assert [p.name for p in saved] == [r["file"]] and saved[0].parent == tmp_path / "回報"
+
+
+@pytest.mark.parametrize("size", ["short", "cut"])
+def test_send_says_copied_only_when_the_page_copied(load, tmp_path, monkeypatch, opened, size):
+    # 研究助理「剪貼簿裡絕對不能是沒遮過的版本」：頁面那一下 execCommand 沒複製成的話，剪貼簿裡還是之前複製的東西
+    # （可能是從主視窗「詳細」複製的、沒遮過的 traceback）。網址內文最後、頁面的 #hint 都不能再叫人貼上，改成指向
+    # 回報/ 裡遮過的 .txt；只有 copied 真的是 True 才是 HINT（沒傳、傳 "true" 都當沒複製成）
+    report = load("report")
+    rep = sample_rep(load)
+    api, _ = make_api(load, tmp_path, monkeypatch, rep)
+    b = rep.body if size == "short" else report.body("x", ENV, SENTENCE, long_tb(300))
+    for copied, args in ((True, (True,)), (False, (False,)), (False, ()), (False, ("true",))):
+        opened.clear()
+        r = api.send(rep.title, b, *args)
+        u, = opened
+        out = query(u)["body"]
+        missed = report.HINT_FILE.format(name=r["file"])
+        want = report.HINT if copied else missed
+        assert r["file"] and r["cut"] == (size == "cut"), args
+        assert out.endswith("\n\n" + want) and (report.HINT in out) == copied, args
+        assert (r["hint"], r["uncopied"]) == (want, missed), args  # 頁面的 #hint：送出之後、「再複製一次」沒成的時候
+        assert u == report.fit("BUG", rep.title, b, report.max_url(), want)[0], args
+
+
+def test_send_points_at_the_page_when_it_can_neither_copy_nor_save(load, tmp_path, monkeypatch, opened):
+    # 也存不了檔：沒有 .txt 可以指，完整的回報只在頁面下面那一格（clip(false) 把 #full 放回畫面上）
+    iplot, report = load("iplot"), load("report")
+    rep = sample_rep(load)
+    api, _ = make_api(load, tmp_path, monkeypatch, rep)
+    blocker = tmp_path / "是一個檔"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(iplot, "OUTBOX", blocker)
+    r = api.send(rep.title, rep.body, False)
+    out = query(opened[0])["body"]
+    assert r["file"] == "" and out.endswith("\n\n" + report.HINT_PAGE) and report.HINT not in out
+    assert (r["hint"], r["uncopied"]) == (report.HINT_PAGE, report.HINT_PAGE)
+    assert "存不了檔（" in r["sentence"] and "完整的回報只在下面那一格。" in r["sentence"]
+    assert "只在剪貼簿裡" not in r["sentence"]  # 跟頁面接著加的「剪貼簿沒有複製成功」不打架（Task 8 掛單①）
+    opened.clear()
+    r = api.send(rep.title, rep.body, True)
+    assert query(opened[0])["body"].endswith("\n\n" + report.HINT) and r["hint"] == report.HINT
+    assert r["uncopied"] == report.HINT_PAGE and "完整的回報只在剪貼簿裡。" in r["sentence"]
 
 
 def test_measure_reports_length_and_limit(load, tmp_path, monkeypatch):
@@ -1213,11 +1339,38 @@ def test_page_copies_before_it_sends():
     assert re.search(r"#full\s*\{[^}]*position:\s*absolute;[^}]*left:\s*-9999px", page)
 
 
+def test_page_tells_send_whether_it_copied():
+    # 複製成不成只有頁面知道：execCommand 的結果原樣交給 send，網址內文最後那一句跟著它換（最後審查 B）；
+    # 頁面最後一行 #hint 換成 send 回來的那一句。「再複製一次」也照那一下成不成換：成了是資料帶來的 HINT，
+    # 沒成是 send 給的 uncopied（指 回報/ 的 .txt，或頁面下面那一格）
+    page = PAGE.read_text(encoding="utf-8")
+    body = handler(page, "open")
+    assert body.count('const copied = document.execCommand("copy");') == 1
+    assert page.count(".send(") == 1 and '.send($("title").value, $("body").value, copied).then((r) => {' in body
+    then = body.split(".then((r) => {", 1)[1].split("}).catch(", 1)[0]
+    assert '$("hint").textContent = r.hint;' in then and "uncopied = r.uncopied;" in then
+    again = handler(page, "again")
+    copy, hint = again.index('const copied = document.execCommand("copy");'), again.index('$("hint").textContent = ')
+    assert copy < hint and '$("hint").textContent = copied ? data.hint : uncopied;' in again
+    script = page.split("<script>", 1)[1]
+    sets = re.findall(r'\$\("hint"\)\.textContent = ([^;\n]*);', script)
+    assert sorted(sets) == sorted(["data.hint", "r.hint", "copied ? data.hint : uncopied"])
+    assert script.count('$("hint")') == len(sets) + 1  # 另外一處是 show 裡的 .hidden
+
+
 def test_page_copies_only_the_redacted_full_text(load, tmp_path, web):
     # 剪貼簿裡絕對不能是沒遮過的版本（研究助理 2026-10-25）：只複製 measure 回來的 full
     page = PAGE.read_text(encoding="utf-8")
-    sets = re.findall(r'\$\("full"\)\.value = ([^;\n]*);', page)
-    assert len(sets) == 1 and sets[0].endswith(".full")
+    script = page.split("<script>", 1)[1]
+    # 寫進 #full 的只有一處、一字不差是 measure 回來的 r.full；#full 的每一次使用都列出來，也只經過 $("full") 拿它
+    assert re.findall(r'\$\("full"\)\.value[^;\n]*', page) == ['$("full").value = r.full']
+    uses = re.findall(r'\$\("full"\)(\.[^;\n]*);', script)
+    focus = [".focus({ preventScroll: true })", ".select()"]  # 「在瀏覽器打開」與「再複製一次」各一次
+    assert sorted(uses) == sorted([".value = r.full", '.classList.add("shown")', ".tabIndex = 0", *focus, *focus])
+    assert len(uses) == script.count('$("full")') == script.count('"full"') and "'full'" not in script
+    assert script.count("getElementById") == 1 and "querySelector" not in script
+    for bad in ('$("full").value +=', "setRangeText", "navigator.clipboard", "clipboardData", 'addEventListener("copy"'):
+        assert bad not in page, bad
     copies = [m.start() for m in re.finditer(r'execCommand\("copy"\)', page)]
     assert len(copies) == 2  # 「在瀏覽器打開」與「再複製一次」
     for at in copies:
@@ -1250,7 +1403,7 @@ def test_page_reminds_to_log_in_and_paste(load, tmp_path, monkeypatch, opened):
     blocker.write_text("x", encoding="utf-8")
     monkeypatch.setattr(load("iplot"), "OUTBOX", blocker)  # 存不了檔：照樣開瀏覽器，不丟例外
     opened.clear()
-    r = api.send(rep.title, rep.body)
+    r = api.send(rep.title, rep.body, True)
     assert (r["ok"], len(opened), r["file"]) == (True, 1, "")
     assert "存不了檔" in r["sentence"] and "完整的回報只在剪貼簿裡" in r["sentence"]
 
@@ -1537,7 +1690,7 @@ def test_send_survives_a_lone_surrogate(load, tmp_path, monkeypatch, opened):
     # 跟存不了檔一樣照樣開瀏覽器，不能讓 send 丟出去
     rep = sample_rep(load)
     api, saved = make_api(load, tmp_path, monkeypatch, rep)
-    r = api.send("[回報] 科學計算\udce9：KeyError", rep.body)
+    r = api.send("[回報] 科學計算\udce9：KeyError", rep.body, True)
     assert (r["ok"], r["file"], saved, len(opened)) == (True, "", [], 1)
     # UnicodeEncodeError 的字裡有 '\udce9' 這種跳脫，redact 會把它當成路徑：不給人看那串字，只說一句短的
     assert "存不了檔（有沒辦法存成 UTF-8 的字）；完整的回報只在剪貼簿裡。" in r["sentence"]
@@ -1788,6 +1941,61 @@ def test_on_error_in_tk_says_when_the_url_was_cut(tmp_path, tk, monkeypatch, bro
     else:
         assert failed == [f"瀏覽器打不開。{cut}把這串網址整個複製到瀏覽器的網址列：{calls[0]}"]
         assert cut not in first and first.endswith(hint if save == "copied" else "直接貼上。")
+    assert_no_leak(view.logs)
+
+
+# ── tkinter 那一頭的網址：再遮過、最後那一句照實說（最後審查 B）──
+
+def test_on_error_in_tk_redacts_the_url_again(tmp_path, tk, opened):
+    # 草稿沒有再遮過：使用者在草稿的標題那一行、內文都貼了路徑。開出去的網址（會變成公開的貼文）的標題、內文
+    # 都是讀回來、再遮過的那一份（網頁那一頭是 test_send_redacts_again）
+    mine = Path.home() / "課程" / "王小明.py"  # 真的 Ctx：這台的家目錄底下（執行時才算，不寫進檔）
+
+    def add(view):
+        draft = next(e[2] for e in view.events if e[:2] == ("action", "edit"))
+        first, rest = draft.read_text(encoding="utf-8").split("\n", 1)
+        draft.write_text(f"{first} {mine}\n{rest}\n我的檔是 {mine}\n", encoding="utf-8", newline="\n")
+
+    press_tk(tmp_path / "iPLoT", add)
+    u, = opened
+    q = query(u)
+    assert q["title"].startswith("[回報] 科學計算：KeyError")
+    for part in ("title", "body"):
+        assert "王小明" not in q[part] and "<HOME>/.../<檔名已遮蔽>.py" in q[part], part
+    assert "我的檔是 <HOME>/.../<檔名已遮蔽>.py" in q["body"]
+    assert_no_leak([q["title"], q["body"]])
+
+
+TK_HINT_CASES = [("copied", "saved"), ("copied", "unsaved"), ("failed", "saved"), ("failed", "unsaved")]
+
+
+@pytest.mark.parametrize("copy, save", TK_HINT_CASES, ids=["-".join(c) for c in TK_HINT_CASES])
+def test_on_error_in_tk_ends_the_url_with_what_really_happened(load, tmp_path, tk, monkeypatch, opened, copy, save):
+    # 跟網頁那一頭一樣：真的複製到 Tk 的剪貼簿，網址內文最後才是 HINT；沒複製成的話剪貼簿裡是之前的東西（可能沒遮過），
+    # 改成指向 回報/ 的 .txt，也存不了檔就指訊息區（遮過的全文寫在那裡）。訊息區那一句跟網址說的是同一件事
+    if copy == "copied":
+        tkinter = pytest.importorskip("tkinter")
+        monkeypatch.setattr(tkinter, "_default_root", Clipboard(), raising=False)
+    home = tmp_path / "iPLoT"
+    unsaved = refusing(monkeypatch, denied(Path.home() / "課程" / "王小明" / "x.txt"))
+    view = press_tk(home, unsaved if save == "unsaved" else None)
+    report = load("report")  # run_module 跑完才匯（句子跟 tmp 的那一份一樣）
+    u, = opened
+    out = query(u)["body"]
+    files = list((home / "modules" / "回報與討論" / "回報").glob("*.txt"))
+    line, = [s for s in view.logs if "如果 GitHub 出錯" in s]
+    if copy == "copied":
+        want = report.HINT
+        assert line.endswith(report.HINT)  # 訊息區那一句最後也是 HINT
+    elif save == "saved":
+        p, = files
+        want = report.HINT_FILE.format(name=p.name)
+        assert f"完整的回報存在 回報/{p.name}（剪貼簿沒有複製成功）" in line and "再從那個檔複製全文" in line
+    else:
+        want = report.HINT_LOG
+        assert files == [] and "剪貼簿也沒有複製成功" in line and "從訊息區複製" in line
+    assert out.endswith("\n\n" + want)
+    assert (report.HINT in out) == (copy == "copied") and ("⌘V" in line) == (copy == "copied")
     assert_no_leak(view.logs)
 
 
