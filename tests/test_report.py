@@ -12,6 +12,7 @@ import sys
 import types
 import webbrowser
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
 from conftest import FakeApp, FakeCore, FakeView, make_module
@@ -687,3 +688,174 @@ def test_short_env_has_no_paths(load, tmp_path, monkeypatch, web):
     out = report.short_env(make_app(tmp_path / "iPLoT"))
     assert out.startswith("iPLoT ")
     assert "/" not in out and "\\" not in out
+
+
+# ── 網址、截斷、存檔（report.py 後半）──
+
+def query(u):
+    """網址的參數拆回 {名字: 值}（parse_qs 的值是清單，每個參數這裡只有一個）。"""
+    return {k: v[0] for k, v in parse_qs(urlsplit(u).query, keep_blank_values=True).items()}
+
+
+def long_tb(n):
+    """n 行的 traceback：Traceback (most recent call last):、n - 2 個 frame、例外那一行。"""
+    frames = [f'  File "<模組:科學計算>/hk_tk.py", line {i}, in step{i}' for i in range(n - 2)]
+    return "\n".join(["Traceback (most recent call last):", *frames, "KeyError: 'score'"]) + "\n"
+
+
+@pytest.mark.parametrize("value", ["a&b=c#d", "100% +1", "第一行\n第二行", "~~~~text\nx\n~~~~", "王小明 💬",
+                                   "a/b\\c\"d'e"])
+def test_url_roundtrips(load, value):
+    q = parse_qs(urlsplit(load("report").url("BUG", value, value)).query)
+    assert q["title"] == [value] and q["body"] == [value]
+
+
+def test_url_category_is_the_quoted_slug(load):
+    report, forum = load("report"), load("forum")
+    u = report.url("BUG", "t", "b")
+    assert u.startswith(forum.FORUM + "/new?")
+    assert "category=" + quote(forum.CATEGORIES["BUG"], safe="") in u
+    assert query(u)["category"] == forum.CATEGORIES["BUG"]
+
+
+def test_url_replaces_lone_surrogates(load):
+    # Linux 上 os.fsdecode 解不開的檔名帶著孤立的代理字元：quote 會丟 UnicodeEncodeError
+    assert query(load("report").url("BUG", "a\udce9b", "x"))["title"] == "a?b"
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin", "linux"])
+def test_max_url_is_the_conservative_2000_everywhere(load, platform):
+    report = load("report")
+    assert report.max_url(platform) == 2000 == report.MAX_URL
+
+
+def test_fit_leaves_a_short_report_alone(load):
+    report = load("report")
+    t, b = "[回報] 科學計算：KeyError（iPLoT 0.6.0）", report.body("x", ENV, SENTENCE, TB)
+    assert report.fit("BUG", t, b, report.MAX_URL) == (report.url("BUG", t, report.with_hint(b)), False)
+
+
+def test_fit_always_ends_the_body_with_the_hint(load):
+    # 短的、traceback 中間截的、「發生了什麼」截的、沒有框的：網址裡的內文最後一行都是 HINT
+    report = load("report")
+    bodies = [report.body("x", ENV, SENTENCE, TB), report.body("x", ENV, SENTENCE, long_tb(200)),
+              report.body("中" * 1000, ENV, SENTENCE, TB), "中" * 2000]
+    cuts = []
+    for b in bodies:
+        u, cut = report.fit("BUG", "t", b, report.MAX_URL)
+        cuts.append(cut)
+        assert query(u)["body"].split("\n")[-1] == report.HINT
+    assert cuts == [False, True, True, True]
+
+
+def test_fit_keeps_the_login_redirect_short(load):
+    # 之後放寬 limit 時：沒登入的話 GitHub 把整條網址再編碼一次放進 return_to，中文多的會長成大約 5/3 倍
+    report = load("report")
+    u, cut = report.fit("BUG", "t", "中" * 2000, 8000)
+    assert cut and len(u) <= 8000 and report.login_redirect(u) <= report.MAX_LOGIN_REDIRECT
+    assert report.login_redirect(u) == len(report.LOGIN + quote(u, safe=""))
+    # 跟量到的對得上（2026-10-24）：內文全是 ASCII、5621 字的網址，轉去登入的那條是 5742 字
+    # （量的那一組沒有記下標題；這裡用探針的標題「網址長度測試」，拼出來剛好是那兩個數）
+    base = report.url("BUG", "網址長度測試", "")
+    u = report.url("BUG", "網址長度測試", "a" * (5621 - len(base)))
+    assert (len(u), report.login_redirect(u)) == (5621, 5742)
+
+
+def test_fit_boundary(load):
+    report = load("report")
+    b = report.body("x", ENV, SENTENCE, long_tb(10))
+    whole = report.url("BUG", "t", report.with_hint(b))
+    assert report.login_redirect(whole) <= report.MAX_LOGIN_REDIRECT  # 這裡只看 limit
+    assert report.fit("BUG", "t", b, len(whole)) == (whole, False)
+    u, cut = report.fit("BUG", "t", b, len(whole) - 1)
+    assert cut and len(u) <= len(whole) - 1
+
+
+def test_fit_keeps_the_first_and_last_lines(load):
+    report = load("report")
+    lines = long_tb(200).rstrip("\n").split("\n")
+    u, cut = report.fit("BUG", "t", report.body("x", ENV, SENTENCE, long_tb(200)), 3000)
+    assert cut and len(u) <= 3000
+    out = query(u)["body"]
+    inner = out.split("~~~~text\n", 1)[1].split("\n~~~~\n", 1)[0].split("\n")
+    k = len(inner) - 2
+    assert inner[0] == lines[0] and inner[-1] == lines[-1] and k >= 1
+    assert inner[1] == report.TRUNCATED.format(n=len(lines) - 1 - k)
+    assert inner[2:] == lines[-k:]
+    # 二分找的是最大的 k：再多留一行就放不下
+    more = [lines[0], report.TRUNCATED.format(n=len(lines) - 2 - k), *lines[-k - 1:]]
+    assert len(report.url("BUG", "t", out.replace("\n".join(inner), "\n".join(more)))) > 3000
+    assert out.endswith("\n\n" + report.HINT)
+
+
+def test_fit_cuts_what_happened_when_one_line_is_too_long(load):
+    # 使用者在「發生了什麼」貼了一大段：traceback 只留最後一行也放不下，「發生了什麼」從後面截，其他照留
+    report = load("report")
+    tb = 'Traceback (most recent call last):\n  File "<模組:科學計算>/hk_tk.py", line 3, in run\nKeyError: \'score\'\n'
+    u, cut = report.fit("BUG", "t", report.body("中" * 1000, ENV, SENTENCE, tb), report.MAX_URL)
+    assert cut and len(u) <= report.MAX_URL
+    out = query(u)["body"]
+    what = out.split("### 發生了什麼\n", 1)[1].split("\n\n### 環境\n", 1)[0]
+    assert what.startswith("中") and what.endswith("中\n（太長，已截斷）")
+    assert "### 環境\n" + "\n".join(ENV) in out and SENTENCE in out and "KeyError: 'score'" in out
+    # 二分找的是最多能留幾個字：再多留一個就放不下
+    longer = out.replace(what, what.replace("\n（太長，已截斷）", "中\n（太長，已截斷）"))
+    assert len(report.url("BUG", "t", longer)) > report.MAX_URL
+
+
+def test_fit_without_a_fence_cuts_the_tail(load):
+    # 使用者把框整個刪了、貼了一大段：從內文的尾巴截
+    report = load("report")
+    head = "### 發生了什麼\nx\n\n### 錯誤\n"
+    u, cut = report.fit("BUG", "t", head + "中" * 2000, report.MAX_URL)
+    assert cut and len(u) <= report.MAX_URL
+    out = query(u)["body"]
+    assert out.startswith(head + "中")
+    assert out.endswith("中\n（太長，已截斷）\n\n" + report.HINT)
+
+
+def test_fit_closes_the_fence_it_cuts_into(load):
+    # traceback 的最後一行就放不下：從尾巴截會截在框裡，補上關框的那一行，後面的字才不會被畫成程式碼
+    report = load("report")
+    tb = 'Traceback (most recent call last):\n  File "<模組:科學計算>/hk_tk.py", line 3, in run\nValueError: ' + "值" * 5000
+    u, cut = report.fit("BUG", "t", report.body("x", ENV, SENTENCE, tb), report.MAX_URL)
+    assert cut and len(u) <= report.MAX_URL
+    out = query(u)["body"]
+    assert "### 環境\n" + "\n".join(ENV) in out and "\n~~~~text\nTraceback (most recent call last):\n" in out
+    assert out.endswith("值\n~~~~\n（太長，已截斷）\n\n" + report.HINT)
+
+
+def test_fit_cuts_a_long_title(load):
+    report = load("report")
+    title = "標" * 500
+    u, cut = report.fit("BUG", title, report.body("x", ENV, SENTENCE, TB), report.MAX_URL)
+    assert cut and len(u) <= report.MAX_URL
+    assert len(query(u)["title"]) <= 200 and title.startswith(query(u)["title"])
+    # 標題截到 200 字就放得下的話，內文照留
+    title = "a" * 3000
+    u, cut = report.fit("BUG", title, report.body("x", ENV, SENTENCE, TB), report.MAX_URL)
+    assert cut and len(u) <= report.MAX_URL
+    assert query(u)["title"] == "a" * 200
+    assert "### 環境\n" + "\n".join(ENV) in query(u)["body"]
+
+
+@pytest.mark.parametrize("limit", [1500, 2000, 4000])
+def test_fit_never_exceeds_the_limit(load, limit):
+    report = load("report")
+    huge = 'Traceback (most recent call last):\n  File "<模組:科學計算>/hk_tk.py", line 3, in run\nValueError: ' + "x" * 5000
+    sick = {"很長的中文內文": ("[回報] 科學計算：KeyError", report.body("中" * 3000, ENV, SENTENCE, long_tb(300))),
+            "一行 5000 字的 traceback": ("t", report.body("x", ENV, SENTENCE, huge)),
+            "沒有框": ("t", "中" * 5000),
+            "標題 3000 字": ("標" * 3000, report.body("x", ENV, SENTENCE, TB)),
+            "全部是 emoji": ("💬" * 500, "💬" * 5000)}
+    for name, (title, b) in sick.items():
+        u, cut = report.fit("BUG", title, b, limit)
+        assert cut, name
+        assert len(u) <= limit and report.login_redirect(u) <= report.MAX_LOGIN_REDIRECT, name
+        assert query(u)["body"].endswith("\n\n" + report.HINT), name
+
+
+def test_save_writes_utf8_with_stamp_and_kind(load, tmp_path):
+    path = load("report").save(tmp_path / "回報", "20261023-201500", "NameError", "王小明\n")
+    assert path == tmp_path / "回報" / "20261023-201500-NameError.txt"
+    assert path.read_bytes() == "王小明\n".encode()  # UTF-8、換行是 \n（Windows 也一樣）

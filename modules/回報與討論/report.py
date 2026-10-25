@@ -1,21 +1,33 @@
-"""回報的內容：環境（iPLoT、作業系統、Python、出錯的模組與版本）與內文（D112）。
+"""回報的內容：環境（iPLoT、作業系統、Python、出錯的模組與版本）與內文（D112）；預填的網址、截斷、存全文（D113）。
 遮蔽一律交給 redact.redact，這裡不自己認路徑。core 只在函式裡 import（module_of、from_error）：直接執行
-（IPLOT_DIRECT=1）時 core 不在 sys.path 上。"""
+（IPLOT_DIRECT=1）時 core 不在 sys.path 上。寫檔的只有 save。"""
 
 import os
 import platform
 import re
 import sys
 import unicodedata
+import urllib.parse
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import forum
 import redact
 
 REPORTER = "0.1.0"  # 內文最後那一行的 HTML 註解帶的版本：跟 CHANGELOG.md 最上面那一節一樣（測試核）
+WHAT_HEAD = "### 發生了什麼"
 WHAT_ERROR = "（請寫一兩句：按了什麼、預期是什麼）"
 WHAT_BLANK = "（請寫：按了什麼、看到什麼、預期是什麼）"
 LOST = "<模組>"  # 出錯的模組找不到它的資料夾時，標題與那一句白話裡的名字（不退回 error.module）
+
+MAX_URL = 2000            # 保守值，每個平台都一樣（研究助理 2026-10-25：不實測；Windows 的 ShellExecute 約 2083，
+                          # 登入的瀏覽器的實際上限沒量過）。有人反映截太多再實測放寬：Task 0 Step 2 的做法
+MAX_LOGIN_REDIRECT = 5600 # 沒登入時 GitHub 轉去登入的那條網址：量到 ≤ 5742 字才完整（2026-10-24），留一點餘裕
+LOGIN = "https://github.com/login?return_to="
+MAX_TITLE = 200           # 網址放不下時，標題超過這麼多字就截到這麼多（設計第 8 節）
+HINT = "完整報告已複製，GitHub 出錯或內容被截斷時，按 ⌘V／Ctrl+V 貼上。"
+TRUNCATED = "…（中間 {n} 行太長，已截斷；完整報告在剪貼簿裡）…"
+CUT = "（太長，已截斷）"     # 「發生了什麼」或內文的尾巴截掉時，接在截剩的那一段後面的一行
 
 
 @dataclass(frozen=True)
@@ -142,7 +154,7 @@ def fence(text: str) -> str:
 
 def body(what: str, env: list[str], sentence: str | None, tb: str | None) -> str:
     """內文（設計第 7 節）。sentence 與 tb 都是 None：沒有「錯誤」那一節；tb 是 ""：框裡寫「（沒有 traceback）」。"""
-    parts = [f"### 發生了什麼\n{what}", "### 環境\n" + "\n".join(env)]
+    parts = [f"{WHAT_HEAD}\n{what}", "### 環境\n" + "\n".join(env)]
     if sentence is not None or tb is not None:
         inner = (tb or "").rstrip("\n") or "（沒有 traceback）"
         mark = fence(inner)
@@ -191,3 +203,161 @@ def blank(app, category: str, module: str | None = None) -> Report:
 def short_env(app) -> str:
     """提建議、問問題的內文最後那一行：iPLoT 0.6.0・macOS 26.5（arm64）・Python 3.14.7（沒有路徑）。"""
     return f"iPLoT {app.version}・{this_os()}・Python {platform.python_version()}"
+
+
+def max_url(platform: str = sys.platform) -> int:
+    """網址的上限：一律 MAX_URL（留著 platform 參數：之後要分平台放寬時不用改呼叫的地方）。"""
+    return MAX_URL
+
+
+def login_redirect(u: str) -> int:
+    """沒登入時 GitHub 轉去登入的那條網址的長度：整條網址再編碼一次放進 return_to（跟量到的四組一字不差）。"""
+    return len(LOGIN + urllib.parse.quote(u, safe=""))
+
+
+def _q(s: str) -> str:
+    """一個參數的值：孤立的代理字元（Linux 上 os.fsdecode 解不開的檔名）先換成 ?，quote 才不會丟例外。"""
+    return urllib.parse.quote(s.encode("utf-8", "replace").decode("utf-8"), safe="")
+
+
+def url(category: str, title: str, body: str) -> str:
+    """論壇的新增頁，分類、標題、內文都預填好（設計第 8 節）。category 是 forum.CATEGORIES 的鍵。"""
+    return f"{forum.FORUM}/new?category={_q(forum.CATEGORIES[category])}&title={_q(title)}&body={_q(body)}"
+
+
+def with_hint(body: str) -> str:
+    """網址裡的內文：最後一律是 HINT 那一句（剪貼簿與 .txt 那一份不帶它，設計第 17 節第 15 條）。"""
+    return body.rstrip("\n") + "\n\n" + HINT
+
+
+def fits(u: str, limit: int) -> bool:
+    """「放得下」：網址 ≤ limit，而且沒登入時轉去登入的那條 ≤ MAX_LOGIN_REDIRECT。"""
+    return len(u) <= limit and login_redirect(u) <= MAX_LOGIN_REDIRECT
+
+
+def _most(ok, lo: int, hi: int) -> int:
+    """二分：ok(lo) 已知成立，回 lo..hi 之間 ok 成立的最大的那個。回的一定是試過、成立的那個，
+    所以就算 ok 不是一路成立到某處為止，回的網址也一定放得下。"""
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if ok(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def _fence(lines: list[str]) -> tuple[int, int] | None:
+    """traceback 的框：第一個 ~~~~…text 那一行與它下面只有同樣長度的 ~ 的那一行（行號）；沒有就 None。"""
+    i = next((i for i, line in enumerate(lines) if re.fullmatch(r"~{4,}text", line)), None)
+    if i is None:
+        return None
+    mark = lines[i][:-len("text")]
+    j = next((j for j in range(i + 1, len(lines)) if lines[j] == mark), None)
+    return None if j is None else (i, j)
+
+
+def _grow(ok, cut, low: int, top: int) -> str | None:
+    """cut(low) 放得下的話，回 low..top 之間放得下的、留得最多的那一份 cut(n)；放不下回 None。"""
+    if not ok(cut(low)):
+        return None
+    return cut(_most(lambda n: ok(cut(n)), low, top))
+
+
+def _middle(body: str):
+    """第 2 步：框裡多於 2 行的話，回 (cut, 1, top)：cut(k) 是留框裡的第一行與最後 k 行、中間換成 TRUNCATED 的內文，
+    1 ≤ k ≤ top。沒有框、或框裡不到 3 行，回 None。"""
+    lines = body.split("\n")
+    box = _fence(lines)
+    if box is None or box[1] - box[0] - 1 <= 2:
+        return None
+    i, j = box
+    inner = lines[i + 1:j]
+
+    def cut(k: int) -> str:
+        mid = TRUNCATED.format(n=len(inner) - 1 - k)
+        return "\n".join([*lines[:i + 1], inner[0], mid, *inner[-k:], *lines[j:]])
+    return cut, 1, len(inner) - 2
+
+
+def _tail(text: str, n: int) -> str:
+    """text 留前 n 個字，後面加一行 CUT。截在 traceback 的框裡的話先補上關框的那一行：不然 GitHub 會把
+    CUT 與 HINT 都畫成程式碼。"""
+    head = text[:n].rstrip("\n")
+    mark = None
+    for line in head.split("\n"):
+        if mark is None:
+            mark = line[:-len("text")] if re.fullmatch(r"~{4,}text", line) else None
+        elif line == mark:
+            mark = None
+    if mark:
+        head += "\n" + mark
+    return f"{head}\n{CUT}" if head else CUT
+
+
+def _what(body: str):
+    """第 3 步的前半：框以外、WHAT_HEAD 底下那一段（到下一個 ### 標題或框為止）。回 (cut, 0, top)：cut(n) 是那一段
+    留前 n 個字、加一行 CUT 的內文，0 ≤ n ≤ top。找不到、或那一段是空的，回 None。"""
+    lines = body.split("\n")
+    i, j = _fence(lines) or (-1, -1)
+    h = next((h for h, line in enumerate(lines) if line == WHAT_HEAD and not i <= h <= j), None)
+    if h is None:
+        return None
+    e = next((e for e in range(h + 1, len(lines)) if lines[e].startswith("### ") or e == i), len(lines))
+    section = "\n".join(lines[h + 1:e])
+    text = section.rstrip("\n")
+    if not text.strip():
+        return None
+    before = "\n".join(lines[:h + 1]) + "\n"
+    after = section[len(text):] + ("\n" + "\n".join(lines[e:]) if e < len(lines) else "")
+    return (lambda n: before + _tail(text, n) + after), 0, len(text)
+
+
+def _shorten(category: str, title: str, body: str, limit: int) -> str | None:
+    """fit 的第 2、3 步，標題不動：回截到放得下的內文（不用截就是 body）；內文只剩 CUT 也放不下，回 None。
+    每一步放不下時，下一步從比較短的那一份接著截（框裡只有 3 行時，換成 TRUNCATED 那一句反而比較長）。"""
+    def ok(b: str) -> bool:
+        return fits(url(category, title, with_hint(b)), limit)
+
+    def size(b: str) -> int:
+        return len(url(category, title, with_hint(b)))
+
+    if ok(body):
+        return body
+    for step in (_middle, _what):
+        found = step(body)
+        if found is not None:
+            cut, low, top = found
+            done = _grow(ok, cut, low, top)
+            if done is not None:
+                return done
+            body = min(body, cut(low), key=size)
+    return _grow(ok, lambda n: _tail(body, n), 0, len(body))
+
+
+def fit(category: str, title: str, body: str, limit: int) -> tuple[str, bool]:
+    """預填的網址與有沒有截（設計第 8 節、第 17 節第 2、15 條）。內文最後一定是 HINT，截的時候也留著；
+    回的網址 ≤ limit、轉去登入的那條 ≤ MAX_LOGIN_REDIRECT。順序：①放得下就照用；②traceback 的框留第一行與最後
+    k 行；③「發生了什麼」從後面截，還是放不下就從內文的尾巴截；④標題超過 MAX_TITLE 字截到 MAX_TITLE、再從頭做
+    ②③；內文只剩 CUT 也放不下（標題本身就很長）就再截標題。都是在編碼之前以行或字為單位截，不會切在 %XX 中間。
+    limit 比只帶 HINT 的網址（約 440 字）還短時沒辦法，回最短的那一條。"""
+    u = url(category, title, with_hint(body))
+    if fits(u, limit):
+        return u, False
+    for t in (title, title[:MAX_TITLE]) if len(title) > MAX_TITLE else (title,):
+        b = _shorten(category, t, body, limit)
+        if b is not None:
+            return url(category, t, with_hint(b)), True
+    t = title[:MAX_TITLE]
+    b = _tail(body, 0) if body else body
+    n = _most(lambda n: fits(url(category, t[:n], with_hint(b)), limit), 0, len(t))
+    return url(category, t[:n], with_hint(b)), True
+
+
+def save(folder: Path, stamp: str, kind: str, text: str) -> Path:
+    """完整的回報（遮過、沒截、不帶 HINT）存成 folder/<stamp>-<kind>.txt（UTF-8、換行 \\n）；folder 不在就建。
+    回寫好的那個檔。"""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{stamp}-{kind}.txt"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
