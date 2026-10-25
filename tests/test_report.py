@@ -266,6 +266,51 @@ CASES = [
     ("doubled_double_quotes", {},  # 從左、從右兩兩配都是兩個 ""：只有 (c)（含分隔符號、頭尾不是空白）認得中間那一對
      '""HK2/王小明/a.txt""', '"".../<檔名已遮蔽>.txt""'),
 ]
+# 中文引號、反引號、全形引號也是引號（M8 最後審查）：每一種一列相對路徑、一列絕對路徑；閉引號與後面的字留著
+QUOTE_MARKS = (("corner", "「」"), ("white_corner", "『』"), ("curly_double", "“”"), ("curly_single", "‘’"),
+               ("double_angle", "《》"), ("angle", "〈〉"), ("backtick", "``"), ("full_width_double", "＂＂"),
+               ("full_width_single", "＇＇"))
+CASES += [row for name, (o, c) in QUOTE_MARKS for row in (
+    (f"{name}_relative", {}, f"讀不到{o}HK2/王小明_B11201234/成績.csv{c}，請確認", f"讀不到{o}.../<檔名已遮蔽>.csv{c}，請確認"),
+    (f"{name}_absolute", {}, f"讀不到{o}/Volumes/USB/學生/王小明.csv{c}，請確認",
+     f"讀不到{o}<PATH>/.../<檔名已遮蔽>.csv{c}，請確認"))]
+CASES += [
+    ("curly_single_with_apostrophe", {},  # ’ 也是撇號：最短的 ‘Bob’ 沒有分隔符號，配到這一行最後一個 ’ 的那一對才是路徑
+     "讀不到‘Bob’s/王小明.txt’，請確認", "讀不到‘.../<檔名已遮蔽>.txt’，請確認"),
+    ("corner_after_a_masked_opener", {},  # 每一個開引號各配到它後面第一個閉引號：第一對以 < 開頭不算，第二對照樣遮
+     "「<IPLOT>/x 「HK2/王小明/a.txt」", "「<IPLOT>/x 「.../<檔名已遮蔽>.txt」"),
+    ("unquoted_path_stops_at_a_closing_mark", {},  # 開引號在上一行（配不到）：沒有引號的路徑不吃掉閉引號與後面的字
+     "「第一行\n/Volumes/USB/學生/王小明.csv」，請確認", "「第一行\n<PATH>/.../<檔名已遮蔽>.csv」，請確認"),
+    ("home_then_a_closing_mark", {}, "在\n/Users/laoban」裡", "在\n<HOME>」裡"),
+    ("apostrophe_inside_an_unquoted_path", {},  # 後面緊接著英文字母的 ’ 是撇號，照樣當路徑的一部分
+     "see /Volumes/USB/Bob’s/王小明.txt now", "see <PATH>/.../<檔名已遮蔽>.txt now"),
+    ("colon_glued_to_a_path", {}, "RuntimeError: 讀不到:/Volumes/USB/學生/王小明.csv",
+     "RuntimeError: 讀不到:<PATH>/.../<檔名已遮蔽>.csv"),
+    ("colon_glued_to_a_windows_path", WIN, "RuntimeError: 讀不到:D:\\學生\\王小明.csv",
+     "RuntimeError: 讀不到:<PATH>/.../<檔名已遮蔽>.csv"),
+    ("url_after_a_colon", {}, "論壇:https://github.com/william10310406/iplot/discussions",
+     "論壇:https://github.com/william10310406/iplot/discussions"),
+    ("file_url_unquoted", {}, "打不開 file:///Volumes/USB/學生/王小明.html 這個檔",
+     "打不開 file://<PATH>/.../<檔名已遮蔽>.html 這個檔"),
+    ("file_url_quoted", {}, "ValueError: 'file:///Volumes/USB/學生/王小明.html' is not a valid path",
+     "ValueError: 'file://<PATH>/.../<檔名已遮蔽>.html' is not a valid path"),
+    ("file_url_windows", WIN,  # file:///C:/… 的第三個 / 留著，路徑從磁碟機開頭：家目錄照樣認得
+     "'file:///C:/Users/laoban/Desktop/王小明.html' 與 file:///D:/課程/王小明.html",
+     "'file:///<HOME>/.../<檔名已遮蔽>.html' 與 file:///<PATH>/.../<檔名已遮蔽>.html"),
+    ("file_url_with_a_host", {}, "打不開 file://server/share/王小明.txt", "打不開 file://.../<檔名已遮蔽>.txt"),
+    ("usr_local_is_not_python", {"pythons": ("/usr",)},  # Linux 的系統 Python：prefix 是 /usr，底下只有 lib/ 才是 Python 的
+     '  File "/usr/local/share/課程/王小明_B11201234/hw.py", line 3, in f\n    print("王小明 的成績")\n',
+     '  File "<PATH>/.../<檔名已遮蔽>.py", line 3, in f\n    （原始碼已略過）\n'),
+    ("usr_lib_is_python", {"pythons": ("/usr",)},
+     '  File "/usr/lib/python3.12/json/decoder.py", line 345, in decode\n' + DECODE,
+     '  File "<PYTHON>/lib/python3.12/json/decoder.py", line 345, in decode\n' + DECODE),
+    ("home_prefix_is_not_python", {"pythons": ("/Users/laoban",)},  # --prefix=$HOME 裝的 Python：家目錄底下都不算
+     '  File "/Users/laoban/lib/課程/王小明.py", line 3, in f\n    print("王小明")\n',
+     '  File "<HOME>/.../<檔名已遮蔽>.py", line 3, in f\n    （原始碼已略過）\n'),
+    ("prefix_above_the_module_is_not_python", {"pythons": ("/Volumes/硬碟",), "module": "/Volumes/硬碟/課/科學計算"},
+     '  File "/Volumes/硬碟/lib/學生/王小明.py", line 3, in f\n    print("王小明")\n',
+     '  File "<PATH>/.../<檔名已遮蔽>.py", line 3, in f\n    （原始碼已略過）\n'),
+]
 
 # 引號裡的相對路徑前面有各種會騙引號配對的字：撇號、一個字母的字接撇號、沒有分隔符號的一對、中間有 / 的日期與分數、
 # 字串前綴、dict／list 的 repr、閉引號後面緊接著 /、落單的引號、緊貼引號的 UNC 開頭（字面上是兩個反斜線接 a）；
@@ -275,7 +320,8 @@ NOISY_PREFIXES = ("Can't ", "Plan B's ", "it's 1/2 ", "'x ' / ", '"a" / ', "'李
                   "'x '/ ", '"a"/', "'", "\\\\a")
 NOISY_PATHS = ("'HK2/王小明_B11201234/a.txt'", "'HK2\\\\王小明_B11201234\\\\a.txt'",  # 第二個是 Windows 的 repr：兩個反斜線
                "b'HK2/王小明_B11201234/a.txt'", '"HK2/王小明_B11201234/a.txt"',
-               "' HK2/王小明_B11201234/a.txt'", "'HK2/王小明_B11201234/a.txt '")
+               "' HK2/王小明_B11201234/a.txt'", "'HK2/王小明_B11201234/a.txt '",
+               "「HK2/王小明_B11201234/a.txt」", "‘HK2/王小明_B11201234/a.txt’", "`HK2/王小明_B11201234/a.txt`")
 NOISY_SUFFIXES = ("", " not found", "。")
 # 引號湯：前綴是這些記號任取 0–2 個接起來，接一個 NOISY_PATHS，後面再接 0–1 個記號
 SOUP = ("'", '"', "/", "\\", " ", "a", "1", "王", "<", "C:")
@@ -349,7 +395,8 @@ def test_quote_soup_is_idempotent_and_only_ambiguous_quotes_leak(load):
         assert redact.redact(once, ctx)[0] == once, (text, once)
         if "王小明" in once:
             quote = path[-1]
-            # 漏得掉的只有兩類，都是照引號本身分不出來的：
+            assert quote not in "」’", (text, once)  # 開引號與閉引號不同字的：只有一種配法，一個都不能漏
+            # 其他的漏得掉的只有兩類，都是照引號本身分不出來的：
             # (1) 前綴的最後一個字是 ASCII 英數字：開引號緊貼英數字是撇號的規則（crab'…'），照設計不當開頭
             # (2) 後綴就是路徑的那種引號、前綴裡也有一個：路徑自己的兩個引號外面都有落單的同一種引號，
             #     哪兩個配成一對都說得通

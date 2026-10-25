@@ -25,30 +25,49 @@ OPEN = r"(?:(?<![A-Za-z0-9])|(?<=(?<![A-Za-z0-9])[bBrRuUfF])|(?<=(?<![A-Za-z0-9]
 BACK_OPEN = r"(?:(?![A-Za-z0-9])|(?=[bBrRuUfF](?![A-Za-z0-9]))|(?=[bBrR][bBrR](?![A-Za-z0-9])))"
 # 引號裡的路徑（第 2 步）。同一行的引號怎麼兩兩配，沒有一種規則永遠配得對（撇號、落單的引號、閉引號後面緊接著 /、
 # 路徑頭尾多打的空白各騙倒過一種）：改成下面幾種讀法各配一次，哪一種讀法配出來的一對像路徑就遮（聯集，寧可多遮）。
-# 兩種引號分開配，不放在同一個 | 裡：雙引號那一對不算的時候，裡面的單引號那一對照樣配得到（"<'HK2/…'"）
+# 每一種引號分開配，不放在同一個 | 裡：雙引號那一對不算的時候，裡面的單引號那一對照樣配得到（"<'HK2/…'"）。
+# 兩頭同一個字的引號：ASCII 的 ' "、反引號、全形的 ＂ ＇；撇號的條件（OPEN）只給 ASCII 的 '
+SYMMETRIC = (("'", OPEN), ('"', ""), ("`", ""), ("＂", ""), ("＇", ""))
+# 開引號與閉引號不同字的（中文引號、書名號）：沒有怎麼兩兩配的問題
+PAIRS = ("「」", "『』", "“”", "‘’", "《》", "〈〉")
 QUOTE_READINGS = (
-    # (a) 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到下一個同種引號：路徑裡可以有空白，前面緊貼什麼都算
-    re.compile(r"'(?:/|[A-Za-z]:[\\/]|\\\\)[^'\n]*'"),
-    re.compile(r'"(?:/|[A-Za-z]:[\\/]|\\\\)[^"\n]*"'),
-    # (b) 從左邊起兩兩配，每一對都吃掉：open(' HK2/…') 這種頭尾有空白的路徑
-    re.compile(OPEN + r"'[^'\n]*'"),
-    re.compile(r'"[^"\n]*"'),
-    # (c) 裡面含 / 或 \、頭尾不是空白才算一對，不算的話這個開引號跳過、下一個引號再試：
-    # Plan B's 'HK2/…'、'x ' / 'HK2/…'（撇號或上一對的閉引號到路徑的開引號那一段頭尾是空白，不算）
-    re.compile(OPEN + r"'(?![\s'])(?=[^'\n]*[/\\])[^'\n]*(?<!\s)'"),
-    re.compile(r'"(?![\s"])(?=[^"\n]*[/\\])[^"\n]*(?<!\s)"'),
+    *(re.compile(pattern) for q, opener in SYMMETRIC for pattern in (
+        # (a) 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到下一個同種引號：路徑裡可以有空白，前面緊貼什麼都算
+        rf"{q}(?:/|[A-Za-z]:[\\/]|\\\\)[^{q}\n]*{q}",
+        # (b) 從左邊起兩兩配，每一對都吃掉：open(' HK2/…') 這種頭尾有空白的路徑
+        rf"{opener}{q}[^{q}\n]*{q}",
+        # (c) 裡面含 / 或 \、頭尾不是空白才算一對，不算的話這個開引號跳過、下一個引號再試：
+        # Plan B's 'HK2/…'、'x ' / 'HK2/…'（撇號或上一對的閉引號到路徑的開引號那一段頭尾是空白，不算）
+        rf"{opener}{q}(?![\s{q}])(?=[^{q}\n]*[/\\])[^{q}\n]*(?<!\s){q}")),
+    # 不同字的：每一個開引號各配到它後面第一個閉引號（lookahead 抓第 1 組，每一個開引號都配得到：
+    # 「<…>「HK2/…」 的第一對以 < 開頭不算，第二對照樣遮）
+    *(re.compile(rf"(?=({o}[^{c}\n]*{c}))") for o, c in PAIRS),
+    # ’ 也是撇號：‘ 再配到這一行最後一個 ’（‘Bob’s/王小明.txt’：最短的 ‘Bob’ 沒有分隔符號，不算）
+    re.compile(r"(?=(‘[^\n]*’))"),
 )
 # (d) 從右邊起兩兩配：在倒過來的字上配，配到的位置再換回來——'' HK2/…'（從左邊配是 ''，路徑的開引號落單）
-QUOTE_READINGS_BACK = (re.compile(r"'[^'\n]*'" + BACK_OPEN), re.compile(r'"[^"\n]*"'))
+QUOTE_READINGS_BACK = tuple(re.compile(rf"{q}[^{q}\n]*{q}" + (BACK_OPEN if opener else "")) for q, opener in SYMMETRIC)
 # 括號裡的絕對路徑，整段（可以有空白）：ImportError 的 (…/My Drive/…/工具.py)
 PAREN_ABS = re.compile(r"\((?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)[^()\n]*)\)")
-# 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 的最後一個 / 或 \，最後一段到空白、引號、括號為止
-TAIL = r"(?:[^'\"\n()<>]*[/\\])?[^\s'\"()<>/\\]*"
-# 已知開頭（第 4 步）後面要接的：分隔符號、空白、引號、) 或字串結尾——以分隔符號為界
-KNOWN_END = r"(?=$|[/\\\s'\")])"
-# 沒有引號的其他絕對路徑：前面只看 ASCII（中文字也算 \w）；POSIX 至少兩段、Windows 的 X:\ 或 X:/、UNC 的 \\
-OTHER_ABS = re.compile(r"(?<![A-Za-z0-9_>.:~/\\-])"
-                       r"(?:/[^\s'\"()<>/\\]+(?=[/\\][^\s'\"()<>/\\])|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\)" + TAIL)
+# 沒有引號的路徑不吃過去的中文閉引號；’ 也是撇號：後面緊接著英文字母的（Bob’s、O’Brien）照樣當路徑的一部分
+CLOSERS = "」』”’》〉"
+APOSTROPHE = r"’(?=[A-Za-z])"
+# 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 與閉引號的最後一個 / 或 \，最後一段到空白、引號、括號、
+# 閉引號為止（寫成「一般的字*（撇號 一般的字*）*」：每一個字只有一條路，不用回頭試）
+TAIL = (rf"(?:[^'\"\n()<>{CLOSERS}]*(?:{APOSTROPHE}[^'\"\n()<>{CLOSERS}]*)*[/\\])?"
+        rf"[^\s'\"()<>/\\{CLOSERS}]*(?:{APOSTROPHE}[^\s'\"()<>/\\{CLOSERS}]*)*")
+# 已知開頭（第 4 步）後面要接的：分隔符號、空白、引號、)、閉引號或字串結尾——以分隔符號為界
+KNOWN_END = rf"(?=$|[/\\\s'\"){CLOSERS}])"
+# 沒有引號的其他絕對路徑：前面只看 ASCII（中文字也算 \w）；POSIX 至少兩段、Windows 的 X:\ 或 X:/、UNC 的 \\。
+# 緊接在冒號後面的也算（讀不到:/Volumes/…），:// 不算（網址；https://github.com/… 後面那幾段前面是英數字或 /）
+SEG = rf"(?:[^\s'\"()<>/\\{CLOSERS}]|{APOSTROPHE})"
+OTHER_ABS = re.compile(r"(?<![A-Za-z0-9_>.~/\\-])(?!(?<=:)//)"
+                       rf"(?:/{SEG}+(?=[/\\]{SEG})|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\)" + TAIL)
+# file:// 的網址：file:// 留著、後面的路徑換成標籤。file:///C:/… 的第三個 / 也留著，路徑從磁碟機開頭（家目錄才認得）；
+# 遮過的 file:///<HOME>/… 也拆在同一個地方（冪等）
+FILE = re.compile(r"file://(?:/(?=[A-Za-z]:[\\/]|<))?", re.IGNORECASE)
+# 沒有引號的（第 4 步）：開頭之後第一個不是分隔符號的字要是路徑的字——不是 < 或 .（遮過的標籤不再換）
+FILE_URL = re.compile(rf"(?P<head>{FILE.pattern})(?=[/\\]*[^\s'\"()<>./\\{CLOSERS}])(?P<path>{TAIL})", re.IGNORECASE)
 # SyntaxError 訊息尾巴的 (檔名, line N)：檔名裡可以有一層括號（王小明 (1).py），不吃掉前面的 '(' was never closed
 SYNTAX_FILE = re.compile(r"\((?P<f>[^()\n/\\<]+(?:\([^()\n/\\<]*\)[^()\n/\\<]*)*), line (?P<n>\d+)\)")
 # SyntaxError 尾巴裡留著的檔名：iPLoT 自己的
@@ -127,6 +146,12 @@ def _ext(name: str) -> str:
     return suffix if EXT.fullmatch(suffix) else ""
 
 
+def _file_url(s: str) -> tuple[str, str]:
+    """file:// 的網址拆成 (開頭, 路徑)；不是的話開頭是空字串。"""
+    m = FILE.match(s)
+    return (m.group(), s[m.end():]) if m else ("", s)
+
+
 def path_label(p: str, ctx: Ctx) -> str:
     """一個路徑換成什麼：iPLoT 自己的 <IPLOT>/…、Python 的 <PYTHON>/…、出錯模組第一層的 <模組:X>/檔名，
     其他都只留副檔名（<模組:X>/.../、<HOME>/.../、<PATH>/.../、.../ 加上 <檔名已遮蔽>）。以 < 開頭的原樣。"""
@@ -137,9 +162,12 @@ def path_label(p: str, ctx: Ctx) -> str:
     rel = _below(n, ctx.iplot)
     if rel and (rel.lower().startswith(("core/", "ui/", "lib/")) or rel.lower() in ("main.py", "config.py")):
         return "<IPLOT>/" + rel
+    # Python 的只認 prefix 底下的 lib/、lib64/（Windows 的 Lib/）：Linux 的 prefix 是 /usr，/usr/local/… 是使用者的。
+    # prefix 是家目錄，或在 iPLoT、出錯的模組、家目錄的上面的（--prefix=$HOME 這種），整個不算
+    mine = [SEP.sub("/", d) for d in (ctx.iplot, ctx.module, ctx.home) if d]
     for base in sorted(ctx.pythons, key=lambda b: len(SEP.sub("/", b)), reverse=True):  # 最長的先比
         rel = _below(n, base)
-        if rel:
+        if rel and rel.lower().startswith(("lib/", "lib64/")) and all(_below(d, base) is None for d in mine):
             return "<PYTHON>/" + rel
     rel = _below(n, ctx.module)
     if rel:
@@ -214,17 +242,17 @@ def redact(text: str, ctx: Ctx) -> tuple[str, dict[str, int]]:
     # 1. frame
     text = _frames(text, label, counts)
 
-    # 2. 引號裡的路徑：每一種讀法配出來的一對，裡面含 / 或 \、去掉頭尾空白之後不以 < 開頭（遮過的記號）、
-    # 不含 ://（網址）的才算；重疊或共用一個引號的幾對合成一段。每一段裡面整個換成一個標籤，引號與頭尾的空白
-    # 留在標籤外面（'HK2/…/成績.csv ' → '.../<檔名已遮蔽>.csv '）
+    # 2. 引號裡的路徑：每一種讀法配出來的一對，裡面（去掉頭尾空白、開頭的 file://）含 / 或 \、不以 < 開頭
+    # （遮過的記號）、不含 ://（網址）的才算；重疊或共用一個引號的幾對合成一段。每一段裡面整個換成一個標籤，
+    # 引號、頭尾的空白與 file:// 留在標籤外面（'HK2/…/成績.csv ' → '.../<檔名已遮蔽>.csv '）
     def quoted(text: str) -> str:
         n = len(text)
-        pairs = [m.span() for pattern in QUOTE_READINGS for m in pattern.finditer(text)]
+        pairs = [m.span(m.lastindex or 0) for pattern in QUOTE_READINGS for m in pattern.finditer(text)]  # 有第 1 組的用第 1 組
         pairs += [(n - m.end(), n - m.start()) for pattern in QUOTE_READINGS_BACK for m in pattern.finditer(text[::-1])]
         spans = []
         for s, e in sorted(pairs):
-            inner = text[s + 1:e - 1]
-            if not ("/" in inner or "\\" in inner) or inner.strip().startswith("<") or "://" in inner:
+            inner = _file_url(text[s + 1:e - 1].strip())[1]
+            if not ("/" in inner or "\\" in inner) or inner.startswith("<") or "://" in inner:
                 continue
             if spans and s < spans[-1][1]:  # 重疊，或這一對的開引號就是上一段的閉引號
                 spans[-1] = (spans[-1][0], max(spans[-1][1], e))
@@ -234,14 +262,17 @@ def redact(text: str, ctx: Ctx) -> tuple[str, dict[str, int]]:
         for s, e in spans:
             inner = text[s + 1:e - 1]
             lead, trail = inner[:len(inner) - len(inner.lstrip())], inner[len(inner.rstrip()):]
-            out += [text[pos:s + 1], lead, label(inner.strip()), trail]
+            head, inner = _file_url(inner.strip())
+            out += [text[pos:s + 1], lead, head, label(inner), trail]
             pos = e - 1
         return "".join(out) + text[pos:]
 
     text = quoted(text)
     # 3. 括號裡的絕對路徑
     text = PAREN_ABS.sub(lambda m: "(" + label(m["p"]) + ")", text)
-    # 4. 沒有引號的已知開頭（長的先比；/ 與 \ 兩種寫法都試；不分大小寫）
+    # 4. 沒有引號的 file:// 網址（file:// 留著；排在其他絕對路徑前面：file:///D:/… 的 D: 後面那個 / 不是開頭），
+    # 與沒有引號的已知開頭（長的先比；/ 與 \ 兩種寫法都試；不分大小寫）
+    text = FILE_URL.sub(lambda m: m["head"] + label(m["path"]), text)
     starts = []
     for s in (ctx.iplot, *ctx.pythons, ctx.module, ctx.home):
         s = (s or "").rstrip("/\\")
