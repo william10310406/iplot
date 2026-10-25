@@ -30,36 +30,74 @@ BACK_OPEN = r"(?:(?![A-Za-z0-9])|(?=[bBrRuUfF](?![A-Za-z0-9]))|(?=[bBrR][bBrR](?
 SYMMETRIC = (("'", OPEN), ('"', ""), ("`", ""), ("＂", ""), ("＇", ""))
 # 開引號與閉引號不同字的（中文引號、書名號）：沒有怎麼兩兩配的問題
 PAIRS = ("「」", "『』", "“”", "‘’", "《》", "〈〉")
-# ASCII 以外的引號，裡面（去掉頭尾空白）以絕對路徑開頭的那一對：名字裡可能也有同一種閉引號
-# （「/…/「論語」心得_王小明.txt」），只遮到第一個閉引號的話後半段連名字一起露出來。標籤延伸到第 4、5 步會吃到的
-# 地方（PATH_END：吃到空白為止，閉引號可能一起吃掉，只多遮）；那裡比閉引號近的（最後一段有空白、名字裡有 ' 或
-# 括號的），照一對遮到閉引號。ASCII 的引號照舊
 ASCII_QUOTES = "'\""
-ABS_START = re.compile(r"/|[A-Za-z]:[\\/]|\\\\|file:", re.IGNORECASE)
-QUOTE_READINGS = (
-    *(re.compile(pattern) for q, opener in SYMMETRIC for pattern in (
+
+
+def _readings(symmetric, pairs=()) -> tuple[tuple[re.Pattern, ...], tuple[re.Pattern, ...]]:
+    """一組讀法：(往右配的, 在倒過來的字上配的)。"""
+    forward = [re.compile(pattern) for q, opener in symmetric for pattern in (
         # (a) 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到下一個同種引號：路徑裡可以有空白，前面緊貼什麼都算
         rf"{q}(?:/|[A-Za-z]:[\\/]|\\\\)[^{q}\n]*{q}",
         # (b) 從左邊起兩兩配，每一對都吃掉：open(' HK2/…') 這種頭尾有空白的路徑
         rf"{opener}{q}[^{q}\n]*{q}",
         # (c) 裡面含 / 或 \、頭尾不是空白才算一對，不算的話這個開引號跳過、下一個引號再試：
         # Plan B's 'HK2/…'、'x ' / 'HK2/…'（撇號或上一對的閉引號到路徑的開引號那一段頭尾是空白，不算）
-        rf"{opener}{q}(?![\s{q}])(?=[^{q}\n]*[/\\])[^{q}\n]*(?<!\s){q}")),
+        rf"{opener}{q}(?![\s{q}])(?=[^{q}\n]*[/\\])[^{q}\n]*(?<!\s){q}")]
     # 不同字的：每一個開引號各配到它後面第一個閉引號（lookahead 抓第 1 組，每一個開引號都配得到：
-    # 「<…>「HK2/…」 的第一對以 < 開頭不算，第二對照樣遮）
-    *(re.compile(rf"(?=({o}[^{c}\n]*{c}))") for o, c in PAIRS),
-    # ’ 也是撇號：‘ 再配到這一行最後一個 ’（‘Bob’s/王小明.txt’：最短的 ‘Bob’ 沒有分隔符號，不算）
-    re.compile(r"(?=(‘[^\n]*’))"),
-)
-# (d) 從右邊起兩兩配：在倒過來的字上配，配到的位置再換回來——'' HK2/…'（從左邊配是 ''，路徑的開引號落單）
-QUOTE_READINGS_BACK = tuple(re.compile(rf"{q}[^{q}\n]*{q}" + (BACK_OPEN if opener else "")) for q, opener in SYMMETRIC)
+    # 「<…>「HK2/…」 的兩對都是一對）；’ 也是撇號：‘ 再配到這一行最後一個 ’（‘Bob’s/王小明.txt’：最短的 ‘Bob’ 沒有分隔符號）
+    forward += [re.compile(rf"(?=({o}[^{c}\n]*{c}))") for o, c in pairs]
+    forward += [re.compile(r"(?=(‘[^\n]*’))")] if pairs else []
+    # (d) 從右邊起兩兩配：在倒過來的字上配，配到的位置再換回來——'' HK2/…'（從左邊配是 ''，路徑的開引號落單）
+    back = [re.compile(rf"{q}[^{q}\n]*{q}" + (BACK_OPEN if opener else "")) for q, opener in symmetric]
+    return tuple(forward), tuple(back)
+
+
+def _unclosed(text: str) -> list[tuple[int, int]]:
+    """閉引號不見了的（第 4、5 步把 「HK2/王小明/a.txt」/… 的 /a.txt」/… 當成絕對路徑先遮，閉引號在標籤裡）：
+    開引號一直開到行尾。不同字的：這一行最後一個閉引號後面的每一個開引號；兩頭同一個字的（ASCII 的除外）：
+    這一行有奇數個時的最後一個。text 的最後一定是 \n（quoted 先補）：回 (開引號, 那一行的 \n 的位置 + 1)，
+    \n 當閉引號留在標籤後面。用 find 一行一行找，不用 lookahead：很多開引號的長行不會每一個都掃到行尾"""
+    out, start = [], 0
+    for line in text.split("\n")[:-1]:
+        end = start + len(line) + 1
+        for o, c in PAIRS:
+            j = line.find(o, line.rfind(c) + 1)
+            while j != -1:
+                out.append((start + j, end))
+                j = line.find(o, j + 1)
+        out += [(start + line.rfind(q), end) for q, _ in SYMMETRIC[2:] if line.count(q) % 2]
+        start = end
+    return out
+
+
+# 第 2 步只用 ASCII 的 ' "（M8 最後審查之前的讀法，一字不差）；中文引號、反引號、全形引號的讀法（LATE，加上
+# _unclosed）排在第 5 步之後：第 2–5 步原樣先跑完，M8 最後審查之前遮得到的一定遮得到；LATE 只把引號裡還剩下的
+# 換成標籤，只會多遮。LATE 裡也有 ASCII 的讀法，只收裡面以 file:// 開頭的（第 2 步不收 ://，那是第 4 步遮的，可能遮到空白為止）
+QUOTE_READINGS = _readings(SYMMETRIC[:2])
+LATE_READINGS = _readings(SYMMETRIC, PAIRS)
+# 剛好是一個標籤：path_label 回得出來的每一種樣子（<IPLOT>/、<PYTHON>/ 後面照留的那一段，也收第 7–10 步換進去的
+# 記號，跟 SAFE 一樣）。LATE 裡面剛好是一個標籤的不換；「標籤＋還有字」的（<PATH>/.../<檔名已遮蔽> Xiaoming.txt）整段換
+LABEL_EXT = r"(?:\.[A-Za-z0-9]{1,8})?"
+PURE = re.compile(r"<IPLOT>/(?:(?i:core|ui|lib)/[^\\\n]*|(?i:main|config)\.py|[^/\\\n]*<(?:USER|下一層模組)>[^\\\n]*)"
+                  r"|<PYTHON>/[^\\\n]*"
+                  rf"|<模組:[^/\\\n]+?>/(?:\.\.\./<檔名已遮蔽>{LABEL_EXT}|[^/\\\n]+)"
+                  rf"|<HOME>(?:/\.\.\./<檔名已遮蔽>{LABEL_EXT})?|(?:<PATH>/)?\.\.\./<檔名已遮蔽>{LABEL_EXT}")
+# 第 2 步到最後那一次 ASCII 引號，整串最多重複幾次（見 redact）
+ROUNDS = 10
 # 括號裡的絕對路徑，整段（可以有空白）：ImportError 的 (…/My Drive/…/工具.py)
 PAREN_ABS = re.compile(r"\((?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)[^()\n]*)\)")
 # 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 的最後一個 / 或 \，最後一段到空白、引號、括號為止。
 # 中文的閉引號照吃：資料夾或檔名裡常有（《論語》心得_王小明.txt、「HK2」/…），停在那裡的話後半段連名字一起露出來
 TAIL = r"(?:[^'\"\n()<>]*[/\\])?[^\s'\"()<>/\\]*"
-# 第 2 步用的：從 ASCII 以外的引號裡那個絕對路徑的開頭起，第 4、5 步會吃到哪裡
-PATH_END = re.compile(TAIL)
+# 第 4、5 步換出來、有遮掉東西的標籤（與出錯模組第一層的檔名）先做記號：< 後面一個私用字元。第 2 步再找一次之後，
+# 記號的標籤後面接著的，中間那一段可以有 ( ) 與 '（Windows 的「新增資料夾 (2)」、Bob's 這種資料夾：TAIL 停在那裡的話
+# 後半段連名字一起露出來）：到同一行裡、不跨過 " < > :// 的最後一個 / 或 \ 與後面那一段為止，路上碰到的記號的標籤
+# （第 5 步從那個 / 起另外遮的後半段）一起併進一個標籤（只多遮）。不直接放寬 TAIL：放寬的 TAIL 會吃掉第 2 步再找一次
+# 要用的引號、留著原樣的標籤（<IPLOT>/core/…）會把吃進去的字原樣留下來
+MARK = "\ue000"
+MARKED = rf"<{MARK}(?P<top>HOME|PATH|模組:[^/\\\n]+?)>(?:/\.\.\./<檔名已遮蔽>{LABEL_EXT}|/[^\s'\"()<>/\\]*)?"
+LINK = r"(?:(?!://)[^\"\n<>])*"  # 中間那一段：不跨過 " < > 與 ://（網址；file:// 後面是另一個標籤）
+EXTEND = re.compile(MARKED + rf"(?P<more>(?:{LINK}{MARKED.replace('?P<top>', '?:')})*(?:{LINK}[/\\][^\s'\"()<>/\\]+)?)")
 # 已知開頭（第 4 步）後面要接的：分隔符號、空白、引號、) 或字串結尾——以分隔符號為界
 KNOWN_END = r"(?=$|[/\\\s'\")])"
 # 沒有引號的其他絕對路徑：前面只看 ASCII（中文字也算 \w）；POSIX 至少兩段、Windows 的 X:\ 或 X:/、UNC 的 \\。
@@ -246,26 +284,28 @@ def redact(text: str, ctx: Ctx) -> tuple[str, dict[str, int]]:
     # 1. frame
     text = _frames(text, label, counts)
 
-    # 2. 引號裡的路徑：每一種讀法配出來的一對，裡面（去掉頭尾空白、開頭的 file://）含 / 或 \、不以 < 開頭
-    # （遮過的記號）、不含 ://（網址）的才算；ASCII 以外的引號裡以絕對路徑開頭的（ABS_START），延伸到第 4、5 步
-    # 會吃到的地方（PATH_END）。重疊或共用一個引號的幾對合成一段。每一段裡面整個換成一個標籤，引號、頭尾的空白與
-    # file:// 留在標籤外面（'HK2/…/成績.csv ' → '.../<檔名已遮蔽>.csv '）；延伸過閉引號的，閉引號也在標籤裡
-    def quoted(text: str) -> str:
-        n = len(text)
-        pairs = [m.span(m.lastindex or 0) for pattern in QUOTE_READINGS for m in pattern.finditer(text)]  # 有第 1 組的用第 1 組
-        pairs += [(n - m.end(), n - m.start()) for pattern in QUOTE_READINGS_BACK for m in pattern.finditer(text[::-1])]
-        # reach：延伸算過的最遠的地方。路徑的開頭在那之前的，延伸不會更遠（擋住的引號、括號、最後一個分隔符號都一樣），
-        # 而且一定併進那一段：不用再算（一行很多對的時候不會每一對都掃到行尾）
-        spans, reach = [], 0
-        for s, e in sorted(pairs):  # text[s] 是這一對的開引號（每一種讀法都是）；text[e - 1] 留在標籤後面
-            whole = text[s + 1:e - 1].strip()
-            head, inner = _file_url(whole)
-            if not ("/" in inner or "\\" in inner) or inner.startswith("<") or "://" in inner:
+    # 2. 引號裡的路徑：每一種讀法配出來的一對，裡面含 / 或 \、去掉頭尾空白之後不以 < 開頭（遮過的記號）、
+    # 不含 ://（網址）的才算；重疊或共用一個引號的幾對合成一段。每一段裡面整個換成一個標籤，引號與頭尾的空白
+    # 留在標籤外面（'HK2/…/成績.csv ' → '.../<檔名已遮蔽>.csv '）。
+    # late（第 5 步之後那一次）：裡面去掉開頭的 file:// 再看（file:// 留在標籤外面），剛好是一個標籤的（PURE）不算，
+    # 「標籤＋還有字」的整段換成一個標籤；ASCII 的引號只收 file:// 開頭的
+    def quoted(text: str, readings, late=False) -> str:
+        forward, back, n = *readings, len(text)
+        pairs = [m.span(m.lastindex or 0) for pattern in forward for m in pattern.finditer(text)]  # 有第 1 組的用第 1 組
+        pairs += [(n - m.end(), n - m.start()) for pattern in back for m in pattern.finditer(text[::-1])]
+        pairs += _unclosed(text) if late else []
+        spans, bare = [], -1  # bare：裡面沒有 / \ <HOME> 的那一對的結尾；同一個結尾、開頭更後面的也沒有
+        for s, e in sorted(pairs):  # text[s] 是這一對的開引號（每一種讀法都是）
+            if spans and e <= spans[-1][1] or e == bare:  # 整個在上一段裡、或一定不算的：不用看裡面（很多開引號的長行）
                 continue
-            start = e - 1 - len(text[s + 1:e - 1].lstrip()) + len(head)  # 路徑的開頭
-            if text[s] not in ASCII_QUOTES and ABS_START.match(whole) and start >= reach:
-                reach = PATH_END.match(text, start).end()
-                e = max(e, reach + 1)
+            head, inner = _file_url(text[s + 1:e - 1].strip()) if late else ("", text[s + 1:e - 1].strip())
+            if late and (PURE.fullmatch(inner) or text[s] in ASCII_QUOTES and not head):
+                continue
+            path = "/" in inner or "\\" in inner or late and "<HOME>" in inner  # <HOME> 這個標籤沒有分隔符號
+            if not path and not head:
+                bare = e
+            if not path or inner.startswith("<") and not late or "://" in inner:
+                continue
             if spans and s < spans[-1][1]:  # 重疊，或這一對的開引號就是上一段的閉引號
                 spans[-1] = (spans[-1][0], max(spans[-1][1], e))
             else:
@@ -274,30 +314,61 @@ def redact(text: str, ctx: Ctx) -> tuple[str, dict[str, int]]:
         for s, e in spans:
             inner = text[s + 1:e - 1]
             lead, trail = inner[:len(inner) - len(inner.lstrip())], inner[len(inner.rstrip()):]
-            head, inner = _file_url(inner.strip())
-            out += [text[pos:s + 1], lead, head, label(inner), trail]
+            head, inner = _file_url(inner.strip()) if late else ("", inner.strip())
+            out += [text[pos:s + 1], lead, head, relabel(inner) if late else label(inner), trail]
             pos = e - 1
         return "".join(out) + text[pos:]
 
-    text = quoted(text)
-    # 3. 括號裡的絕對路徑
-    text = PAREN_ABS.sub(lambda m: "(" + label(m["p"]) + ")", text)
-    # 4. 沒有引號的 file:// 網址（file:// 留著；排在其他絕對路徑前面：file:///D:/… 的 D: 後面那個 / 不是開頭），
-    # 與沒有引號的已知開頭（長的先比；/ 與 \ 兩種寫法都試；不分大小寫）
-    text = FILE_URL.sub(lambda m: m["head"] + label(m["path"]), text)
+    def relabel(inner: str) -> str:
+        """late 那一段的標籤：以 < 開頭的是前面的標籤＋還有字，開頭的 <HOME> 留著（不然是 <PATH>）、只留最後一段的副檔名。"""
+        if PURE.fullmatch(inner):  # 幾對合成一段之後剛好是一個標籤
+            return inner
+        if not inner.startswith("<"):
+            return label(inner)
+        counts["路徑"] += 1
+        top = "<HOME>" if inner.startswith("<HOME>") else "<PATH>"
+        return f"{top}/.../<檔名已遮蔽>{_ext(SEP.split(inner)[-1])}"
+
+    def mark(out: str) -> str:
+        """第 4、5 步的標籤：有遮掉東西的（與出錯模組第一層的檔名）做記號，等一下往後延伸；<IPLOT>/、<PYTHON>/ 照留的不做。"""
+        return "<" + MARK + out[1:] if out.startswith(("<HOME>", "<PATH>", "<模組:")) else out
+
     starts = []
     for s in (ctx.iplot, *ctx.pythons, ctx.module, ctx.home):
         s = (s or "").rstrip("/\\")
         if s:
             starts += [s.replace("\\", "/"), s.replace("/", "\\")]
-    if starts:
-        alts = "|".join(re.escape(s) for s in sorted(dict.fromkeys(starts), key=len, reverse=True))
-        known = re.compile(f"(?:{alts}){KNOWN_END}{TAIL}", re.IGNORECASE)
-        text = known.sub(lambda m: label(m.group()), text)
-    # 5. 沒有引號的其他絕對路徑
-    text = OTHER_ABS.sub(lambda m: label(m.group()), text)
-    # 第 2 步再找一次：第 3–5 步換出來的標籤緊貼著引號時（\\a'HK2/…' 的 \\a 換成標籤），那個引號才當得了開頭
-    text = quoted(text)
+    alts = "|".join(re.escape(s) for s in sorted(dict.fromkeys(starts), key=len, reverse=True))
+    known = re.compile(f"(?:{alts}){KNOWN_END}{TAIL}", re.IGNORECASE) if starts else None
+
+    def paths(text: str) -> str:
+        """第 2–5 步（M8 最後審查之前的整串，原樣），接著往後延伸、中文引號那幾種的讀法、ASCII 引號再一次。"""
+        text = quoted(text, QUOTE_READINGS)
+        # 3. 括號裡的絕對路徑
+        text = PAREN_ABS.sub(lambda m: "(" + label(m["p"]) + ")", text)
+        # 4. 沒有引號的 file:// 網址（file:// 留著；排在其他絕對路徑前面：file:///D:/… 的 D: 後面那個 / 不是開頭），
+        # 與沒有引號的已知開頭（長的先比；/ 與 \ 兩種寫法都試；不分大小寫）
+        text = FILE_URL.sub(lambda m: m["head"] + mark(label(m["path"])), text)
+        if known:
+            text = known.sub(lambda m: mark(label(m.group())), text)
+        # 5. 沒有引號的其他絕對路徑
+        text = OTHER_ABS.sub(lambda m: mark(label(m.group())), text)
+        # 第 2 步再找一次：第 3–5 步換出來的標籤緊貼著引號時（\\a'HK2/…' 的 \\a 換成標籤），那個引號才當得了開頭
+        text = quoted(text, QUOTE_READINGS)
+        # 第 4、5 步的標籤往後延伸（中間那一段可以有 ( ) '），拿掉記號
+        text = EXTEND.sub(lambda m: f"<{m['top']}>/.../<檔名已遮蔽>{_ext(SEP.split(m['more'])[-1])}" if m["more"]
+                          else m.group().replace(MARK, ""), text).replace("<" + MARK, "<")
+        # 中文引號、反引號、全形引號（與 ASCII 引號裡的 file://）：第 2–5 步都跑完之後才配，只換引號裡還剩下的；
+        # 接著 ASCII 引號再找一次
+        return quoted(quoted(text + "\n", LATE_READINGS, late=True)[:-1], QUOTE_READINGS)
+
+    # 整串重複到不再變為止：換掉的那一段裡的引號、括號不見了，剩下的兩兩配起來、第 3–5 步看到的可能不一樣
+    # （幾對合成一段時前面那一對的閉引號被吃掉；括號裡的 ( 不見了，第 3 步才認得那一對括號），遮第二次才遮到的話
+    # 不冪等。第一次就是 M8 最後審查之前的整串加上後面那幾步；之後每一次只把字換成標籤，幾次就停（ROUNDS 只是保險）
+    for _ in range(ROUNDS):
+        before, text = text, paths(text)
+        if text == before:
+            break
 
     # 6. SyntaxError 訊息尾巴的檔名
     def syntax(m: re.Match) -> str:

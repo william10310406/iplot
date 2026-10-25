@@ -299,7 +299,7 @@ CASES = [
      '""HK2/王小明/a.txt""', '"".../<檔名已遮蔽>.txt""'),
 ]
 # 中文引號、反引號、全形引號也是引號（M8 最後審查）：每一種一列相對路徑、一列絕對路徑。相對的閉引號與後面的字留著；
-# 絕對的延伸到第 4、5 步會吃到的地方（名字裡可能也有同一種閉引號）：閉引號與後面的字吃到空白為止（舊的樣子，只多遮）
+# 絕對的先由第 4、5 步遮（名字裡可能也有同一種閉引號）：閉引號與後面的字吃到空白為止（沒有引號的樣子，只多遮）
 QUOTE_MARKS = (("corner", "「」"), ("white_corner", "『』"), ("curly_double", "“”"), ("curly_single", "‘’"),
                ("double_angle", "《》"), ("angle", "〈〉"), ("backtick", "``"), ("full_width_double", "＂＂"),
                ("full_width_single", "＇＇"))
@@ -309,8 +309,8 @@ CASES += [row for name, (o, c) in QUOTE_MARKS for row in (
 CASES += [
     ("curly_single_with_apostrophe", {},  # ’ 也是撇號：最短的 ‘Bob’ 沒有分隔符號，配到這一行最後一個 ’ 的那一對才是路徑
      "讀不到‘Bob’s/王小明.txt’，請確認", "讀不到‘.../<檔名已遮蔽>.txt’，請確認"),
-    ("corner_after_a_masked_opener", {},  # 每一個開引號各配到它後面第一個閉引號：第一對以 < 開頭不算，第二對照樣遮
-     "「<IPLOT>/x 「HK2/王小明/a.txt」", "「<IPLOT>/x 「.../<檔名已遮蔽>.txt」"),
+    ("corner_after_a_masked_opener", {},  # 每一個開引號各配到它後面第一個閉引號：第二對照樣遮；第一對是「像標籤＋還有字」
+     "「<IPLOT>/x 「HK2/王小明/a.txt」", "「<PATH>/.../<檔名已遮蔽>.txt」"),  # （<IPLOT>/x 不是標籤），兩對合起來整段遮
     ("unquoted_path_swallows_a_closing_mark", {},  # 開引號在上一行（配不到）：沒有引號的路徑吃到空白為止，閉引號也吃掉
      "「第一行\n/Volumes/USB/學生/王小明.csv」，請確認", "「第一行\n<PATH>/.../<檔名已遮蔽>"),
     ("home_then_a_closing_mark", {},  # 家目錄緊接著閉引號：不以分隔符號為界，不算家目錄，整段當成其他的絕對路徑
@@ -326,19 +326,68 @@ CASES += [
      "讀不到 C:\\Users\\laoban\\Desktop\\「HK2」\\王小明.docx", "讀不到 <HOME>/.../<檔名已遮蔽>.docx"),
     ("curly_quotes_inside_an_unquoted_path", {},
      "讀不到 /Users/laoban/Desktop/“期末”王小明.docx", "讀不到 <HOME>/.../<檔名已遮蔽>.docx"),
-    ("absolute_path_in_corner_quotes_with_corner_quotes_inside", {},  # 第一個 」 是名字裡的：延伸到空白為止，整段遮
+    ("absolute_path_in_corner_quotes_with_corner_quotes_inside", {},  # 第一個 」 是名字裡的：第 4 步吃到空白為止，整段遮
      "讀不到「/Users/laoban/作業/「論語」心得_王小明.txt」", "讀不到「<HOME>/.../<檔名已遮蔽>"),
-    ("double_slash_in_corner_quotes", {},  # 開頭兩個 /：第 5 步不認（//server/…），第 2 步一樣延伸到空白為止
-     "讀不到「//server/share/王小明.txt」", "讀不到「<PATH>/.../<檔名已遮蔽>"),
+    # 中文引號、反引號、全形引號的讀法排在第 2–5 步之後（最後審查的第二輪）：那一對裡面剩下的——第 4、5 步不認的路徑，
+    # 或「標籤＋還有字」（第 4、5 步停在閉引號前面）——整段換成一個標籤，閉引號與後面的字留著
+    ("double_slash_in_corner_quotes", {},  # 開頭兩個 /：第 5 步不認（//server/…）
+     "讀不到「//server/share/王小明.txt」", "讀不到「<PATH>/.../<檔名已遮蔽>.txt」"),
     ("one_segment_absolute_path_in_corner_quotes", {},  # 只有一段：第 5 步也不認
-     "讀不到「/王小明.csv」，請確認", "讀不到「<PATH>/.../<檔名已遮蔽>"),
-    # 第 4、5 步停在閉引號前面的（最後一段有空白、名字裡有 ' 或括號）：照一對遮到閉引號，閉引號後面的留著
-    ("space_in_the_last_segment_in_corner_quotes", {},
+     "讀不到「/王小明.csv」，請確認", "讀不到「<PATH>/.../<檔名已遮蔽>.csv」，請確認"),
+    ("space_in_the_last_segment_in_corner_quotes", {},  # 第 5 步遮到空白為止，剩下 <PATH>/.../<檔名已遮蔽> Xiaoming.txt
      "讀不到「/Volumes/USB/學生/Wang Xiaoming.txt」，請確認", "讀不到「<PATH>/.../<檔名已遮蔽>.txt」，請確認"),
+    ("space_in_the_last_segment_in_corner_quotes_at_home", {},  # 家目錄的標籤＋還有字：開頭照樣是 <HOME>
+     "讀不到「/Users/laoban/Desktop/Wang Xiaoming.txt」", "讀不到「<HOME>/.../<檔名已遮蔽>.txt」"),
+    ("apostrophe_and_space_in_the_last_segment_in_corner_quotes", {},  # 最後一段的 ' 擋住第 5 步：剩下 's 王小明.csv
+     "讀不到「/Volumes/USB/學生/Bob's 王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>.csv」"),
+    ("module_label_and_more_in_corner_quotes", {},  # 開頭不是 <HOME>、<PATH> 的標籤＋還有字：換成 <PATH>
+     "讀不到「/Users/laoban/iPLoT/modules/科學計算/HK2/Wang Xiaoming.py」", "讀不到「<PATH>/.../<檔名已遮蔽>.py」"),
+    ("space_in_the_last_segment_of_a_quoted_file_url", {},  # ASCII 引號裡的 file://：第 4 步遮到空白為止，之後整段換
+     "ValueError: 'file:///Volumes/USB/學生/Wang Xiaoming.html' is not a valid path",
+     "ValueError: 'file://<PATH>/.../<檔名已遮蔽>.html' is not a valid path"),
+    ("labels_alone_in_corner_quotes_are_left_alone", {},  # 裡面剛好是一個標籤的不換：iPLoT 自己的、出錯模組第一層的照留
+     "見「/Users/laoban/iPLoT/core/runner.py」與「/Users/laoban/iPLoT/modules/科學計算/hk_tk.py」",
+     "見「<IPLOT>/core/runner.py」與「<模組:科學計算>/hk_tk.py」"),
+    # 資料夾名裡有括號或 '（Windows 的「新增資料夾 (2)」、Bob's）：第 4、5 步的標籤往後延伸到最後一段，整段遮（M8 之前就漏）
     ("apostrophe_in_an_absolute_path_in_corner_quotes", {},
-     "讀不到「/Volumes/USB/Bob's/王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>.csv」"),
-    ("parentheses_in_a_windows_path_in_corner_quotes", WIN,  # Windows 的「新增資料夾 (2)」
-     "讀不到「D:\\學生 (2)\\王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>.csv」"),
+     "讀不到「/Volumes/USB/Bob's/王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>"),
+    ("parentheses_in_a_windows_path_in_corner_quotes", WIN,
+     "讀不到「D:\\學生 (2)\\王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>"),
+    ("parentheses_in_an_unquoted_windows_path", WIN, "讀不到 D:\\學生 (2)\\王小明.csv", "讀不到 <PATH>/.../<檔名已遮蔽>.csv"),
+    ("parentheses_in_an_unquoted_windows_path_with_slashes", WIN,
+     "讀不到 D:/學生 (2)/王小明.csv", "讀不到 <PATH>/.../<檔名已遮蔽>.csv"),
+    ("new_folder_2_in_a_windows_home", WIN,
+     "讀不到 C:\\Users\\laoban\\Desktop\\新增資料夾 (2)\\王小明.csv", "讀不到 <HOME>/.../<檔名已遮蔽>.csv"),
+    ("apostrophe_in_an_unquoted_path", {}, "讀不到 /Volumes/USB/Bob's/王小明.csv", "讀不到 <PATH>/.../<檔名已遮蔽>.csv"),
+    # 中文引號裡的絕對路徑，前面的資料夾有 (2)、後面的名字裡有同一種閉引號（第二輪的複審找到的 P）：
+    # 第 5 步把 (2) 後面那一截另外遮掉，往後延伸時兩個標籤併成一個
+    ("parentheses_then_corner_quotes_in_corner_quotes", {},
+     "讀不到「/Volumes/USB/學生 (2)/「HK2」/王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>"),
+    ("parentheses_then_corner_quotes_in_corner_quotes_at_home", {},
+     "讀不到「/Users/laoban/Desktop/作業 (2)/「HK2」/王小明.csv」", "讀不到「<HOME>/.../<檔名已遮蔽>"),
+    ("parentheses_then_corner_quotes_in_corner_quotes_on_windows", WIN,
+     "讀不到「D:\\學生 (2)\\「HK2」\\王小明.csv」", "讀不到「<PATH>/.../<檔名已遮蔽>"),
+    ("parentheses_then_book_titles_in_book_titles", {},
+     "讀不到《/Volumes/USB/作業 (1)/《論語》/王小明.txt》", "讀不到《<PATH>/.../<檔名已遮蔽>"),
+    # ‘…’ 落在沒有引號的絕對路徑裡（‘期中’ 資料夾、O’Brien；第二輪的複審找到的 S）：第 4、5 步先整段遮，‘’ 之後才配
+    ("curly_single_folders_in_an_unquoted_path", {},
+     "讀不到 /Volumes/USB/‘期中’/‘HK2’/王小明.csv", "讀不到 <PATH>/.../<檔名已遮蔽>.csv"),
+    ("curly_single_folders_in_a_home_path", {},
+     "FileNotFoundError: /Users/laoban/作業/‘論語’/‘心得’/王小明.txt not found.",
+     "FileNotFoundError: <HOME>/.../<檔名已遮蔽>.txt not found."),
+    ("curly_single_folders_in_a_windows_path", WIN,
+     "C:\\Users\\laoban\\Desktop\\‘期中’\\‘HK2’\\王小明.docx", "<HOME>/.../<檔名已遮蔽>.docx"),
+    ("curly_quotes_before_an_apostrophe_path", {},
+     "按了‘開始’之後：/Volumes/USB/O’Brien/王小明.csv 打不開", "按了‘開始’之後：<PATH>/.../<檔名已遮蔽>.csv 打不開"),
+    ("curly_quotes_in_english_before_an_apostrophe_path", {},
+     "I clicked ‘Run’ and got /Users/laoban/Bob’s/王小明.csv", "I clicked ‘Run’ and got <HOME>/.../<檔名已遮蔽>.csv"),
+    # 中文引號裡的相對路徑，閉引號後面緊接著 / 或 \：第 5 步把 /a.txt」/… 當成絕對路徑先遮，閉引號在標籤裡；
+    # 開引號一直開到行尾（第二輪：只排在第 5 步之後的話，前面那一半露出來）
+    ("closing_mark_glued_to_a_slash", {},
+     "讀不到「HK2/王小明/a.txt」/「HK2/李大華/b.txt」", "讀不到「.../<檔名已遮蔽>"),
+    ("backtick_glued_to_a_path", {}, "讀不到 `HK2/王小明/a.txt`/x/y", "讀不到 `.../<檔名已遮蔽>"),
+    ("unclosed_corner_quote_reaches_the_line_end", {},  # 沒有閉引號的開引號後面有路徑：到行尾整段遮（多遮，接受）
+     "請按「確定 /Volumes/a/b 試試\n下一行", "請按「.../<檔名已遮蔽>\n下一行"),
     ("colon_glued_to_a_path", {}, "RuntimeError: 讀不到:/Volumes/USB/學生/王小明.csv",
      "RuntimeError: 讀不到:<PATH>/.../<檔名已遮蔽>.csv"),
     ("colon_glued_to_a_windows_path", WIN, "RuntimeError: 讀不到:D:\\學生\\王小明.csv",
@@ -379,17 +428,25 @@ NOISY_PATHS = ("'HK2/王小明_B11201234/a.txt'", "'HK2\\\\王小明_B11201234\\
                "「HK2/王小明_B11201234/a.txt」", "‘HK2/王小明_B11201234/a.txt’", "`HK2/王小明_B11201234/a.txt`",
                # 中文引號、書名號、反引號裡的絕對路徑，名字裡又有同一種閉引號（最後審查的複審）
                "「/Volumes/USB/「HK2」/王小明_B11201234/a.txt」", "《/Users/laoban/作業/《論語》心得_王小明_B11201234.txt》",
-               "`/Volumes/USB/學生/王小明_B11201234/a.txt`")
+               "`/Volumes/USB/學生/王小明_B11201234/a.txt`",
+               # 最後一段前面是中文字：閉引號後面緊接著 / 或 \ 時，第 5 步從那個 / 起當成絕對路徑（第二輪）
+               "「HK2/B11201234_王小明/a.txt」", "`HK2/B11201234_王小明/a.txt`")
 NOISY_SUFFIXES = ("", " not found", "。")
 # 引號湯：前綴是這些記號任取 0–2 個接起來，接一個 NOISY_PATHS，後面再接 0–1 個記號
 SOUP = ("'", '"', "/", "\\", " ", "a", "1", "王", "<", "C:")
 # 資料夾或檔名裡有中文的閉引號（《論語》心得_王小明.txt、「HK2」/王小明.csv）：絕對路徑在什麼前後、什麼引號裡都整段遮。
-# 湯與噪音句只把記號放在路徑外面，抓不到這一種（最後審查 A 停在閉引號，後半段連名字一起露出來，複審才找到）
-CLOSER_BASES = ("/Users/laoban/作業", "/Volumes/USB/作業")
+# 湯與噪音句只把記號放在路徑外面，抓不到這一種（最後審查 A 停在閉引號，後半段連名字一起露出來，複審才找到）。
+# 前面的資料夾有 (2) 或 '（Windows 的「新增資料夾 (2)」、Bob's）的也一樣（第二輪的複審：中文引號裡的那一種漏過）
+CLOSER_BASES = ("/Users/laoban/作業", "/Volumes/USB/作業", "/Volumes/USB/學生 (2)", "/Users/laoban/Bob's")
 CLOSER_NAMES = tuple(name for o, c in ("「」", "『』", "“”", "‘’", "《》", "〈〉") for name in (
     f"{o}論語{c}心得_王小明.txt", f"{o}HK2{c}/王小明.txt", f"王小明{o}期中{c}.txt", f"{o}期中{c}/王小明/a.txt"))
 CLOSER_WRAPS = (("讀不到 ", ""), ("FileNotFoundError: ", " not found."), ("讀不到:", ""), ("讀不到「", "」"),
                 ("讀不到《", "》，請確認"), ("讀不到`", "`"), ("讀不到 '", "'"), ("讀不到 (", ")"), ("打不開 file://", ""))
+# 中文引號、反引號、全形引號裡的相對路徑，閉引號後面緊接著分隔符號與字：第 5 步把 /a.txt」/x 當成絕對路徑先遮，
+# 閉引號在標籤裡（第二輪的 CJK 湯找到的）。前面不放落單的同種引號（那是照引號本身分不出來的那一類）
+GLUED_MARKS = ("「」", "『』", "“”", "‘’", "《》", "〈〉", "``", "＂＂", "＇＇")
+GLUED_AFTER = ("/x", "\\x", "/「HK2/李大華/b.txt」", "\\作業\\b.txt，請確認")
+GLUED_BEFORE = ("讀不到", "讀不到 ", "FileNotFoundError: ")
 
 # 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
 SAMPLE = (
@@ -474,6 +531,15 @@ def test_closing_marks_inside_an_absolute_path_never_leak(load):
     ctx = redact.Ctx(**MAC)
     for base, name, (before, after) in itertools.product(CLOSER_BASES, CLOSER_NAMES, CLOSER_WRAPS):
         text = f"{before}{base}/{name}{after}"
+        once = redact.redact(text, ctx)[0]
+        assert "王小明" not in once and redact.redact(once, ctx)[0] == once, (text, once)
+
+
+def test_closing_mark_glued_to_a_separator_never_leaks(load):
+    redact = load("redact")
+    ctx = redact.Ctx(**MAC)
+    for (o, c), after, before in itertools.product(GLUED_MARKS, GLUED_AFTER, GLUED_BEFORE):
+        text = f"{before}{o}HK2/B11201234_王小明/a.txt{c}{after}"
         once = redact.redact(text, ctx)[0]
         assert "王小明" not in once and redact.redact(once, ctx)[0] == once, (text, once)
 
