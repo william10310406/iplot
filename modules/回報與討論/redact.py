@@ -19,8 +19,9 @@ FRAME = re.compile(r'^(?P<lead>(?:[ \t]*\|)?[ \t]*)File "(?P<path>.*)", line (?P
 FROZEN = re.compile(r"<frozen [^\n]*>")
 # 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到同一種引號為止：Can't 的撇號配不錯、路徑裡可以有空白
 QUOTED_ABS = re.compile(r"(?P<q>['\"])(?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)(?:(?!(?P=q))[^\n])*)(?P=q)")
-# 其他引號裡的字（同一行）；裡面含 / 或 \ 的才當路徑
-QUOTED = re.compile(r"'[^'\n]*'|\"[^\"\n]*\"")
+# 其他引號裡的字（同一行）；裡面含 / 或 \ 的才當路徑。單引號前面緊貼 ASCII 英數字的是撇號（Can't、couldn't），
+# 不當開頭：不然它跟路徑開頭的那個引號配成一對，Can't read 'HK2/王小明/…' 的相對路徑就漏了
+QUOTED = re.compile(r"(?<![A-Za-z0-9])'[^'\n]*'|\"[^\"\n]*\"")
 # 括號裡的絕對路徑，整段（可以有空白）：ImportError 的 (…/My Drive/…/工具.py)
 PAREN_ABS = re.compile(r"\((?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)[^()\n]*)\)")
 # 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 的最後一個 / 或 \，最後一段到空白、引號、括號為止
@@ -46,9 +47,10 @@ EXT = re.compile(r"\.[A-Za-z0-9]{1,8}")
 SEP = re.compile(r"[/\\]+")
 # Windows 的磁碟機開頭（分隔符號換成 / 之後）
 DRIVE = re.compile(r"[A-Za-z]:/")
-# 換過之後還是 iPLoT 自己、Python 的 frame：原始碼留著
-SAFE = ("<IPLOT>/core/", "<IPLOT>/ui/", "<IPLOT>/lib/", "<IPLOT>/main.py", "<PYTHON>/",
-        "<IPLOT>/<USER>/", "<IPLOT>/<USER>.py")  # 帳號名剛好是 core、lib、main：第一次遮完的標籤是這樣
+# 換過之後還是 iPLoT 自己、Python 的 frame：原始碼留著。<IPLOT>/ 後面第一段含 <USER> 或 <下一層模組> 的也算：
+# 帳號名或下一層模組的名字剛好是 core、lib、main、re 這種（是第一段的一部分），第一次遮完的標籤是
+# <IPLOT>/<下一層模組>/runner.py、<IPLOT>/co<下一層模組>/…、<IPLOT>/<USER>.py；不認的話遮第二次會把留著的原始碼拿掉，不冪等
+SAFE = re.compile(r"<PYTHON>/|<IPLOT>/(?:core/|ui/|lib/|main\.py|[^/]*<(?:USER|下一層模組)>)")
 # 路徑被遮掉的記號：結果含這幾個的才算一個「路徑」
 MASKED = ("<HOME>", "<PATH>", "<檔名已遮蔽>")
 SKIPPED = "  （原始碼已略過）"
@@ -156,7 +158,7 @@ def _frames(text: str, label, counts: dict[str, int]) -> str:
         lead, path = m["lead"], m["path"]
         new = label(path)
         out.append(f'{lead}File "{new}", line {m["n"]}{m["tail"]}')
-        if new.startswith(SAFE) or FROZEN.fullmatch(path):
+        if SAFE.match(new) or FROZEN.fullmatch(path):
             continue
         prefix = lead[:lead.find("|") + 1]  # 到 | 為止（含 |）；沒有 | 是空字串
         depth = len(lead) - len(prefix)

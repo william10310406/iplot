@@ -220,6 +220,10 @@ CASES = [
     ("user_named_core", {"users": ("core",)}, RUNNER,
      '  File "<IPLOT>/<USER>/runner.py", line 72, in run_module\n    exec(code, ns)\n    ~~~~^^^^^^^^^^\n'),
     ("user_case_variants", {"users": ("User", "user")}, "owner User and user", "owner <USER> and <USER>"),
+    ("apostrophe_before_quoted_relative", {},  # Can't 的撇號不能當開頭的引號：不然跟路徑開頭的那個配成一對
+     "Can't read 'HK2/王小明/成績.csv'", "Can't read '.../<檔名已遮蔽>.csv'"),
+    ("secret_named_core", {"secrets": ("core",)}, RUNNER,  # 下一層模組剛好叫 core：遮第二次也不能把原始碼拿掉
+     '  File "<IPLOT>/<下一層模組>/runner.py", line 72, in run_module\n    exec(code, ns)\n    ~~~~^^^^^^^^^^\n'),
 ]
 
 # 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
