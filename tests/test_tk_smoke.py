@@ -3,6 +3,7 @@
 import dataclasses
 import gc
 import os
+import shutil
 import subprocess
 import sys
 import types
@@ -17,7 +18,7 @@ _probe.update()  # macOS 的 Tk 9.0：沒跑過事件迴圈就 destroy 的視窗
 _probe.destroy()
 
 from core.core import Core  # noqa: E402
-from core.text import T  # noqa: E402
+from core.text import REPORT_MODULE, T  # noqa: E402
 from core.types import DEFAULT_CONFIG, ErrorInfo  # noqa: E402
 from ui.tk import Panel  # noqa: E402
 
@@ -146,6 +147,63 @@ def test_open_file_button_uses_core_action(home, panel, monkeypatch):
     [opener] = [panel.messages.nametowidget(n) for n in panel.messages.window_names()]
     opener.invoke()
     assert seen == [("edit", Path("/m/iplot.py"), panel.core.config.editor, 7)]
+
+
+REPORTER_SRC = "def on_error(app, error):\n    app.log(repr(error))\n"
+
+
+def embedded(panel):
+    """訊息區裡的鈕，照畫面上的順序（window_names() 不是這個順序）。"""
+    return [panel.messages.nametowidget(v).cget("text") for _, v, _ in panel.messages.dump("1.0", "end", window=True)]
+
+
+def failing(home, panel):
+    """一個 1/0 的模組 A，跑一次；回傳那一筆 ErrorInfo。"""
+    make_module(home / "modules", "A", "def run(app):\n    1/0\n")
+    core = started(home, panel)
+    [a] = [m for m in core.all_modules() if m.title == "A"]
+    error = core.press(a).error
+    panel.root.update()
+    return error
+
+
+def test_no_report_button_without_the_report_module(home, panel):
+    """modules/回報與討論 不是模組：錯誤那一列照舊只有「打開檔案」。"""
+    failing(home, panel)
+    assert embedded(panel) == [T["open_file"]]
+
+
+def test_report_button_hands_the_same_error_to_on_error(home, panel):
+    """D110：有「回報與討論」才多一顆「回報這個問題」，排在「打開檔案」後面；按了把同一筆錯誤交給它的 on_error，
+    而且 quiet（沒有「完成」那一行，設計第 17 節第 6 條）。"""
+    make_module(home / "modules", REPORT_MODULE, REPORTER_SRC)
+    error = failing(home, panel)
+    assert embedded(panel) == [T["open_file"], T["report_issue"]]
+    button(panel.messages, T["report_issue"]).invoke()
+    panel.root.update()
+    assert repr(error) in messages(panel)
+    assert T["done"].split("{seconds")[0].format(title=REPORT_MODULE) not in messages(panel)
+
+
+def test_report_button_alone_when_the_error_has_no_file(home, panel):
+    """沒有檔案的錯（核心的錯）沒有「打開檔案」，「回報這個問題」照樣有。"""
+    make_module(home / "modules", REPORT_MODULE, REPORTER_SRC)
+    started(home, panel)
+    panel.report(ErrorInfo("RuntimeError", "x", None, None, "", "core", None))
+    assert embedded(panel) == [T["report_issue"]]
+
+
+def test_report_button_rescans_when_the_module_is_gone(home, panel, monkeypatch):
+    """畫出鈕之後「回報與討論」被刪掉：按了只重掃，不跑任何東西。"""
+    make_module(home / "modules", REPORT_MODULE, REPORTER_SRC)
+    core = started(home, panel)
+    panel.report(ErrorInfo("RuntimeError", "x", None, None, "", "core", None))
+    shutil.rmtree(home / "modules" / REPORT_MODULE)
+    seen = []
+    monkeypatch.setattr(core, "press", lambda *a, **kw: seen.append("press"))
+    monkeypatch.setattr(core, "rescan", lambda: seen.append("rescan"))
+    button(panel.messages, T["report_issue"]).invoke()
+    assert seen == ["rescan"]
 
 
 def test_right_click_menu_uses_core_action(home, panel, monkeypatch):

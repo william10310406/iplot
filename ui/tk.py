@@ -7,7 +7,8 @@ from tkinter import filedialog, messagebox, simpledialog
 
 from core.core import Core
 from core.errors import describe
-from core.text import T
+from core.scan import is_module, module_info
+from core.text import REPORT_MODULE, T
 from core.types import ErrorInfo, Group, ModuleInfo, Scope
 
 COLORS = {"here": "blue", "parent": "red", "extra": "green"}
@@ -121,18 +122,28 @@ class Panel:
         self._write(text + "\n")
 
     def report(self, error: ErrorInfo) -> None:
-        """訊息區顯示完整 traceback，最後才是白話那一句和「打開檔案」：捲到底看到的是人話，不是 traceback。"""
-        button = None
+        """訊息區顯示完整 traceback，最後才是白話那一句和「打開檔案」：捲到底看到的是人話，不是 traceback。
+        modules/回報與討論 是模組時多一顆「回報這個問題」，按了交給它的 on_error（D110）。"""
+        buttons = []
         if error.file is not None:
-            button = tk.Button(self.messages, text=T["open_file"], command=lambda: self.core.action(
-                "edit", error.file, self.core.config.editor, error.line))
-        self._write(error.traceback_text + describe(error) + "\n", button)
+            buttons.append(tk.Button(self.messages, text=T["open_file"], command=lambda: self.core.action(
+                "edit", error.file, self.core.config.editor, error.line)))
+        if is_module(self.core.home / "modules" / REPORT_MODULE):
+            buttons.append(tk.Button(self.messages, text=T["report_issue"], command=lambda: self._report(error)))
+        self._write(error.traceback_text + describe(error) + "\n", *buttons)
 
-    def _write(self, text: str, button: tk.Button | None = None) -> None:
+    def _report(self, error: ErrorInfo) -> None:
+        folder = self.core.home / "modules" / REPORT_MODULE
+        if not is_module(folder):  # 畫出鈕之後被刪了
+            return self.core.rescan()
+        self.core.press(module_info(folder, folder.parent.resolve(), "here"), "on_error", (error,), quiet=True)
+
+    def _write(self, text: str, *buttons: tk.Button) -> None:
         self.messages.configure(state="normal")
         self.messages.insert("end", text)
-        if button is not None:
+        for button in buttons:
             self.messages.window_create("end", window=button)
+        if buttons:
             self.messages.insert("end", "\n")
         self.messages.configure(state="disabled")
         self.messages.see("end")
