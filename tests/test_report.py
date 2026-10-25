@@ -512,6 +512,14 @@ def test_module_of_top_level(load, tmp_path):
     (folder / "hk_tk.py").write_text("x = 1\n", encoding="utf-8", newline="\n")
     error = ErrorInfo("KeyError", "'score'", folder / "hk_tk.py", 3, "", "module", "科學計算")
     assert report.module_of(error) == (folder, ())
+    # 指到模組的符號連結：核心不當它是模組（core.scan.is_module），這裡也不認
+    link = tmp_path / "modules" / "連結"
+    try:
+        link.symlink_to(folder, target_is_directory=True)
+    except OSError:  # Windows 沒有建符號連結的權限
+        return
+    error = ErrorInfo("KeyError", "'score'", link / "hk_tk.py", 3, "", "module", "連結")
+    assert report.module_of(error) == (None, ())
 
 
 def test_module_of_deep_file_in_the_module(load, tmp_path):
@@ -651,11 +659,14 @@ def test_from_error_module_folder_gone_hides_name(load, tmp_path, web):
     # 按鈕按下去之前，那個資料夾被刪、改名或搬走（收作業會 rmtree 學生的資料夾）：不退回 error.module
     report = load("report")
     app = make_app(tmp_path / "iPLoT")
-    error = ErrorInfo("KeyError", "'score'", tmp_path / "不存在" / "王小明_B11201234" / "iplot.py", 3, "",
-                      "module", "王小明_B11201234")
+    gone = tmp_path / "不存在" / "王小明_B11201234" / "iplot.py"
+    tb = (f'Traceback (most recent call last):\n  File "{gone}", line 3, in run\n'
+          "    score = row['score']\nKeyError: 'score'\n")
+    error = ErrorInfo("KeyError", "'score'", gone, 3, tb, "module", "王小明_B11201234")
     rep = report.from_error(error, app)
     assert rep.title.startswith("[回報] <模組>：KeyError")
-    for leak in ("王小明", "B11201234"):
+    assert rep.ctx.secrets == ()  # error.module 不放進 secrets：叫 A 的模組會把整段 traceback 換爛
+    for leak in ("王小明", "B11201234", str(tmp_path)):
         assert leak not in rep.title and leak not in rep.body
     assert "找不到它的資料夾，名稱已遮蔽" in rep.body
 
@@ -668,7 +679,11 @@ def test_blank_report_has_environment_and_no_error(load, tmp_path, web):
     assert "- iPLoT：" in rep.body and "- 模組：" not in rep.body
 
 
-def test_short_env_has_no_paths(load, tmp_path, web):
-    out = load("report").short_env(make_app(tmp_path / "iPLoT"))
+def test_short_env_has_no_paths(load, tmp_path, monkeypatch, web):
+    # 作業系統那一段換成固定的：Debian 的 PRETTY_NAME「Debian GNU/Linux 12」帶一個 /，那不是路徑。
+    # 這裡測的是 short_env 自己不加路徑
+    report = load("report")
+    monkeypatch.setattr(report, "this_os", lambda: "macOS 26.5（arm64）")
+    out = report.short_env(make_app(tmp_path / "iPLoT"))
     assert out.startswith("iPLoT ")
     assert "/" not in out and "\\" not in out

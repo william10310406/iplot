@@ -1,6 +1,6 @@
 """回報的內容：環境（iPLoT、作業系統、Python、出錯的模組與版本）與內文（D112）。
-遮蔽一律交給 redact.redact，這裡不自己認路徑。core 只在 from_error 裡 import：直接執行（IPLOT_DIRECT=1）時
-core 不在 sys.path 上。"""
+遮蔽一律交給 redact.redact，這裡不自己認路徑。core 只在函式裡 import（module_of、from_error）：直接執行
+（IPLOT_DIRECT=1）時 core 不在 sys.path 上。"""
 
 import os
 import platform
@@ -13,7 +13,6 @@ from pathlib import Path
 import redact
 
 REPORTER = "0.1.0"  # 內文最後那一行的 HTML 註解帶的版本：跟 CHANGELOG.md 最上面那一節一樣（測試核）
-MARKER = "iplot.py"
 WHAT_ERROR = "（請寫一兩句：按了什麼、預期是什麼）"
 WHAT_BLANK = "（請寫：按了什麼、看到什麼、預期是什麼）"
 LOST = "<模組>"  # 出錯的模組找不到它的資料夾時，標題與那一句白話裡的名字（不退回 error.module）
@@ -80,26 +79,21 @@ def _nfc(name: str) -> str:
     return unicodedata.normalize("NFC", name)
 
 
-def _is_module(folder: Path) -> bool:
-    """跟 core.scan 一樣比對實際檔名（不分大小寫的磁碟上 iPLoT.py 不算）；讀不到就不是。"""
-    try:
-        return MARKER in os.listdir(folder) and (folder / MARKER).is_file()
-    except OSError:
-        return False
-
-
 def module_of(error) -> tuple[Path | None, tuple[str, ...]]:
     """出錯的模組的最上層模組資料夾，與中間那幾層下一層模組的名字（要藏的；從出錯的那一層往上）。
-    從 error.file 往上找第一個有 iplot.py、名字是 error.module 的資料夾，再往上到上一層沒有 iplot.py 為止
-    （設計第 17 節第 8 條）。核心與設定的錯誤、找不到那個資料夾的，回 (None, ())。"""
+    從 error.file 往上找第一個是模組、名字是 error.module 的資料夾，再往上到上一層不是模組為止
+    （設計第 17 節第 8 條）。「是模組」用核心的 is_module：符號連結不算、iPLoT.py 不算。
+    核心與設定的錯誤、找不到那個資料夾的，回 (None, ())。"""
+    from core.scan import is_module
+
     if error.file is None or error.module is None:
         return None, ()
     want = _nfc(error.module)
-    mod = next((p for p in Path(error.file).parents if _nfc(p.name) == want and _is_module(p)), None)
+    mod = next((p for p in Path(error.file).parents if _nfc(p.name) == want and is_module(p)), None)
     if mod is None:
         return None, ()
     names, top = [], mod
-    while top.parent != top and _is_module(top.parent):
+    while top.parent != top and is_module(top.parent):
         names.append(_nfc(top.name))
         top = top.parent
     return top, tuple(names)
