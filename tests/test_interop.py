@@ -172,9 +172,12 @@ def test_ensure_python_ok_puts_home_and_lib_first(load, tmp_path):
 
 def test_check_version(load):
     b = load("boot")
-    assert b.check_version("0.5.1", 3, "0.1.0") is None and b.check_version("0.5.0", 3, "0.1.0") is None
-    assert b.check_version("0.6.0", 3, "0.1.0") == "互通 0.1.0 支援 iPLoT 0.5，這台是 0.6.0。到工作坊看看互通有沒有新版。"
-    assert b.check_version("0.5.1", 2, "0.1.0") is not None
+    for found in ("0.5.0", "0.5.2", "0.6.0", "0.6.3"):  # 0.5 與 0.6 都認：先換互通、後按「更新」也行（D117）
+        assert b.check_version(found, 3, "0.2.0") is None, found
+    for found in ("0.4.9", "0.7.0"):
+        assert b.check_version(found, 3, "0.2.0") == (f"互通 0.2.0 支援 iPLoT 0.5、0.6，這台是 {found}。"
+                                                      "iPLoT 比較舊就按「更新」，比較新就到工作坊看看互通有沒有新版。")
+    assert b.check_version("0.6.0", 2, "0.2.0") is not None
 
 
 def test_alert_passes_text_as_arguments(load, capsys):
@@ -226,7 +229,7 @@ def test_own_version(load, tmp_path):
     assert boot.own_version(tmp_path) == "?"
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.2.0] - 2026-10-08\n\nx\n\n## [0.1.0]\n",
                                            encoding="utf-8")
-    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.1.0"
+    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.2.0"
 
 
 def test_boot_and_run_read_on_python_3_8():
@@ -1220,6 +1223,37 @@ def test_a_tilde_with_a_real_user_name_is_a_relative_path(load, home, entry, tmp
     make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
     assert entry.go(["A", f"~{me}/f.txt", "~/g.txt"], cwd=tmp_path) == 0
     assert [repr([tmp_path / f"~{me}" / "f.txt", Path.home() / "g.txt"])] in entry.wv.windows[0].calls("log")
+
+
+def test_expand_on_a_0_5_core_without_home_path(load, monkeypatch):
+    """iPLoT 0.5.x 的核心沒有 core.scan.home_path：照互通 0.1.0 的做法，不丟 ImportError（D117）。"""
+    from core import scan
+    run = load("run")
+    monkeypatch.delattr(scan, "home_path")
+    assert run._expand("~/g.txt") == Path.home() / "g.txt" and run._expand("a/b.txt") == Path("a/b.txt")
+    try:  # 0.1.0 的做法：pathlib 找不到那個使用者丟 RuntimeError 就照字面；Windows 不丟，猜成 C:\Users\<名字>
+        old = Path("~沒有這個人/f.txt").expanduser()
+    except RuntimeError:
+        old = Path("~沒有這個人/f.txt")
+    assert run._expand("~沒有這個人/f.txt") == old
+
+
+def test_the_same_interop_runs_before_and_after_updating_from_0_5_2_to_0_6_0(entry, home, monkeypatch, tmp_path):
+    """互通 0.2.0 先裝在 0.5.2 上（核心沒有 home_path），再按「更新」換成 0.6.0（「更新」不碰 modules/）：
+    同一份互通兩邊都跑得動，模組都跑了、沒有提示框（D117）。"""
+    import core
+    from core import scan
+    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
+    want = [repr([Path.home() / "g.txt", tmp_path / "x.txt"])]
+    for version in ("0.5.2", "0.6.0"):
+        entry.wv.windows.clear()          # FakeWebview.start 只觸發 windows[0]
+        with monkeypatch.context() as m:
+            m.setattr(core, "__version__", version)
+            if version == "0.5.2":
+                m.delattr(scan, "home_path")
+            assert entry.go(["A", "~/g.txt", "x.txt"], cwd=tmp_path) == 0, version
+            assert hasattr(scan, "home_path") == (version == "0.6.0")
+        assert want in entry.wv.windows[0].calls("log") and entry.alerts == [], version
 
 
 def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
