@@ -138,7 +138,7 @@ UPDATE_URL = "https://william10310406.github.io/iplot-workshop/update.json"
 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"
 ```
 
-從 0.5.1 換上來的，照 CHANGELOG 0.5.2 的兩件事做（換掉 `modules/工作坊`、把 `WORKSHOP_URL` 換成上面那一行；`docs/08_操作說明-0.5.2.md` 第 1.2 節）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
+從 0.5.x 換上來的，照 CHANGELOG 0.6.0 那一段做（`docs/08_操作說明-0.6.0.md` 第 1.2 節）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
 
 不想連網：把網址換成 `None`（不加引號），存檔，執行「重新啟動」；按下去只會說一句怎麼設定。要用別人放檔案的地方：換成那個人給的網址（字串，要加引號）。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，照上面那三行自己加上去；不加等於沒設定（`None`）。
 
@@ -274,7 +274,7 @@ python3 tools/publish.py --version 0.5.2 --ref HEAD --base-url "file://$(pwd)/�
 
 ### 上傳自己的模組
 
-要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.5.2.md](docs/08_操作說明-0.5.2.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
+要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.6.0.md](docs/08_操作說明-0.6.0.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
 
 ## 在面板外打開模組
 
@@ -317,7 +317,7 @@ python3 tools/publish.py --version 0.5.2 --ref HEAD --base-url "file://$(pwd)/�
 - **「匯入作業包」**（在「科學計算」的下一層）：選老師的 `t2026fscSpace` 資料夾，每個 `HKn.txt` 長成一格。
 - **「收作業」**（同一層）：選 TronClass 下載的檔（一人一個 `.zip` 或 `.txt`，或全班一包的 zip），可以多選；檔名裡看得出 HKn 就收進那一份，看不出來會問一次。
 - **批次模式（不開面板）**：在 `modules/科學計算/` 裡執行 `python3 hk_tk.py --batch ~/Downloads/HK5.zip --kit ~/Downloads/t2026fscSpace`，收進 zip 旁邊的 `HK5_收件/`（套件裝進 zip 旁邊的 `科學計算-venv/`），開一個全班名單的視窗，雙擊一個就開；Windows 未經實機驗證。
-- 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.5.2.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
+- 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.6.0.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
 
 ## 文件
 
