@@ -5,17 +5,21 @@ import getpass
 import importlib
 import itertools
 import os
+import platform
 import re
+import shutil
 import sys
 import types
 import webbrowser
 from pathlib import Path
 
 import pytest
-from conftest import FakeApp, make_module
+from conftest import FakeApp, FakeCore, FakeView, make_module
 
+from core.app import App
 from core.runner import run_module
 from core.scan import module_info
+from core.types import DEFAULT_CONFIG, ErrorInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "modules" / "回報與討論"
@@ -443,3 +447,228 @@ def test_real_traceback_from_tmp_leaks_nothing(load, tmp_path):
     assert "<IPLOT>/core/" in out  # 不寫死 runner.py：CI 的帳號就叫 runner
     files = re.findall(r'File "([^"]*)"', out)
     assert files and all(f.startswith("<") for f in files)
+
+
+# ── 環境與內文（report.py 前半）──
+
+def copied(home):
+    """把模組複製到 home/modules/回報與討論（不帶 回報/、__pycache__、.history），回它的 ModuleInfo。"""
+    folder = home / "modules" / MODULE.name
+    shutil.copytree(MODULE, folder, ignore=shutil.ignore_patterns("回報", "__pycache__", ".history"))
+    return module_info(folder, (home / "modules").resolve(), "here")
+
+
+def make_app(home):
+    """真的 App：app.home 是 tmp 的 iPLoT、app.version 是核心的版本；FakeCore 的 all_modules() 是空的。"""
+    return App(FakeCore(home, DEFAULT_CONFIG, FakeView()), copied(home))
+
+
+def child_tree(home):
+    """科學計算/、科學計算/HK2/、科學計算/HK2/王小明_B11201234/ 各有 iplot.py：學生的作業本身是下一層模組（D95）。回最深那個資料夾。"""
+    top = make_module(home / "modules", "科學計算")
+    return make_module(make_module(top, "HK2"), "王小明_B11201234")
+
+
+@pytest.mark.parametrize("mods, want", [({"ui.tk"}, "tkinter"), ({"ui.tk", "ui.web"}, "tkinter"), ({"ui.web"}, "網頁"),
+                                        (set(), "面板外")])
+def test_panel_kind(load, mods, want):
+    # 後備的 tkinter 面板裡兩個都在：先看 ui.tk
+    assert load("report").panel_kind(dict.fromkeys(mods)) == want
+
+
+@pytest.mark.parametrize("base, want", [
+    ("/Library/Frameworks/Python.framework/Versions/3.14", "python.org"),
+    ("/opt/homebrew/Cellar/python@3.12/3.12.13_2/Frameworks/Python.framework/Versions/3.12", "Homebrew"),
+    ("/opt/homebrew/opt/python@3.10/Frameworks/Python.framework/Versions/3.10", "Homebrew"),
+    ("/usr/local/Cellar/python@3.11/3.11.9/Frameworks/Python.framework/Versions/3.11", "Homebrew"),
+    ("/usr", "系統"), ("/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9", "系統"),
+    ("/usr/local", "其他"), ("/Users/laoban/.pyenv/versions/3.12.1", "其他"),
+    ("C:\\Users\\laoban\\AppData\\Local\\Programs\\Python\\Python312", "其他")])
+def test_python_source(load, base, want):
+    assert load("report").python_source(base) == want
+
+
+@pytest.mark.parametrize("args, kw, want", [
+    (("Darwin", "arm64"), {"mac": "26.5"}, "macOS 26.5（arm64）"),
+    (("Windows", "AMD64"), {"build": "22631"}, "Windows（build 22631，AMD64）"),
+    (("Linux", "x86_64"), {"linux": "Ubuntu 24.04 LTS"}, "Linux：Ubuntu 24.04 LTS（x86_64）"),
+    (("Linux", "x86_64"), {}, "Linux（x86_64）")])
+def test_os_line(load, args, kw, want):
+    assert load("report").os_line(*args, **kw) == want
+
+
+def test_this_os_never_names_the_machine(load):
+    # platform.node() 常常是「王老師的 MacBook」
+    report = load("report")
+    node = platform.node()
+    if not node:
+        pytest.skip("這台沒有主機名稱")
+    assert node not in report.this_os()
+
+
+def test_module_of_top_level(load, tmp_path):
+    report = load("report")
+    folder = make_module(tmp_path / "modules", "科學計算")
+    (folder / "hk_tk.py").write_text("x = 1\n", encoding="utf-8", newline="\n")
+    error = ErrorInfo("KeyError", "'score'", folder / "hk_tk.py", 3, "", "module", "科學計算")
+    assert report.module_of(error) == (folder, ())
+
+
+def test_module_of_deep_file_in_the_module(load, tmp_path):
+    # 學生的作業在模組資料夾深處，那兩層沒有 iplot.py：不是下一層模組，沒有名字要藏
+    report = load("report")
+    folder = make_module(tmp_path / "modules", "科學計算")
+    work = folder / "HK2" / "王小明_B11201234" / "作業.py"
+    work.parent.mkdir(parents=True)
+    work.write_text("1/0\n", encoding="utf-8", newline="\n")
+    error = ErrorInfo("ZeroDivisionError", "division by zero", work, 1, "", "module", "科學計算")
+    assert report.module_of(error) == (folder, ())
+
+
+def test_module_of_child_module_hides_its_name(load, tmp_path):
+    report = load("report")
+    student = child_tree(tmp_path)
+    error = ErrorInfo("KeyError", "'score'", student / "iplot.py", 3, "", "module", "王小明_B11201234")
+    assert report.module_of(error) == (tmp_path / "modules" / "科學計算", ("王小明_B11201234", "HK2"))
+
+
+def test_module_of_core_error(load):
+    report = load("report")
+    error = ErrorInfo("KeyError", "'a'", ROOT / "core" / "core.py", 120, "", "core", None)
+    assert report.module_of(error) == (None, ())
+
+
+@pytest.mark.parametrize("files, want", [
+    ({".origin": "url: x\nversion: 0.2.0\n"}, "0.2.0（工作坊）"),
+    ({"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [0.3.1] - 2026-10-01\n\nx\n"}, "0.3.1"),
+    ({}, "版本未知")])
+def test_module_version(load, tmp_path, files, want):
+    report = load("report")
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8", newline="\n")
+    assert report.module_version(tmp_path) == want
+
+
+def test_reporter_version_matches_changelog(load):
+    # 內文最後那一行的 HTML 註解帶的版本：跟這個模組 CHANGELOG.md 最上面那一節一樣
+    text = (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
+    heads = [h for h in re.findall(r"^## \[([^\]]*)\]", text, re.M) if h.casefold() != "unreleased"]
+    assert heads[0] == load("report").REPORTER
+
+
+def test_fence_is_longer_than_any_tilde_run(load):
+    report = load("report")
+    assert report.fence("a ~~~~~~ b") == "~~~~~~~"
+    assert report.fence("x") == "~~~~"
+
+
+ENV = ["- iPLoT：0.6.0（面板：網頁）", "- 作業系統：macOS 26.5（arm64）", "- Python：3.14.7（python.org）",
+       "- 模組：科學計算 0.2.0（工作坊）"]
+SENTENCE = "模組『科學計算』第 120 行出錯：KeyError，'score'"
+TB = ('Traceback (most recent call last):\n  File "<模組:科學計算>/hk_tk.py", line 120, in grade\n'
+      "  （原始碼已略過）\nKeyError: 'score'\n")
+
+
+def test_body_layout(load):
+    report = load("report")
+    assert report.body("（請寫一兩句：按了什麼、預期是什麼）", ENV, SENTENCE, TB) == (
+        "### 發生了什麼\n"
+        "（請寫一兩句：按了什麼、預期是什麼）\n"
+        "\n"
+        "### 環境\n"
+        "- iPLoT：0.6.0（面板：網頁）\n"
+        "- 作業系統：macOS 26.5（arm64）\n"
+        "- Python：3.14.7（python.org）\n"
+        "- 模組：科學計算 0.2.0（工作坊）\n"
+        "\n"
+        "### 錯誤\n"
+        "模組『科學計算』第 120 行出錯：KeyError，'score'\n"
+        "\n"
+        "~~~~text\n"
+        "Traceback (most recent call last):\n"
+        '  File "<模組:科學計算>/hk_tk.py", line 120, in grade\n'
+        "  （原始碼已略過）\n"
+        "KeyError: 'score'\n"
+        "~~~~\n"
+        "\n"
+        f"<!-- iPLoT 回報 {report.REPORTER} -->")
+
+
+def test_body_without_traceback_text(load):
+    # MissingHandler、config.py 的型別錯：traceback_text 是 ""
+    report = load("report")
+    out = report.body("x", ENV, SENTENCE, "")
+    assert "~~~~text\n（沒有 traceback）\n~~~~\n" in out
+
+
+def test_body_without_error(load):
+    report = load("report")
+    out = report.body("x", ENV, None, None)
+    assert "### 錯誤" not in out and "~~~~" not in out
+    assert out.startswith("### 發生了什麼\nx\n\n### 環境\n- iPLoT：")
+    assert out.endswith("- 模組：科學計算 0.2.0（工作坊）\n\n<!-- iPLoT 回報 " + report.REPORTER + " -->")
+
+
+ERROR_KINDS = {"module": "NameError", "core": "KeyError", "config": "TypeError"}
+
+
+@pytest.mark.parametrize("source, module, want", [("module", "科學計算", "[回報] 科學計算：NameError（iPLoT 9.9.9）"),
+                                                  ("core", None, "[回報] 核心：KeyError（iPLoT 9.9.9）"),
+                                                  ("config", None, "[回報] config.py：TypeError（iPLoT 9.9.9）")])
+def test_from_error_title(load, tmp_path, monkeypatch, source, module, want):
+    report = load("report")
+    monkeypatch.setattr(App, "version", "9.9.9")
+    home = tmp_path / "iPLoT"
+    app = make_app(home)
+    file = {"module": make_module(home / "modules", "科學計算") / "iplot.py",
+            "core": ROOT / "core" / "core.py", "config": home / "config.py"}[source]
+    error = ErrorInfo(ERROR_KINDS[source], "x", file, None, "", source, module)
+    assert report.from_error(error, app).title == want
+
+
+def test_from_error_redacts_title_and_body(load, tmp_path, web):
+    report = load("report")
+    home = tmp_path / "iPLoT"
+    app = make_app(home)
+    student = child_tree(home)
+    missing = student / "成績.csv"
+    tb = (f'Traceback (most recent call last):\n  File "{student / "iplot.py"}", line 3, in <module>\n'
+          f"    open('{missing}')\nFileNotFoundError: [Errno 2] No such file or directory: '{missing}'\n")
+    error = ErrorInfo("FileNotFoundError", f"[Errno 2] No such file or directory: '{missing}'",
+                      student / "iplot.py", 3, tb, "module", "王小明_B11201234")
+    rep = report.from_error(error, app)
+    assert rep.category == "BUG"
+    assert rep.title.startswith("[回報] 科學計算：FileNotFoundError")
+    for leak in ("王小明", "B11201234", str(tmp_path)):
+        assert leak not in rep.title and leak not in rep.body
+    assert "出錯的是它的下一層模組，名稱已遮蔽" in rep.body
+    for part in ("- iPLoT：", "（面板：網頁）", "- 作業系統：", "- Python：", "### 錯誤"):
+        assert part in rep.body
+    assert "下一層模組" in rep.notice
+
+
+def test_from_error_module_folder_gone_hides_name(load, tmp_path, web):
+    # 按鈕按下去之前，那個資料夾被刪、改名或搬走（收作業會 rmtree 學生的資料夾）：不退回 error.module
+    report = load("report")
+    app = make_app(tmp_path / "iPLoT")
+    error = ErrorInfo("KeyError", "'score'", tmp_path / "不存在" / "王小明_B11201234" / "iplot.py", 3, "",
+                      "module", "王小明_B11201234")
+    rep = report.from_error(error, app)
+    assert rep.title.startswith("[回報] <模組>：KeyError")
+    for leak in ("王小明", "B11201234"):
+        assert leak not in rep.title and leak not in rep.body
+    assert "找不到它的資料夾，名稱已遮蔽" in rep.body
+
+
+def test_blank_report_has_environment_and_no_error(load, tmp_path, web):
+    report = load("report")
+    rep = report.blank(make_app(tmp_path / "iPLoT"), "BUG")
+    assert (rep.category, rep.title) == ("BUG", "[回報] ")
+    assert "### 錯誤" not in rep.body
+    assert "- iPLoT：" in rep.body and "- 模組：" not in rep.body
+
+
+def test_short_env_has_no_paths(load, tmp_path, web):
+    out = load("report").short_env(make_app(tmp_path / "iPLoT"))
+    assert out.startswith("iPLoT ")
+    assert "/" not in out and "\\" not in out
