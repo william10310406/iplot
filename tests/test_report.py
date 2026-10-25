@@ -226,6 +226,8 @@ CASES = [
      '  File "<IPLOT>/<下一層模組>/runner.py", line 72, in run_module\n    exec(code, ns)\n    ~~~~^^^^^^^^^^\n'),
     ("bytes_repr_relative", {},  # bytes 的 repr：b 緊貼開頭的引號，不是撇號，裡面的相對路徑照樣遮
      "No such file or directory: b'HK2/王小明/a.txt'", "No such file or directory: b'.../<檔名已遮蔽>.txt'"),
+    ("one_letter_word_apostrophe", {},  # 一個字母的字（B）接撇號會當開頭的引號：裡面沒有 / 或 \ 就不算一對，不吃掉路徑的開引號
+     "Plan B's 'HK2/王小明/a.txt'", "Plan B's '.../<檔名已遮蔽>.txt'"),
 ]
 
 # 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
