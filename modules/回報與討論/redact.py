@@ -17,20 +17,29 @@ KEYS = ("路徑", "使用者名稱", "疑似學號", "電子郵件", "原始碼"
 FRAME = re.compile(r'^(?P<lead>(?:[ \t]*\|)?[ \t]*)File "(?P<path>.*)", line (?P<n>\d+)(?P<tail>[^\n]*)$')
 # 本來就沒有原始碼的 frame：<frozen runpy> 這種（<string>、<stdin> 不算：底下是 eval／exec 的那個字串）
 FROZEN = re.compile(r"<frozen [^\n]*>")
-# 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到同一種引號為止：Can't 的撇號配不錯、路徑裡可以有空白
-QUOTED_ABS = re.compile(r"(?P<q>['\"])(?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)(?:(?!(?P=q))[^\n])*)(?P=q)")
-# 其他引號裡的路徑（同一行）。一對引號（開引號到同一行的下一個同種引號）只有在裡面的字
-# (a) 含 / 或 \、(b) 頭尾都不是空白時才算一對，兩種引號都一樣；不算的話這個開引號就跳過，下一個引號再試。
-# 判斷的是「這一對像不像一個路徑」：路徑不以空白開頭或結尾，而上一對的閉引號到下一對的開引號之間
-# 幾乎都是空白開頭、空白結尾——'x ' / 'HK2/…'、'王小明' 2026/10/25 交的 'HK2/…'、Plan B's 1/2 'HK2/…'
-# 的那一段都含 /，但頭尾是空白，不成立，路徑的開引號照樣當開頭；{"k": "v", 'p': 'HK2/…', "z": 1} 也不會
-# 把 "v" 與 "z" 中間整段當路徑遮掉。沒有分隔符號的一對（'x '、"a"、Plan B's 的 's '）也不成立。
-# 單引號前面緊貼 ASCII 英數字的是撇號（Can't、couldn't），不當開頭。例外是字串的前綴：前面是一個 b r u f
-# （大小寫）或兩個 b r（rb、br…），而前綴本身前面不是 ASCII 英數字的，照樣當開頭——bytes／raw 的 repr：
+# 單引號當得了開頭的條件：前面不是 ASCII 英數字（Can't、couldn't 的撇號不當開頭），或前面是一個 b r u f
+# （大小寫）或兩個 b r（rb、br…）、而前綴本身前面不是 ASCII 英數字——bytes／raw 的 repr：
 # No such file or directory: b'HK2/王小明/a.txt'
-QUOTED = re.compile(r"(?:(?<![A-Za-z0-9])|(?<=(?<![A-Za-z0-9])[bBrRuUfF])|(?<=(?<![A-Za-z0-9])[bBrR][bBrR]))"
-                    r"'(?![\s'])(?=[^'\n]*[/\\])[^'\n]*(?<!\s)'"
-                    r"|\"(?![\s\"])(?=[^\"\n]*[/\\])[^\"\n]*(?<!\s)\"")
+OPEN = r"(?:(?<![A-Za-z0-9])|(?<=(?<![A-Za-z0-9])[bBrRuUfF])|(?<=(?<![A-Za-z0-9])[bBrR][bBrR]))"
+# 同一個條件，給倒過來的字用：開引號前面的字在倒過來的字裡排在它後面，lookbehind 換成 lookahead
+BACK_OPEN = r"(?:(?![A-Za-z0-9])|(?=[bBrRuUfF](?![A-Za-z0-9]))|(?=[bBrR][bBrR](?![A-Za-z0-9])))"
+# 引號裡的路徑（第 2 步）。同一行的引號怎麼兩兩配，沒有一種規則永遠配得對（撇號、落單的引號、閉引號後面緊接著 /、
+# 路徑頭尾多打的空白各騙倒過一種）：改成下面幾種讀法各配一次，哪一種讀法配出來的一對像路徑就遮（聯集，寧可多遮）。
+# 兩種引號分開配，不放在同一個 | 裡：雙引號那一對不算的時候，裡面的單引號那一對照樣配得到（"<'HK2/…'"）
+QUOTE_READINGS = (
+    # (a) 引號後面緊接著絕對路徑開頭（/、X:\、X:/、\\），到下一個同種引號：路徑裡可以有空白，前面緊貼什麼都算
+    re.compile(r"'(?:/|[A-Za-z]:[\\/]|\\\\)[^'\n]*'"),
+    re.compile(r'"(?:/|[A-Za-z]:[\\/]|\\\\)[^"\n]*"'),
+    # (b) 從左邊起兩兩配，每一對都吃掉：open(' HK2/…') 這種頭尾有空白的路徑
+    re.compile(OPEN + r"'[^'\n]*'"),
+    re.compile(r'"[^"\n]*"'),
+    # (c) 裡面含 / 或 \、頭尾不是空白才算一對，不算的話這個開引號跳過、下一個引號再試：
+    # Plan B's 'HK2/…'、'x ' / 'HK2/…'（撇號或上一對的閉引號到路徑的開引號那一段頭尾是空白，不算）
+    re.compile(OPEN + r"'(?![\s'])(?=[^'\n]*[/\\])[^'\n]*(?<!\s)'"),
+    re.compile(r'"(?![\s"])(?=[^"\n]*[/\\])[^"\n]*(?<!\s)"'),
+)
+# (d) 從右邊起兩兩配：在倒過來的字上配，配到的位置再換回來——'' HK2/…'（從左邊配是 ''，路徑的開引號落單）
+QUOTE_READINGS_BACK = (re.compile(r"'[^'\n]*'" + BACK_OPEN), re.compile(r'"[^"\n]*"'))
 # 括號裡的絕對路徑，整段（可以有空白）：ImportError 的 (…/My Drive/…/工具.py)
 PAREN_ABS = re.compile(r"\((?P<p>(?:/|[A-Za-z]:[\\/]|\\\\)[^()\n]*)\)")
 # 路徑開頭之後的延伸：吃到同一行裡、不跨過引號 ( ) < > 的最後一個 / 或 \，最後一段到空白、引號、括號為止
@@ -205,16 +214,31 @@ def redact(text: str, ctx: Ctx) -> tuple[str, dict[str, int]]:
     # 1. frame
     text = _frames(text, label, counts)
 
-    # 2. 引號裡的路徑：先找引號後面緊接著絕對路徑開頭的，再找其他含 / 或 \、頭尾不是空白的（QUOTED 本身就只配這種）；
-    # 以 < 開頭（遮過的記號）、含 :// 的（網址）原樣
-    def quoted(m: re.Match) -> str:
-        s, inner = m.group(), m.group()[1:-1]
-        if not inner.startswith("<") and "://" not in inner:
-            return s[0] + label(inner) + s[-1]
-        return s
+    # 2. 引號裡的路徑：每一種讀法配出來的一對，裡面含 / 或 \、去掉頭尾空白之後不以 < 開頭（遮過的記號）、
+    # 不含 ://（網址）的才算；重疊或共用一個引號的幾對合成一段。每一段裡面整個換成一個標籤，引號與頭尾的空白
+    # 留在標籤外面（'HK2/…/成績.csv ' → '.../<檔名已遮蔽>.csv '）
+    def quoted(text: str) -> str:
+        n = len(text)
+        pairs = [m.span() for pattern in QUOTE_READINGS for m in pattern.finditer(text)]
+        pairs += [(n - m.end(), n - m.start()) for pattern in QUOTE_READINGS_BACK for m in pattern.finditer(text[::-1])]
+        spans = []
+        for s, e in sorted(pairs):
+            inner = text[s + 1:e - 1]
+            if not ("/" in inner or "\\" in inner) or inner.strip().startswith("<") or "://" in inner:
+                continue
+            if spans and s < spans[-1][1]:  # 重疊，或這一對的開引號就是上一段的閉引號
+                spans[-1] = (spans[-1][0], max(spans[-1][1], e))
+            else:
+                spans.append((s, e))
+        out, pos = [], 0
+        for s, e in spans:
+            inner = text[s + 1:e - 1]
+            lead, trail = inner[:len(inner) - len(inner.lstrip())], inner[len(inner.rstrip()):]
+            out += [text[pos:s + 1], lead, label(inner.strip()), trail]
+            pos = e - 1
+        return "".join(out) + text[pos:]
 
-    text = QUOTED_ABS.sub(lambda m: m["q"] + label(m["p"]) + m["q"], text)
-    text = QUOTED.sub(quoted, text)
+    text = quoted(text)
     # 3. 括號裡的絕對路徑
     text = PAREN_ABS.sub(lambda m: "(" + label(m["p"]) + ")", text)
     # 4. 沒有引號的已知開頭（長的先比；/ 與 \ 兩種寫法都試；不分大小寫）
@@ -229,6 +253,8 @@ def redact(text: str, ctx: Ctx) -> tuple[str, dict[str, int]]:
         text = known.sub(lambda m: label(m.group()), text)
     # 5. 沒有引號的其他絕對路徑
     text = OTHER_ABS.sub(lambda m: label(m.group()), text)
+    # 第 2 步再找一次：第 3–5 步換出來的標籤緊貼著引號時（\\a'HK2/…' 的 \\a 換成標籤），那個引號才當得了開頭
+    text = quoted(text)
 
     # 6. SyntaxError 訊息尾巴的檔名
     def syntax(m: re.Match) -> str:

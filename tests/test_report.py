@@ -235,17 +235,37 @@ CASES = [
      "ValueError: '王小明' 2026/10/25 交的 'HK2/王小明/成績.csv'", "ValueError: '王小明' 2026/10/25 交的 '.../<檔名已遮蔽>.csv'"),
     ("dict_repr_keeps_context", {},  # "v" 的閉引號到 "z" 的開引號那一段結尾是空白：不算一對，不把中間整段遮掉
      '{"k": "v", \'p\': \'HK2/王小明/x.txt\', "z": 1}', '{"k": "v", \'p\': \'.../<檔名已遮蔽>.txt\', "z": 1}'),
-    ("one_letter_apostrophe_then_slash", {},  # B' 當開頭、裡面有 1/2 的 /，但結尾是空白：不算一對
-     "Plan B's 1/2 'HK2/x.txt'", "Plan B's 1/2 '.../<檔名已遮蔽>.txt'"),
+    ("one_letter_apostrophe_then_slash", {},  # B' 也可能是 b'…' 的開引號：那樣讀 's 1/2 ' 是一對（含 /），跟路徑那一對
+     "Plan B's 1/2 'HK2/x.txt'", "Plan B'.../<檔名已遮蔽>.txt'"),  # 共用一個引號，合起來整段遮（多遮，接受）
+    ("trailing_space_inside_quotes", {},  # 檔名後面多打一個空白是 FileNotFoundError 的老原因：空白留在標籤外面
+     "FileNotFoundError: [Errno 2] No such file or directory: 'HK2/王小明_B11201234/成績.csv '",
+     "FileNotFoundError: [Errno 2] No such file or directory: '.../<檔名已遮蔽>.csv '"),
+    ("leading_space_inside_quotes", {}, "open(' HK2/王小明/a.txt')", "open(' .../<檔名已遮蔽>.txt')"),
+    ("full_width_space_inside_quotes", {},  # 全形空白也算頭尾的空白（str.strip 的空白）
+     "'　HK2/王小明/a.txt'", "'　.../<檔名已遮蔽>.txt'"),
+    ("closing_quote_then_slash", {},  # 'x ' 的閉引號後面緊接著 /：當成絕對路徑讀是一對，跟路徑那一對共用一個引號，合起來整段遮
+     "'x '/ 'HK2/王小明/a.txt'", "'x '<PATH>/.../<檔名已遮蔽>.txt'"),
+    ("slash_between_pairs", {}, '"a"/"HK2/王小明/a.txt"', '"a"<PATH>/.../<檔名已遮蔽>.txt"'),
+    ("lone_quote_before_spaced_path", {},  # 從左邊配是 ''（沒有分隔符號），從右邊配才是路徑那一對
+     "'' HK2/王小明/a.txt'", "'' .../<檔名已遮蔽>.txt'"),
+    ("single_inside_double_starting_with_lt", {},  # 雙引號那一對以 < 開頭，原樣；裡面的單引號那一對分開找，照樣遮
+     '"<\'HK2/王小明/a.txt\'"', '"<\'.../<檔名已遮蔽>.txt\'"'),
+    ("unc_glued_to_quote", {},  # 字面上是兩個反斜線接 a：第 5 步把它遮成標籤之後，緊貼標籤的引號才當得了開頭（再找一次）
+     "\\\\a'HK2/王小明/a.txt'", "<PATH>/.../<檔名已遮蔽>'.../<檔名已遮蔽>.txt'"),
 ]
 
 # 引號裡的相對路徑前面有各種會騙引號配對的字：撇號、一個字母的字接撇號、沒有分隔符號的一對、中間有 / 的日期與分數、
-# 字串前綴、dict／list 的 repr。前綴裡不放「王小明」（只看路徑裡的那一個有沒有漏；'王小明' 在前面的那一句是第 58 列）
+# 字串前綴、dict／list 的 repr、閉引號後面緊接著 /、落單的引號、緊貼引號的 UNC 開頭（字面上是兩個反斜線接 a）；
+# 路徑本身也可以頭尾有空白。前綴裡不放「王小明」（只看路徑裡的那一個有沒有漏；'王小明' 在前面的那一句是第 58 列）
 NOISY_PREFIXES = ("Can't ", "Plan B's ", "it's 1/2 ", "'x ' / ", '"a" / ', "'李大華' 2026/10/25 ", "[b'a', ",
-                  "{'k': 'v', ", "rock'n'roll ", "'分數' / ", "b's ", "isn't 3/4 ", 'x = "" / ', "(", "")
+                  "{'k': 'v', ", "rock'n'roll ", "'分數' / ", "b's ", "isn't 3/4 ", 'x = "" / ', "(", "",
+                  "'x '/ ", '"a"/', "'", "\\\\a")
 NOISY_PATHS = ("'HK2/王小明_B11201234/a.txt'", "'HK2\\\\王小明_B11201234\\\\a.txt'",  # 第二個是 Windows 的 repr：兩個反斜線
-               "b'HK2/王小明_B11201234/a.txt'", '"HK2/王小明_B11201234/a.txt"')
+               "b'HK2/王小明_B11201234/a.txt'", '"HK2/王小明_B11201234/a.txt"',
+               "' HK2/王小明_B11201234/a.txt'", "'HK2/王小明_B11201234/a.txt '")
 NOISY_SUFFIXES = ("", " not found", "。")
+# 引號湯：前綴是這些記號任取 0–2 個接起來，接一個 NOISY_PATHS，後面再接 0–1 個記號
+SOUP = ("'", '"', "/", "\\", " ", "a", "1", "王", "<", "C:")
 
 # 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
 SAMPLE = (
@@ -304,6 +324,24 @@ def test_quoted_relative_path_is_masked_in_noisy_lines(load):
         once = redact.redact(text, ctx)[0]
         assert "王小明" not in once and "B11201234" not in once, (text, once)
         assert redact.redact(once, ctx)[0] == once, (text, once)
+
+
+def test_quote_soup_is_idempotent_and_only_ambiguous_quotes_leak(load):
+    redact = load("redact")
+    ctx = redact.Ctx(**MAC)
+    prefixes = ["", *("".join(p) for n in (1, 2) for p in itertools.product(SOUP, repeat=n))]
+    for prefix, path, suffix in itertools.product(prefixes, NOISY_PATHS, ("", *SOUP)):
+        text = prefix + path + suffix
+        once = redact.redact(text, ctx)[0]
+        assert redact.redact(once, ctx)[0] == once, (text, once)
+        if "王小明" in once:
+            quote = path[-1]
+            # 漏得掉的只有兩類，都是照引號本身分不出來的：
+            # (1) 前綴的最後一個字是 ASCII 英數字：開引號緊貼英數字是撇號的規則（crab'…'），照設計不當開頭
+            # (2) 後綴就是路徑的那種引號、前綴裡也有一個：路徑自己的兩個引號外面都有落單的同一種引號，
+            #     哪兩個配成一對都說得通
+            glued = prefix[-1:].isascii() and prefix[-1:].isalnum()
+            assert glued or (suffix == quote and quote in prefix), (text, once)
 
 
 def test_redact_counts(load):
