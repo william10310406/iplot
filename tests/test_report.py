@@ -1177,7 +1177,8 @@ def test_page_copies_only_the_redacted_full_text(load, tmp_path, web):
         before = page[:at]
         assert before[:before.rindex(".select()")].endswith('$("full")')
     assert page.count(".select()") == page.count('$("full").select()')  # 標題、內文那兩格從不 select()
-    # 頁面最後一行是 HINT：字由 render 的資料帶進來，page.html 不另抄一份
+    # 預覽頁（#edit 顯示的時候）最後一行是 HINT：字由 render 的資料帶進來，page.html 不另抄一份；
+    # #menu 上藏著它（test_page_shows_the_hint_only_with_the_preview）
     report = load("report")
     assert report.HINT not in page and '$("hint").textContent = data.hint' in page
     tree = Tree(page)
@@ -1595,11 +1596,8 @@ def test_on_error_in_tk_logs_the_redacted_full_text_when_it_can_neither_save_nor
     assert len(opened) == 1
 
 
-@pytest.mark.parametrize("how", ["deleted", "big5"])
-def test_on_error_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, how):
-    # 按「確定」之前草稿被刪了、或用 Big5（cp950）存了：一句話、不開瀏覽器，不變成「回報與討論」自己的錯誤
-    names = []
-
+def spoiler(how, names):
+    """草稿那一步按「確定」之前（View 的 on_confirm）：deleted 把草稿刪掉，big5 用 Big5（cp950）蓋過；草稿的檔名記進 names。"""
     def spoil(view):
         draft = next(e[2] for e in view.events if e[:2] == ("action", "edit"))
         names.append(draft.name)
@@ -1608,12 +1606,17 @@ def test_on_error_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, h
         else:
             draft.write_bytes("[回報] 科學計算：KeyError\n\n我改過了\n".encode("cp950"))
 
-    home = tmp_path / "iPLoT"
-    view = press_tk(home, spoil)
+    return spoil
+
+
+def assert_unreadable(view, home, how, name, tmp_path, opened):
+    """讀不回草稿：訊息區一句話、不開瀏覽器、不存 .txt、不指檔案。那一句不提任何一顆鈕：同一個 _by_file 從
+    「回報這個問題」（on_error）與選單的「1」（run）都會走到，兩邊按的不一樣（控制者的裁定）。"""
     line, = [s for s in view.logs if s.startswith("讀不回草稿")]
-    assert "沒有送出" in line and "再按一次「回報這個問題」" in line
+    assert "沒有送出" in line and "請再試一次（會開新的一份）" in line
+    assert "再按一次" not in line and "「" not in line
     if how == "big5":
-        assert f"草稿留在 回報/{names[0]}" in line and "UTF-8" in line
+        assert f"草稿留在 回報/{name}" in line and "UTF-8" in line
     else:
         assert "<檔名已遮蔽>.md" in line  # FileNotFoundError 的字帶著草稿的完整路徑：遮過
     for leak in (str(tmp_path), os.path.realpath(tmp_path)):
@@ -1622,6 +1625,15 @@ def test_on_error_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, h
     assert opened == []
     assert not list((home / "modules" / "回報與討論" / "回報").glob("*.txt"))
     assert not [e for e in view.events if e[:2] == ("action", "reveal")]
+
+
+@pytest.mark.parametrize("how", ["deleted", "big5"])
+def test_on_error_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, how):
+    # 按「確定」之前草稿被刪了、或用 Big5（cp950）存了：一句話、不開瀏覽器，不變成「回報與討論」自己的錯誤
+    names = []
+    home = tmp_path / "iPLoT"
+    view = press_tk(home, spoiler(how, names))
+    assert_unreadable(view, home, how, names[0], tmp_path, opened)
 
 
 # ── 草稿存不了、寫到一半的檔、tkinter 那一頭截過時也說（Task 7 修補第 2 輪）──
@@ -1768,7 +1780,7 @@ def start_api(load, tmp_path, monkeypatch):
     return api, top.folder
 
 
-def test_run_opens_the_menu_page(tmp_path, web, opened):
+def test_run_opens_the_menu_page(load, tmp_path, web, opened):
     home = tmp_path / "iPLoT"
     view = View()
     result, _ = press(home, view, "run")
@@ -1777,20 +1789,27 @@ def test_run_opens_the_menu_page(tmp_path, web, opened):
     assert len(pages) == 1 and pages[0][1] == "回報與討論"
     data = page_data(pages[0][2])
     assert data["mode"] == "menu" and data["modules"] == [] and data["short_env"].startswith("iPLoT ")
+    assert data["hint"] == load("report").HINT  # 換到預覽那一段才顯示（page.html 的 show），字一樣從資料來
     assert [e[0] for e in view.events] == ["page-open", "page-closed"]  # 沒送：不寫訊息區、不指檔案
     assert opened == []
 
 
-def test_menu_lists_only_top_level_modules(tmp_path, web):
-    # 下一層模組的名字是學生的名字與學號（D95）：不列進清單，run 給 Api 的 starts 裡也沒有
+@pytest.mark.parametrize("twice", [False, True])
+def test_menu_lists_only_top_level_modules(tmp_path, web, twice):
+    # 下一層模組的名字是學生的名字與學號（D95）：不列進清單，run 給 Api 的 starts 裡也沒有。
+    # twice：另一個根底下也有一個最上層的「科學計算」（config 的 ROOTS 多一個資料夾）：選單裡只列一次
     home = tmp_path / "iPLoT"
     bodies = []
+    modules = science(home)
+    if twice:
+        other = tmp_path / "另一個根"
+        modules += (module_info(make_module(other, "科學計算"), other.resolve(), "extra"),)
 
     def hook(html, api):
         bodies.extend([api.start("科學計算")["body"], api.start("王小明_B11201234")["body"]])
 
     view = View(hook=hook)
-    result, _ = press(home, view, "run", core=ModulesCore(home, DEFAULT_CONFIG, view, science(home)))
+    result, _ = press(home, view, "run", core=ModulesCore(home, DEFAULT_CONFIG, view, modules))
     assert result.ok, result.error
     html = view.events[0][2]
     assert page_data(html)["modules"] == ["科學計算"]
@@ -1895,13 +1914,26 @@ def test_menu_fills_the_edit_page_then_measures():
         assert f'id="{button}" type="button" disabled>{text}</button>' in page, button
     assert tree.ids["module"][0] == "select" and '<option value="">（不指定模組）</option>' in page
     assert 'createElement("option")' in page and ".textContent = name" in page  # 模組的名字當文字放
-    assert '$("menu").hidden = data.mode !== "menu"' in page
+    assert page.count("show(data.mode);") == 1  # 一開始照 mode：menu 先顯示 #menu（show 見下一個測試）
     body = handler(page, "report")
     start = body.index('.start($("module").value)')
     then = body.index(".then(", start)
     title, text = body.index('$("title").value = r.title', then), body.index('$("body").value = r.body', then)
-    assert then < title and then < text < body.index("measure();", max(title, text))
-    assert re.search(r'\$\("edit"\)\.hidden = false', body) and re.search(r'\$\("menu"\)\.hidden = true', body)
+    shown = body.index('show("edit");', max(title, text))  # 放好了才藏 #menu、顯示 #edit
+    assert then < title and then < text < shown < body.index("measure();", shown)
+
+
+def test_page_shows_the_hint_only_with_the_preview():
+    # 「完整報告已複製…」只在預覽那一段（#edit）看得到：#menu 上什麼都還沒複製，提建議、問問題、看論壇也從不複製
+    # （控制者的裁定）。#hint 跟 #edit 在同一個地方、照同一個條件藏：一開始照 mode，「回報問題」換到 #edit 時一起出來
+    page = PAGE.read_text(encoding="utf-8")
+    script = page.split("<script>", 1)[1]
+    sets = {k: re.findall(rf'\$\("{k}"\)\.hidden = ([^;\n]*);', script) for k in ("menu", "edit", "hint")}
+    assert sets == {"menu": ['mode !== "menu"'], "edit": ['mode !== "edit"'], "hint": ['mode !== "edit"']}
+    show = script.split("function show(mode) {", 1)[1].split("\n}", 1)[0]
+    assert all(f'$("{k}").hidden = ' in show for k in sets)  # 三個都只在 show 裡設
+    assert script.count("show(data.mode);") == 1 and script.count('show("edit");') == 1
+    assert 'show("edit");' in handler(page, "report")
 
 
 @pytest.mark.parametrize("answer, want", [("1", "edit"), ("2", "IDEA"), ("3", "QA"), ("4", "forum"), (None, None),
@@ -1954,3 +1986,16 @@ def test_run_in_tk_gives_the_url_when_the_browser_fails(load, tmp_path, tk, monk
     result, _ = press(home, view, "run")
     assert result.ok, result.error
     assert view.logs == [f"瀏覽器打不開。把這串網址整個複製到瀏覽器的網址列：{load('forum').FORUM}"]
+
+
+@pytest.mark.parametrize("how", ["deleted", "big5"])
+def test_run_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, how):
+    # 選單的「1」重用 _by_file：讀不回草稿的那一句跟「回報這個問題」那條路一樣，不叫人去按這條路上沒有的鈕
+    names = []
+    home = tmp_path / "iPLoT"
+    view = View(on_confirm=spoiler(how, names))
+    view.answer, view.answers = "1", [True]
+    result, _ = press(home, view, "run")
+    assert result.ok, result.error
+    assert view.asks == [MENU] and names[0].endswith("-回報.md")
+    assert_unreadable(view, home, how, names[0], tmp_path, opened)

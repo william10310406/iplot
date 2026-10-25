@@ -1,6 +1,7 @@
 <!doctype html>
 <!-- 「回報與討論」的預覽頁（iplot.py 的 render 把資料以 JSON 放進最下面那個 application/json）。
      mode 是 "edit"（on_error）：一開始就是 #edit；"menu"（run）：先是 #menu 的四個入口，「回報問題」叫 start 換到 #edit。
+     最後一行的 #hint（「完整報告已複製…」）只跟著 #edit 顯示（show）：#menu 上什麼都還沒複製。
      頁面 → Python：pywebview.api.measure（量網址長度、拿 Python 遮過的全文）、send（再遮一次、存檔、開瀏覽器）；
      #menu 另外叫 start（拿那一份回報）、go（提建議、問問題）、open_forum（看論壇）。
      剪貼簿：按鈕的 click 裡、叫 send 之前，用 execCommand 複製 #full 那一格；#full 只放 measure 回來的、遮過的全文，
@@ -149,6 +150,13 @@ $("again").addEventListener("click", () => {
   $("result").textContent = sentence + clip(copied, true);
 });
 
+// 顯示 #menu 或 #edit。#hint 跟著 #edit：它說「完整報告已複製」，#menu 上什麼都還沒複製（提建議、問問題、看論壇也從不複製）
+function show(mode) {
+  $("menu").hidden = mode !== "menu";
+  $("edit").hidden = mode !== "edit";
+  $("hint").hidden = mode !== "edit";
+}
+
 // #menu（run 的那一頁）的四顆鈕：連上 Python 之前、等 Python 回來的時候是灰的
 function menuReady(on) {
   for (const id of ["report", "idea", "qa", "forum"]) $(id).disabled = !on;
@@ -160,8 +168,7 @@ $("report").addEventListener("click", () => {
     $("notice").textContent = r.notice;
     $("title").value = r.title;
     $("body").value = r.body;
-    $("menu").hidden = true;
-    $("edit").hidden = false;
+    show("edit");
     measure();  // .value 放進去不會觸發 input 事件：自己量一次，#full 換成這一份、最新的那一次回來，按鈕才亮
   }).catch((e) => {
     $("said").textContent = "打不開回報的那一頁：" + why(e);
@@ -186,8 +193,7 @@ $("idea").addEventListener("click", () => browse(() => window.pywebview.api.go("
 $("qa").addEventListener("click", () => browse(() => window.pywebview.api.go("QA"), ASKED));
 $("forum").addEventListener("click", () => browse(() => window.pywebview.api.open_forum(), "已經在瀏覽器打開了。"));
 
-$("edit").hidden = data.mode !== "edit";
-$("menu").hidden = data.mode !== "menu";
+show(data.mode);
 if (data.mode === "edit") {  // menu 的資料沒有這三個：等 start 回來才放
   $("notice").textContent = data.notice;
   $("title").value = data.title;

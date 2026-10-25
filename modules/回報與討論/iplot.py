@@ -197,9 +197,10 @@ def run(app):
     if report.panel_kind() == "tkinter":
         return _menu_by_ask(app)
     env = report.short_env(app)
-    names = [m.name for m in app.modules if m.level != "child"]
+    names = list(dict.fromkeys(m.name for m in app.modules if m.level != "child"))  # 不同的根底下同名的只列一次
     saved = []
-    data = {"mode": "menu", "modules": names, "short_env": env, "hint": report.HINT}
+    data = {"mode": "menu", "modules": names, "short_env": env,
+            "hint": report.HINT}  # HINT：「回報問題」換到預覽那一段才顯示（page.html 的 show），#menu 上什麼都還沒複製
     api = Api(report.blank(app, "BUG"), "回報", saved, {n: report.blank(app, "BUG", n) for n in names}, env)
     app.page("回報與討論", render(data), api)
     _reveal(app, api)
@@ -292,11 +293,12 @@ def _by_file(app, rep: report.Report, kind: str) -> None:
 
 
 def _unreadable(exc: Exception, draft: str, ctx: redact.Ctx) -> str:
-    """草稿讀不回來時訊息區的那一句（不開瀏覽器）：編碼不對的草稿還在，叫人這次存成 UTF-8；刪掉了的就只叫人再按一次。"""
+    """草稿讀不回來時訊息區的那一句（不開瀏覽器）：編碼不對的草稿還在，叫人這次存成 UTF-8；刪掉了的就只叫人再試一次。
+    不提任何一顆鈕：「回報這個問題」（on_error）與選單的「1」（run）都走 _by_file，兩邊按的不一樣。"""
     if isinstance(exc, UnicodeDecodeError):  # 它的字只有編碼的名字、那個位元組與位置，沒有路徑：不經過 _why
-        return (f"讀不回草稿（{exc}），沒有送出；改過的草稿留在 回報/{draft}，再按一次「回報這個問題」"
-                "會開新的一份，這次請存成 UTF-8。")
-    return f"讀不回草稿（{_why(exc, ctx)}），沒有送出；請再按一次「回報這個問題」。"
+        return (f"讀不回草稿（{exc}），沒有送出；改過的草稿留在 回報/{draft}，請再試一次（會開新的一份），"
+                "這次存成 UTF-8。")
+    return f"讀不回草稿（{_why(exc, ctx)}），沒有送出；請再試一次（會開新的一份）。"
 
 
 def _tk_sentence(p: Path | None, err: Exception | None, copied: bool, new_url: str, ctx: redact.Ctx,
