@@ -1,13 +1,20 @@
 """隨附模組「回報與討論」（modules/回報與討論）：遮蔽、內文、網址、截斷、預覽頁與面板的流程（M8、D110–D116）。
 不開瀏覽器（autouse 的替身）、不連網、不寫進 repo（跑模組的流程先複製到 tmp）；遮蔽的表用假的 Ctx，只有端對端的兩個用這台機器。"""
 
+import getpass
 import importlib
+import os
+import re
 import sys
 import types
 import webbrowser
 from pathlib import Path
 
 import pytest
+from conftest import FakeApp, make_module
+
+from core.runner import run_module
+from core.scan import module_info
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "modules" / "回報與討論"
@@ -75,3 +82,289 @@ def test_forum_has_four_categories(load):
 def test_report_folder_is_ignored_by_git():
     lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "modules/回報與討論/回報/" in lines
+
+
+# ── 遮蔽（redact.py）：表格式的例子一律用假的 Ctx（家目錄 /Users/laoban、C:\Users\laoban 只寫在這裡）──
+
+MAC = dict(home="/Users/laoban", users=("laoban",), iplot="/Users/laoban/iPLoT",
+           pythons=("/Library/Frameworks/Python.framework/Versions/3.14",
+                    "/opt/homebrew/opt/python@3.12/Frameworks/Python.framework/Versions/3.12",
+                    "/opt/homebrew/Cellar/python@3.12/3.12.13_2/Frameworks/Python.framework/Versions/3.12",
+                    "/Users/laoban/iPLoT/.venv"),
+           module="/Users/laoban/iPLoT/modules/科學計算", module_name="科學計算")
+WIN = dict(home="C:\\Users\\laoban", users=("laoban",), iplot="C:\\Users\\laoban\\iPLoT",
+           pythons=("C:\\Users\\laoban\\AppData\\Local\\Programs\\Python\\Python312",), module=None, module_name=None)
+SPACE = dict(iplot="/Users/laoban/我的 iPLoT", module="/Users/laoban/我的 iPLoT/modules/科學計算")  # 第 14、39 列
+KEYS = ("路徑", "使用者名稱", "疑似學號", "電子郵件", "原始碼", "下一層模組")
+RUNNER = '  File "/Users/laoban/iPLoT/core/runner.py", line 72, in run_module\n    exec(code, ns)\n    ~~~~^^^^^^^^^^\n'
+DECODE = "    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n"
+
+# (名字, ctx 的覆寫, 輸入, 輸出)：ctx 從 MAC 起、覆寫的鍵蓋上去
+CASES = [
+    ("iplot_frame_keeps_source", {}, RUNNER,
+     '  File "<IPLOT>/core/runner.py", line 72, in run_module\n    exec(code, ns)\n    ~~~~^^^^^^^^^^\n'),
+    ("python_frame_keeps_source", {},
+     '  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode\n'
+     + DECODE + "               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+     '  File "<PYTHON>/lib/python3.14/json/decoder.py", line 345, in decode\n'
+     + DECODE + "               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n"),
+    ("homebrew_cellar_is_python", {},
+     '  File "/opt/homebrew/Cellar/python@3.12/3.12.13_2/Frameworks/Python.framework/Versions/3.12/lib/python3.12/json/__init__.py", line 346, in loads\n'
+     "    return _default_decoder.decode(s)\n",
+     '  File "<PYTHON>/lib/python3.12/json/__init__.py", line 346, in loads\n    return _default_decoder.decode(s)\n'),
+    ("venv_is_python", {},
+     '  File "/Users/laoban/iPLoT/.venv/lib/python3.14/site-packages/x.py", line 2, in f\n    y = 2\n',
+     '  File "<PYTHON>/lib/python3.14/site-packages/x.py", line 2, in f\n    y = 2\n'),
+    ("module_top_file_drops_source_and_marker", {},
+     '  File "/Users/laoban/iPLoT/modules/科學計算/hk_tk.py", line 120, in grade\n    score = row["score"]\n            ~~~^^^^^^^^^\n',
+     '  File "<模組:科學計算>/hk_tk.py", line 120, in grade\n    （原始碼已略過）\n'),
+    ("module_deep_file", {},
+     '  File "/Users/laoban/iPLoT/modules/科學計算/HK2/王小明_B11201234/作業.py", line 5, in grade\n    score = row["score"]\n',
+     '  File "<模組:科學計算>/.../<檔名已遮蔽>.py", line 5, in grade\n    （原始碼已略過）\n'),
+    ("home_other_folder", {},
+     '  File "/Users/laoban/課程/HK2/王小明_B11201234/作業.py", line 3, in f\n    print("王小明")\n',
+     '  File "<HOME>/.../<檔名已遮蔽>.py", line 3, in f\n    （原始碼已略過）\n'),
+    ("external_volume", {},
+     '  File "/Volumes/硬碟/學生/王小明.py", line 3, in f\n    print("王小明")\n',
+     '  File "<PATH>/.../<檔名已遮蔽>.py", line 3, in f\n    （原始碼已略過）\n'),
+    ("home_prefix_is_not_eaten", {}, "'/Users/laobanxyz/a.py'", "'<PATH>/.../<檔名已遮蔽>.py'"),
+    ("windows_home", WIN,
+     '  File "C:\\Users\\laoban\\Desktop\\王小明.py", line 3, in <module>\n    x\n',
+     '  File "<HOME>/.../<檔名已遮蔽>.py", line 3, in <module>\n    （原始碼已略過）\n'),
+    ("windows_case_insensitive", WIN, "'c:\\users\\LAOBAN\\x\\y.txt'", "'<HOME>/.../<檔名已遮蔽>.txt'"),
+    ("windows_python", WIN,
+     '  File "C:\\Users\\laoban\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\json\\decoder.py", line 345, in decode\n'
+     + DECODE,
+     '  File "<PYTHON>/Lib/json/decoder.py", line 345, in decode\n' + DECODE),
+    ("unc_path", {}, "\\\\server\\share\\王小明\\a.csv", "<PATH>/.../<檔名已遮蔽>.csv"),
+    ("path_with_space", SPACE,
+     '  File "/Users/laoban/我的 iPLoT/modules/科學計算/iplot.py", line 3, in run\n    x = 1\n',
+     '  File "<模組:科學計算>/iplot.py", line 3, in run\n    （原始碼已略過）\n'),
+    ("config_frame_keeps_name_drops_source", {},
+     '  File "/Users/laoban/iPLoT/config.py", line 1\n    ROOTS = [\n    ^\n',
+     '  File "<IPLOT>/config.py", line 1\n    （原始碼已略過）\n'),
+    ("syntax_error_location", {},
+     '  File "/Users/laoban/iPLoT/modules/科學計算/iplot.py", line 3\n    if name = "x":\n       ^^^^^^^^^^\nSyntaxError: invalid syntax\n',
+     '  File "<模組:科學計算>/iplot.py", line 3\n    （原始碼已略過）\nSyntaxError: invalid syntax\n'),
+    ("syntax_message_filename", {},
+     "invalid syntax (壞掉.py, line 1)\ninvalid syntax (iplot.py, line 3)\n",
+     "invalid syntax (<檔名已遮蔽>.py, line 1)\ninvalid syntax (iplot.py, line 3)\n"),
+    ("relative_frame", {},
+     '  File "HK2/王小明_B11201234/頂層錯.py", line 3, in <module>\n    print(x)\n',
+     '  File ".../<檔名已遮蔽>.py", line 3, in <module>\n    （原始碼已略過）\n'),
+    ("quoted_relative_in_message", {},
+     "No such file or directory: 'HK2/王小明/作業.py'", "No such file or directory: '.../<檔名已遮蔽>.py'"),
+    ("quoted_absolute_in_message", {},
+     "'/Users/laoban/課程/成績.csv' -> 'HK2/王小明/作業.py'", "'<HOME>/.../<檔名已遮蔽>.csv' -> '.../<檔名已遮蔽>.py'"),
+    ("unquoted_path_in_text", {}, "see /Users/laoban/課程/HK2/x.txt now", "see <HOME>/.../<檔名已遮蔽>.txt now"),
+    ("urls_are_not_paths", {},
+     "https://github.com/william10310406/iplot/discussions", "https://github.com/william10310406/iplot/discussions"),
+    ("frozen_and_string_frames", {},
+     '  File "<frozen runpy>", line 293, in run_path\n  File "<string>", line 2, in <module>\n',
+     '  File "<frozen runpy>", line 293, in run_path\n  File "<string>", line 2, in <module>\n'),
+    ("exception_group", {},
+     '  |   File "/Users/laoban/iPLoT/modules/科學計算/iplot.py", line 5, in run\n  |     raise ExceptionGroup("x", [])\n'
+     "  | ExceptionGroup: x (0 sub-exceptions)\n",
+     '  |   File "<模組:科學計算>/iplot.py", line 5, in run\n  |     （原始碼已略過）\n  | ExceptionGroup: x (0 sub-exceptions)\n'),
+    ("user_in_text", {}, "owner laoban and LaoBan said hi", "owner <USER> and <USER> said hi"),
+    ("user_whole_word_only", {}, "laobanxyz", "laobanxyz"),
+    ("short_user_is_left", {"users": ("ab",)}, "ab cd", "ab cd"),
+    ("student_id_after_cjk", {}, "王小明B11201234", "王小明<疑似學號>"),
+    ("student_id_digits", {}, "學號 411234567 的作業", "學號 <疑似學號> 的作業"),
+    ("not_student_ids", {},
+     "line 120, 0x7f3a9c2b10, [Errno 2], 3.14.7, pytest-1234, 2026-10-23, 20:47:56",
+     "line 120, 0x7f3a9c2b10, [Errno 2], 3.14.7, pytest-1234, 2026-10-23, 20:47:56"),
+    ("email", {}, "寄給 laoban.b@school.edu.tw", "寄給 <EMAIL>"),
+    ("secret_module_name", {"secrets": ("王小明_B11201234",)},
+     "模組『王小明_B11201234』第 3 行出錯", "模組『<下一層模組>』第 3 行出錯"),
+    ("placeholders_are_left_alone", {},
+     "'<HOME>/.../<檔名已遮蔽>.py' \"<模組:科學計算>/hk_tk.py\" <IPLOT>/core/runner.py",
+     "'<HOME>/.../<檔名已遮蔽>.py' \"<模組:科學計算>/hk_tk.py\" <IPLOT>/core/runner.py"),
+    ("user_named_like_a_placeholder", {"users": ("User",)}, "owner User and <USER>", "owner <USER> and <USER>"),
+    ("user_next_to_id", {"users": ("王小明",)}, "王小明B11201234", "<USER><疑似學號>"),
+    ("import_error_path_with_space", {},
+     "ImportError: cannot import name 'g' from '工具' (/Users/laoban/My Drive/課程/王小明/工具.py)",
+     "ImportError: cannot import name 'g' from '工具' (<HOME>/.../<檔名已遮蔽>.py)"),
+    ("apostrophe_before_quoted_path", {},
+     "Can't get attribute 'C' on <module '工具' from '/Users/laoban/My Drive/王小明/工具.py'>",
+     "Can't get attribute 'C' on <module '工具' from '<HOME>/.../<檔名已遮蔽>.py'>"),
+    ("onedrive_in_parens", WIN,
+     "(C:\\Users\\laoban\\OneDrive - 國立某大學\\HK2\\王小明\\作業.py)", "(<HOME>/.../<檔名已遮蔽>.py)"),
+    ("unquoted_space_in_iplot_prefix", SPACE,
+     "see /Users/laoban/我的 iPLoT/modules/科學計算/HK2/王小明/作業.py now", "see <模組:科學計算>/.../<檔名已遮蔽>.py now"),
+    ("module_in_external_root_unquoted", {"module": "/Volumes/硬碟/課/科學計算", "secrets": ("王小明_B11201234", "HK2")},
+     "see /Volumes/硬碟/課/科學計算/HK2/王小明_B11201234/王小明.py now", "see <模組:科學計算>/.../<檔名已遮蔽>.py now"),
+    ("windows_repr_doubles_backslashes", WIN,  # 字面上是兩個反斜線：Windows 上 OSError 的訊息是 repr
+     "No such file or directory: 'C:\\\\Users\\\\laoban\\\\Desktop\\\\成績.csv'",
+     "No such file or directory: '<HOME>/.../<檔名已遮蔽>.csv'"),
+    ("syntax_filename_with_parens", {}, "invalid syntax (王小明 (1).py, line 1)", "invalid syntax (<檔名已遮蔽>.py, line 1)"),
+    ("never_closed_keeps_its_first_half", {},
+     "'(' was never closed (王小明 (1).py, line 3)", "'(' was never closed (<檔名已遮蔽>.py, line 3)"),
+    ("never_closed_iplot_kept", {}, "'(' was never closed (iplot.py, line 1)", "'(' was never closed (iplot.py, line 1)"),
+    ("onedrive_unquoted", {},
+     "FileNotFoundError: /Users/laoban/OneDrive - 國立臺灣大學/課程/B11234567_王小明/data.txt not found.",
+     "FileNotFoundError: <HOME>/.../<檔名已遮蔽>.txt not found."),
+    ("onedrive_unquoted_windows", WIN,
+     "FileNotFoundError: C:\\Users\\laoban\\OneDrive - 國立臺灣大學\\課程\\B11234567_王小明\\data.txt not found.",
+     "FileNotFoundError: <HOME>/.../<檔名已遮蔽>.txt not found."),
+    ("cjk_right_before_a_path", {},
+     "RuntimeError: 找不到/Volumes/USB/學生/王小明.csv", "RuntimeError: 找不到<PATH>/.../<檔名已遮蔽>.csv"),
+    ("windows_forward_slashes", WIN,
+     "RuntimeError: 讀不到 D:/課程/李大華/作業.py", "RuntimeError: 讀不到 <PATH>/.../<檔名已遮蔽>.py"),
+    ("string_frame_drops_source", {},
+     '  File "<string>", line 1\n    王小明 的分數 +\n        ^^^\nSyntaxError: invalid syntax\n',
+     '  File "<string>", line 1\n    （原始碼已略過）\nSyntaxError: invalid syntax\n'),
+    ("quote_inside_a_frame_path", {},
+     '  File "/Users/laoban/課程/期中 "重交"/作業.py", line 3, in g\n    names = ["王小明"]\n',
+     '  File "<HOME>/.../<檔名已遮蔽>.py", line 3, in g\n    （原始碼已略過）\n'),
+    ("user_named_core", {"users": ("core",)}, RUNNER,
+     '  File "<IPLOT>/<USER>/runner.py", line 72, in run_module\n    exec(code, ns)\n    ~~~~^^^^^^^^^^\n'),
+    ("user_case_variants", {"users": ("User", "user")}, "owner User and user", "owner <USER> and <USER>"),
+]
+
+# 手寫的 3.14 樣子的 traceback：三段串起來（FileNotFoundError → SyntaxError → KeyError）
+SAMPLE = (
+    "Traceback (most recent call last):\n"
+    '  File "/Users/laoban/iPLoT/core/runner.py", line 72, in run_module\n'
+    "    exec(code, ns)\n"
+    "    ~~~~^^^^^^^^^^\n"
+    '  File "/Users/laoban/課程/王小明/工具.py", line 3, in load\n'
+    "    return open('/Users/laoban/課程/王小明/成績.csv', encoding='utf-8')\n"
+    "FileNotFoundError: [Errno 2] No such file or directory: '/Users/laoban/課程/王小明/成績.csv'\n"
+    "\n"
+    "During handling of the above exception, another exception occurred:\n"
+    "\n"
+    "Traceback (most recent call last):\n"
+    '  File "/Users/laoban/iPLoT/modules/科學計算/iplot.py", line 9, in <module>\n'
+    '    runpy.run_path("HK2/王小明_B11201234/頂層錯.py")\n'
+    '  File "<frozen runpy>", line 287, in run_path\n'
+    '  File "HK2/王小明_B11201234/頂層錯.py", line 1\n'
+    '    print("王小明 B11201234 laoban"\n'
+    "         ^\n"
+    "SyntaxError: '(' was never closed (頂層錯.py, line 1)\n"
+    "\n"
+    "The above exception was the direct cause of the following exception:\n"
+    "\n"
+    "Traceback (most recent call last):\n"
+    '  File "/Users/laoban/iPLoT/core/runner.py", line 75, in run_module\n'
+    "    value = fn(app, *args)\n"
+    "            ~~^^^^^^^^^^^^\n"
+    '  File "/Users/laoban/iPLoT/modules/科學計算/HK2/王小明_B11201234/作業.py", line 5, in grade\n'
+    '    score = row["B11201234"]\n'
+    "            ~~~^^^^^^^^^^^^^\n"
+    "KeyError: 'B11201234'\n"
+    "學生名單在 /Users/laoban/課程/名單.csv ，由 laoban 整理\n"  # 3.11 起的 add_note
+)
+
+
+@pytest.mark.parametrize("name, over, text, want", CASES, ids=[c[0] for c in CASES])
+def test_redact_table(load, name, over, text, want):
+    redact = load("redact")
+    assert redact.redact(text, redact.Ctx(**{**MAC, **over}))[0] == want
+
+
+@pytest.mark.parametrize("name, over, text, want", CASES, ids=[c[0] for c in CASES])
+def test_redact_is_idempotent(load, name, over, text, want):
+    redact = load("redact")
+    ctx = redact.Ctx(**{**MAC, **over})
+    once = redact.redact(text, ctx)[0]
+    assert redact.redact(once, ctx)[0] == once
+
+
+def test_redact_counts(load):
+    # secret 在路徑以外也出現一次：第 7 步排在路徑規則後面，只在路徑裡的名字已經跟著路徑不見了
+    redact = load("redact")
+    text = ('  File "/Users/laoban/iPLoT/modules/科學計算/HK2/王小明_B11201234/作業.py", line 5, in grade\n    score = row["score"]\n'
+            + "FileNotFoundError: [Errno 2] No such file or directory: '/Users/laoban/課程/成績.csv'\n"
+            + "模組『王小明_B11201234』 owner laoban, id B11201234, mail a.b@school.edu.tw\n")
+    counts = redact.redact(text, redact.Ctx(**{**MAC, "secrets": ("王小明_B11201234",)}))[1]
+    assert counts == {"路徑": 2, "使用者名稱": 1, "疑似學號": 1, "電子郵件": 1, "原始碼": 1, "下一層模組": 1}
+
+
+def test_summary_lists_what_was_masked(load):
+    redact = load("redact")
+    ctx = redact.Ctx(**MAC)
+    zero = dict.fromkeys(reversed(KEYS), 0)  # 字典的順序反過來：句子照鍵的順序，不照字典的
+    assert redact.summary({**zero, "路徑": 3, "使用者名稱": 1}, ctx) == "已自動遮蔽：3 個路徑、1 個使用者名稱。"
+    assert redact.summary({**zero, "原始碼": 2}, ctx) == "已自動遮蔽：2 段原始碼。"
+    assert redact.summary(zero, ctx) == "沒有找到要自動遮的東西。"
+
+
+def test_summary_warns_about_a_short_user(load):
+    redact = load("redact")
+    ctx = redact.Ctx(**{**MAC, "users": ("ab",)})
+    zero = dict.fromkeys(KEYS, 0)
+    assert (redact.summary({**zero, "路徑": 1}, ctx)
+            == "已自動遮蔽：1 個路徑。你的使用者名稱太短，沒有自動遮，請自己找找看。")
+    assert redact.summary(zero, ctx).endswith("你的使用者名稱太短，沒有自動遮，請自己找找看。")
+
+
+def test_redact_empty(load):
+    redact = load("redact")
+    text, counts = redact.redact("", redact.Ctx(**MAC))
+    assert text == ""
+    assert list(counts.items()) == [(k, 0) for k in KEYS]
+
+
+@pytest.mark.parametrize("exc", [ImportError, KeyError, OSError])
+def test_context_survives_getuser_failing(load, monkeypatch, exc):
+    redact = load("redact")
+
+    def fail():
+        raise exc("找不到名字")
+
+    monkeypatch.setattr(getpass, "getuser", fail)
+    monkeypatch.setenv("USER", "laoban")
+    monkeypatch.setenv("USERNAME", "LaoBan")  # 去重不分大小寫，留第一次出現的寫法
+    monkeypatch.setenv("LOGNAME", "LAOBAN")
+    ctx = redact.context(ROOT)
+    assert [u for u in ctx.users if u.lower() == "laoban"] == ["laoban"]
+
+
+def test_context_reads_this_machine(load):
+    redact = load("redact")
+    ctx = redact.context(ROOT, MODULE, ["王小明_B11201234"])
+    assert ctx.home == str(Path.home())
+    assert os.path.realpath(sys.base_prefix) in ctx.pythons
+    assert sys.prefix in ctx.pythons
+    assert (ctx.iplot, ctx.module, ctx.module_name) == (str(ROOT), str(MODULE), "回報與討論")
+    assert ctx.secrets == ("王小明_B11201234",)
+    try:
+        user = getpass.getuser()
+    except (ImportError, KeyError, OSError):  # 這台拿不到名字：只看上面的
+        return
+    assert user in ctx.users
+
+
+def test_whole_sample_leaks_nothing(load):
+    redact = load("redact")
+    out = redact.redact(SAMPLE, redact.Ctx(**MAC))[0]
+    for leak in ("laoban", "王小明", "B11201234", "課程", "/Users/"):
+        assert leak not in out
+    assert "<IPLOT>/core/runner.py" in out
+    assert "<模組:科學計算>" in out
+
+
+def test_real_traceback_from_tmp_leaks_nothing(load, tmp_path):
+    # 真的跑一個會出錯的模組、context() 讀這台機器：macOS 的 tmp_path 帶著帳號名
+    redact = load("redact")
+    student = tmp_path / "Users" / "someone" / "課程" / "王小明_B11201234" / "作業.py"
+    student.parent.mkdir(parents=True)
+    student.write_text("1/0\n", encoding="utf-8", newline="\n")
+    modules = tmp_path / "iPLoT" / "modules"
+    folder = make_module(modules, "科學計算", f"import runpy\nrunpy.run_path(r'{student}', run_name='作業')\n")
+    info = module_info(folder, modules.resolve(), "here")
+    error = run_module(info, FakeApp(tmp_path / "iPLoT")).error
+    ctx = redact.context(ROOT, info.folder)  # 第一個 frame 是這個 repo 的 core/runner.py（測試 import 的 core）
+    out = redact.redact(error.traceback_text, ctx)[0]
+    for leak in (str(tmp_path), os.path.realpath(tmp_path), "王小明", "B11201234"):
+        assert leak not in out
+    try:
+        user = getpass.getuser()
+    except (ImportError, KeyError, OSError):
+        user = ""
+    if len(user) >= 3:
+        assert user not in out
+    assert "<IPLOT>/core/" in out  # 不寫死 runner.py：CI 的帳號就叫 runner
+    files = re.findall(r'File "([^"]*)"', out)
+    assert files and all(f.startswith("<") for f in files)
