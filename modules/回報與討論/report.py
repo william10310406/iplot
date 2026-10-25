@@ -247,12 +247,18 @@ def _most(ok, lo: int, hi: int) -> int:
     return lo
 
 
+def _opener(line: str) -> str | None:
+    """traceback 的框的開框那一行（body 寫的 ~~~~text，~ 至少 4 個）：回那一串 ~（關框那一行就是它）；
+    不是回 None。"""
+    return line[:-len("text")] if re.fullmatch(r"~{4,}text", line) else None
+
+
 def _fence(lines: list[str]) -> tuple[int, int] | None:
-    """traceback 的框：第一個 ~~~~…text 那一行與它下面只有同樣長度的 ~ 的那一行（行號）；沒有就 None。"""
-    i = next((i for i, line in enumerate(lines) if re.fullmatch(r"~{4,}text", line)), None)
+    """traceback 的框：第一個開框那一行（_opener）與它下面只有同樣長度的 ~ 的那一行（行號）；沒有就 None。"""
+    i = next((i for i, line in enumerate(lines) if _opener(line)), None)
     if i is None:
         return None
-    mark = lines[i][:-len("text")]
+    mark = _opener(lines[i])
     j = next((j for j in range(i + 1, len(lines)) if lines[j] == mark), None)
     return None if j is None else (i, j)
 
@@ -281,15 +287,22 @@ def _middle(body: str):
 
 
 def _tail(text: str, n: int) -> str:
-    """text 留前 n 個字，後面加一行 CUT。截在 traceback 的框裡的話先補上關框的那一行：不然 GitHub 會把
-    CUT 與 HINT 都畫成程式碼。"""
-    head = text[:n].rstrip("\n")
+    """text 留前 n 個字，後面加一行 CUT。截在 traceback 的框的開框或關框那一行的中間的話，那半行拿掉（~~~、~~~~tex
+    在 GitHub 上也會開框：CommonMark 的 ~ 至少 3 個、後面帶什麼字都算）；截完還在框裡的話，補上關框的那一行。
+    不然 GitHub 會把 CUT 與 HINT 都畫成程式碼。看的是那一行原本的整行，不是截剩的樣子：只看樣子的話，
+    分不出半個開框行與使用者自己打的 ~~~ 那一行（例如關掉他自己的框的那一行）。"""
+    lines = text[:n].split("\n")
+    rest = text[n:].partition("\n")[0]  # 最後一行被截掉的那一段；截在行尾就是空的
     mark = None
-    for line in head.split("\n"):
+    for i, line in enumerate(lines):
+        whole = line + rest if i == len(lines) - 1 else line
+        if whole != line and (whole == mark if mark else _opener(whole)):
+            line = lines[i] = ""  # 半個開框或關框行
         if mark is None:
-            mark = line[:-len("text")] if re.fullmatch(r"~{4,}text", line) else None
+            mark = _opener(line)
         elif line == mark:
             mark = None
+    head = "\n".join(lines).rstrip("\n")
     if mark:
         head += "\n" + mark
     return f"{head}\n{CUT}" if head else CUT
@@ -337,10 +350,13 @@ def _shorten(category: str, title: str, body: str, limit: int) -> str | None:
 
 def fit(category: str, title: str, body: str, limit: int) -> tuple[str, bool]:
     """預填的網址與有沒有截（設計第 8 節、第 17 節第 2、15 條）。內文最後一定是 HINT，截的時候也留著；
-    回的網址 ≤ limit、轉去登入的那條 ≤ MAX_LOGIN_REDIRECT。順序：①放得下就照用（標題再長也不動）；放不下的話，
-    標題超過 MAX_TITLE 字一律先截到 MAX_TITLE，再截內文：②traceback 的框留第一行與最後 k 行；③「發生了什麼」從後面
-    截，還是放不下就從內文的尾巴截；④內文只剩 CUT 也放不下（標題本身就很長）就再截標題。都是在編碼之前以行或字為
-    單位截，不會切在 %XX 中間。limit 比只帶 HINT 的網址（約 440 字）還短時沒辦法，回最短的那一條。"""
+    limit 不比下限（見最後）短的話，回的網址 ≤ limit、轉去登入的那條 ≤ MAX_LOGIN_REDIRECT。順序：①放得下就照用
+    （標題再長也不動）；放不下的話，標題超過 MAX_TITLE 字一律先截到 MAX_TITLE，再截內文：②traceback 的框留第一行與
+    最後 k 行；③「發生了什麼」從後面截，還是放不下就從內文的尾巴截；④內文只剩 CUT 也放不下（標題本身就很長）就再截
+    標題。都是在編碼之前以行或字為單位截，不會切在 %XX 中間。
+    下限是「標題空白、內文只剩一行 CUT 加 HINT」的那一條網址（現在 BUG、IDEA 433 字，QA、NEWS 415 字；body 本來就是
+    空字串的話內文只有 HINT：361、343 字）。整條放不下、limit 又比下限短時，沒有網址放得下：回的就是下限那一條與
+    True，它比 limit 長，fits(網址, limit) 是 False。MAX_URL 是 2000，走不到。"""
     u = url(category, title, with_hint(body))
     if fits(u, limit):
         return u, False

@@ -703,6 +703,19 @@ def long_tb(n):
     return "\n".join(["Traceback (most recent call last):", *frames, "KeyError: 'score'"]) + "\n"
 
 
+def inside_a_fence(text):
+    """照 GitHub（CommonMark）的讀法，text 讀完還在框裡嗎：行首最多 3 個空白、~ 至少 3 個的那一行開框（後面帶什麼字
+    都算，所以 ~~~、~~~~tex 也開框），~ 至少一樣多、後面只有空白的那一行關框。"""
+    mark = None
+    for line in text.split("\n"):
+        if mark is None:
+            m = re.match(r" {0,3}(~{3,})", line)
+            mark = m[1] if m else None
+        elif re.fullmatch(rf" {{0,3}}{mark}~*[ \t]*", line):
+            mark = None
+    return mark is not None
+
+
 @pytest.mark.parametrize("value", ["a&b=c#d", "100% +1", "第一行\n第二行", "~~~~text\nx\n~~~~", "王小明 💬",
                                    "a/b\\c\"d'e"])
 def test_url_roundtrips(load, value):
@@ -754,8 +767,9 @@ def test_fit_keeps_the_login_redirect_short(load):
     u, cut = report.fit("BUG", "t", "中" * 2000, 8000)
     assert cut and len(u) <= 8000 and report.login_redirect(u) <= report.MAX_LOGIN_REDIRECT
     assert report.login_redirect(u) == len(report.LOGIN + quote(u, safe=""))
-    # 跟量到的對得上（2026-10-24）：內文全是 ASCII、5621 字的網址，轉去登入的那條是 5742 字
-    # （量的那一組沒有記下標題；這裡用探針的標題「網址長度測試」，拼出來剛好是那兩個數）
+    # 式子對著量到的那一組（2026-10-24：內文全是 ASCII、5621 字的網址，轉去登入的那條 5742 字）。量的那一組沒有
+    # 記下標題，這裡也不是重現它：拼一條 5621 字的網址，標題挑「網址長度測試」，是因為這樣要再編碼一次的字
+    # （%、:、/、?、=、&）剛好 43 個，5621 + len(LOGIN) 35 + 2 × 43 = 5742，跟量到的兩個數合得上。釘住的是式子
     base = report.url("BUG", "網址長度測試", "")
     u = report.url("BUG", "網址長度測試", "a" * (5621 - len(base)))
     assert (len(u), report.login_redirect(u)) == (5621, 5742)
@@ -823,6 +837,39 @@ def test_fit_closes_the_fence_it_cuts_into(load):
     out = query(u)["body"]
     assert "### 環境\n" + "\n".join(ENV) in out and "\n~~~~text\nTraceback (most recent call last):\n" in out
     assert out.endswith("值\n~~~~\n（太長，已截斷）\n\n" + report.HINT)
+
+
+def test_fit_never_leaves_half_a_fence_line(load):
+    # 從尾巴截、截在開框（~~~~text）或關框（~~~~）那一行的中間：那半行拿掉。~~~、~~~~tex 也會開框（CommonMark：~ 至少
+    # 3 個、後面帶什麼字都算），留著的話 CUT 與 HINT 都被畫成程式碼；~、~~ 只是半個框。limit 一個字一個字往上加，
+    # 截的地方從框的前面走過開框那一行、框裡、關框那一行，一直到留下第一個「中」
+    report = load("report")
+    end = "\n" + report.CUT + "\n\n" + report.HINT
+
+    def size(head):  # 內文截成 head 加一行 CUT 時，網址多長
+        return len(report.url("BUG", "t", report.with_hint(head + "\n" + report.CUT)))
+    half = {"~", "~~", "~~~", "~~~~t", "~~~~te", "~~~~tex"}
+    top, box = "### 發生了什麼\nx\n\n### 錯誤\nzz", "\n\n~~~~text\n"
+    cases = [(top + box + "中" * 300 + "\n~~~~", ["", box + "~~~~", box + "中\n~~~~"])]  # 審查的那一組
+    for k in range(1, 9):  # 框裡那一行 k 個 y：二分每次試的地方不一樣，截在關框那一行中間的情形才試得到
+        ys = [box + "y" * i + "\n~~~~" for i in range(1, k + 1)]
+        cases.append((top + box + "y" * k + "\n~~~~\n\n" + "中" * 300, ["", box + "~~~~", *ys, ys[-1] + "\n\n中"]))
+    low = size(top)
+    for b, want in cases:
+        seen = []
+        for limit in range(low, low + 100):
+            u, cut = report.fit("BUG", "t", b, limit)
+            out = query(u)["body"]
+            assert cut and len(u) <= limit and out.endswith(end), limit
+            head = out[:-len(end)]
+            assert not inside_a_fence(head) and not half & set(head.split("\n")), (limit, head[-20:])
+            assert head.startswith(top), limit
+            tail = head[len(top):]
+            if not seen or seen[-1] != tail:
+                seen.append(tail)
+            if "中" in tail:
+                break
+        assert seen == want
 
 
 def test_fit_cuts_a_long_title(load):
