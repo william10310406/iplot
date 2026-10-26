@@ -40,9 +40,15 @@ class NoTk:
 
 
 def _expand(text: str) -> Path:
-    """「~」「~/…」換成家目錄；「~名字/…」各平台都照字面（core.scan.home_path）。確認過 Python 之後才叫得到這裡。"""
-    from core.scan import home_path
-
+    """「~」「~/…」換成家目錄；「~名字/…」各平台都照字面（core.scan.home_path）。確認過 Python 之後才叫得到這裡。
+    iPLoT 0.5.x 的核心沒有 home_path：照互通 0.1.0 的做法，pathlib 找不到那個使用者丟 RuntimeError 就照字面（D117）。"""
+    try:
+        from core.scan import home_path
+    except ImportError:  # iPLoT 0.5.x
+        try:
+            return Path(text).expanduser()
+        except RuntimeError:
+            return Path(text)
     return home_path(text) or Path(text)
 
 
@@ -111,7 +117,7 @@ def main(argv: list[str], *, home: Path | None = None, folder: Path | None = Non
 
 
 def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
-    import popup as popup_module
+    import popup as popup_module  # noqa: I001  core 在 iPLoT 是第一方、在 iplot-modules 是第三方：兩邊的 isort 要的空行不一樣
     import sync
 
     from core.core import Core, load_config

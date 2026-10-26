@@ -34,6 +34,7 @@ T: dict[str, str] = {
     "status_hint": "單擊選一個模組看它的說明；雙擊執行。",
     "details": "詳細",
     "hide_details": "收起",
+    "report_issue": "回報這個問題",
     "ok": "確定",
     "cancel": "取消",
     "scanned": "已掃描 {roots}，找到 {count} 個模組",
@@ -66,6 +67,8 @@ T: dict[str, str] = {
 
 # 碰作業系統的事（打開、編輯、顯示、終端機、垃圾桶）由 modules/ 裡叫這個名字的模組做（D50、D52）
 SYSTEM_MODULE = "作業系統"
+# 錯誤那一列的「回報這個問題」交給 modules/ 裡叫這個名字的模組的 on_error(app, error)（D110）
+REPORT_MODULE = "回報與討論"
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
 # TITLE = "顯示名稱"   # 要讓按鈕文字跟資料夾名稱不同時才打開這一行

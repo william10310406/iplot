@@ -172,9 +172,12 @@ def test_ensure_python_ok_puts_home_and_lib_first(load, tmp_path):
 
 def test_check_version(load):
     b = load("boot")
-    assert b.check_version("0.5.1", 3, "0.1.0") is None and b.check_version("0.5.0", 3, "0.1.0") is None
-    assert b.check_version("0.6.0", 3, "0.1.0") == "互通 0.1.0 支援 iPLoT 0.5，這台是 0.6.0。到工作坊看看互通有沒有新版。"
-    assert b.check_version("0.5.1", 2, "0.1.0") is not None
+    for found in ("0.5.0", "0.5.2", "0.6.0", "0.6.3"):  # 0.5 與 0.6 都認：先換互通、後按「更新」也行（D117）
+        assert b.check_version(found, 3, "0.2.0") is None, found
+    for found in ("0.4.9", "0.7.0"):
+        assert b.check_version(found, 3, "0.2.0") == (f"互通 0.2.0 支援 iPLoT 0.5、0.6，這台是 {found}。"
+                                                      "iPLoT 比較舊就按「更新」，比較新就到工作坊看看互通有沒有新版。")
+    assert b.check_version("0.6.0", 2, "0.2.0") is not None
 
 
 def test_alert_passes_text_as_arguments(load, capsys):
@@ -226,7 +229,7 @@ def test_own_version(load, tmp_path):
     assert boot.own_version(tmp_path) == "?"
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.2.0] - 2026-10-08\n\nx\n\n## [0.1.0]\n",
                                            encoding="utf-8")
-    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.1.0"
+    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.2.0"
 
 
 def test_boot_and_run_read_on_python_3_8():
@@ -813,19 +816,27 @@ def test_why_not_names_the_reason(load, home, tmp_path):
 
 @pytest.fixture
 def entry(load, home, monkeypatch):
-    """run.main 的測試環境：Python 一律算對、同步與提示框只記錄、webview 是假的；互通的紀錄寫在 home/modules/互通。"""
+    """run.main 的測試環境：Python 一律算對、同步與提示框只記錄、webview 是假的；互通的紀錄寫在 home/modules/互通。
+    同一個測試 go 好幾次也一樣：每一次 go 都只記錄同步，不會真的做捷徑。"""
     from conftest import FakeWebview
 
-    run, boot, sync = load("run"), load("boot"), load("sync")
+    run, boot = load("run"), load("boot")
     synced, alerts, wv = [], [], FakeWebview()
+
+    def record_sync():
+        """把 sys.modules 裡的那一份 sync 的 sync 換成只記錄。run._run 跑完會把 sync 從 sys.modules 拿掉（OURS），
+        下一次 import sync 拿到的是新的一份、真的 sync.sync：所以每一次 go 之前都要再換一次。"""
+        monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: synced.append(a) or [])
+
     monkeypatch.setattr(boot, "ensure_python", lambda *a, **k: None)
-    monkeypatch.setattr(sync, "sync", lambda *a, **k: synced.append(a) or [])
+    record_sync()
     monkeypatch.setattr(boot, "alert", lambda title, message, **k: alerts.append((title, message)))
     folder = home / "modules" / "互通"
     folder.mkdir()
 
     def go(argv, cwd=None, **kw):
         kw.setdefault("home", home)
+        record_sync()
         return run.main(argv, folder=folder, webview=wv, cwd=cwd or home, **kw)
 
     return types.SimpleNamespace(run=run, go=go, wv=wv, synced=synced, alerts=alerts, folder=folder)
@@ -1222,6 +1233,38 @@ def test_a_tilde_with_a_real_user_name_is_a_relative_path(load, home, entry, tmp
     assert [repr([tmp_path / f"~{me}" / "f.txt", Path.home() / "g.txt"])] in entry.wv.windows[0].calls("log")
 
 
+def test_expand_on_a_0_5_core_without_home_path(load, monkeypatch):
+    """iPLoT 0.5.x 的核心沒有 core.scan.home_path：照互通 0.1.0 的做法，不丟 ImportError（D117）。"""
+    from core import scan
+    run = load("run")
+    monkeypatch.delattr(scan, "home_path")
+    assert run._expand("~/g.txt") == Path.home() / "g.txt" and run._expand("a/b.txt") == Path("a/b.txt")
+    try:  # 0.1.0 的做法：pathlib 找不到那個使用者丟 RuntimeError 就照字面；Windows 不丟，猜成 C:\Users\<名字>
+        old = Path("~沒有這個人/f.txt").expanduser()
+    except RuntimeError:
+        old = Path("~沒有這個人/f.txt")
+    assert run._expand("~沒有這個人/f.txt") == old
+
+
+def test_the_same_interop_runs_before_and_after_updating_from_0_5_2_to_0_6_0(entry, home, monkeypatch, tmp_path):
+    """互通 0.2.0 先裝在 0.5.2 上（核心沒有 home_path），再按「更新」換成 0.6.0（「更新」不碰 modules/）：
+    同一份互通兩邊都跑得動，模組都跑了、沒有提示框（D117）。"""
+    import core
+    from core import scan
+    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
+    want = [repr([Path.home() / "g.txt", tmp_path / "x.txt"])]
+    for version in ("0.5.2", "0.6.0"):
+        entry.wv.windows.clear()          # FakeWebview.start 只觸發 windows[0]
+        with monkeypatch.context() as m:
+            m.setattr(core, "__version__", version)
+            if version == "0.5.2":
+                m.delattr(scan, "home_path")
+            assert entry.go(["A", "~/g.txt", "x.txt"], cwd=tmp_path) == 0, version
+            assert hasattr(scan, "home_path") == (version == "0.6.0")
+        assert want in entry.wv.windows[0].calls("log") and entry.alerts == [], version
+    assert len(entry.synced) == 2  # 兩次都只記錄：第二次 go 也沒有真的同步、做捷徑
+
+
 def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
     """藏著的小視窗是 accessory（不在 Dock、不在 ⌘-Tab）；app.page 開的視窗要找得回來，所以開之前回到一般的 App。"""
     p = popup.p
@@ -1311,6 +1354,7 @@ def test_main_offers_the_panel_only_when_there_is_one_and_it_is_not_the_target(e
         entry.go([target])
         [[got, _, offer]] = entry.wv.windows[0].calls("done")
         assert (got, offer) == (outcome, "主控面板" if target != "主控面板" else None), target
+    assert len(entry.synced) == 4  # 四次 go 都只記錄同步
 
 
 def test_pressing_the_panel_keeps_the_modules_exit_code(entry, home):
@@ -1360,6 +1404,7 @@ def test_running_the_calendar_itself_offers_the_panel(entry, home):
     entry.wv.windows.clear()
     entry.go(["行事曆"])
     assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
+    assert len(entry.synced) == 2  # 兩次 go 都只記錄同步
 
 
 def test_the_back_button_runs_the_named_module_and_closes(popup, home):

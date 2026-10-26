@@ -94,7 +94,7 @@ def test_app_js_uses_only_text_keys_that_exist():
     assert used and used <= set(T), used - set(T)
     assert {"menu_run", "menu_enter", "menu_edit", "menu_reveal", "menu_terminal", "menu_add_child", "add_tile",
             "ask_name", "bad_name", "empty_group", "status_hint", "open_file", "details", "hide_details",
-            "ok", "cancel"} <= used
+            "report_issue", "ok", "cancel"} <= used
 
 
 def test_app_js_calls_exactly_the_bridge_methods():
