@@ -56,6 +56,8 @@ def test_0_6_0_notes_carry_the_manual_steps():
         'WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"',
         "open .backup",
         "雙擊一次「互通」",
+        "回報功能剛上線，畫面異常或複製失敗請直接用它回報。",  # 研究助理 2026-10-26：發佈說明加的兩句
+        "按送出前，請先看一下 GitHub 內文裡有沒有人名或學號，有的話不要送出，直接告訴我。",
     ):
         assert part in notes, part
     assert notes.index("「互通」按「覆蓋」或「更新」") < notes.index("再回來按「更新」")
