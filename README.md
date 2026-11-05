@@ -342,6 +342,25 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 - **批次模式（不開面板）**：在 `modules/科學計算/` 裡執行 `python3 hk_tk.py --batch ~/Downloads/HK5.zip --kit ~/Downloads/t2026fscSpace`，收進 zip 旁邊的 `HK5_收件/`（套件裝進 zip 旁邊的 `科學計算-venv/`），開一個全班名單的視窗，雙擊一個就開；Windows 未經實機驗證。
 - 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.6.0.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
 
+### 科學計算課的環境（.venv）
+
+課程的套件只裝進課程資料夾裡的 `.venv`，不裝進電腦本身的 Python。在 iPLoT 雙擊「科學計算」就會建好；沒有 `.venv` 時，單獨執行一份作業會停下來，說明下面這幾步（macOS；Windows 未經實機驗證，指令不一樣）：
+
+1. 打開「終端機」，進到課程資料夾（有 `hk_tk.py` 的那一個）：`cd 課程資料夾的路徑`
+2. 建立課程專用的 `.venv`：
+
+   ```
+   python3 -m venv .venv
+   ```
+
+3. 安裝缺的套件（把「套件名」換成訊息裡寫的，要等幾分鐘）：
+
+   ```
+   .venv/bin/python -m pip install 套件名
+   ```
+
+4. 回到 iPLoT，重新雙擊那個模組。
+
 ## 回報問題與討論
 
 錯誤訊息旁邊的「回報這個問題」（隨附的模組「回報與討論」）會先遮掉路徑與使用者名稱、給你看、讓你改，再用瀏覽器開到 `https://github.com/william10310406/iplot/discussions` 的新增頁，標題、內文都填好；雙擊面板上「回報與討論」這一格，可以回報沒有錯誤訊息的問題、提建議、問問題、看論壇。要有 GitHub 帳號，送出是你在瀏覽器裡按：iPLoT 不登入、不連網，只把內容填進網址交給瀏覽器。論壇是公開的，學生的名字請自己再看一次（錯誤訊息裡直接寫著的名字遮不到）。iPLoT 打不開的時候，直接到那個網址發；怎麼按、遮了什麼、沒遮什麼，見 [docs/08](docs/08_操作說明-0.6.0.md) 第 10 節。

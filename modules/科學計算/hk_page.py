@@ -12,6 +12,7 @@ import importlib.metadata
 import os
 import platform
 import re
+import shlex
 import subprocess
 import sys
 import traceback
@@ -188,14 +189,25 @@ def _hand_off(file: Path, need: list[str], popen) -> None:
     sys.exit(0)
 
 
+MAKE_VENV = "python3 -m venv .venv"  # README「科學計算課的環境（.venv）」寫同一行，test_hk_page 核對
+VENV_PIP = ".venv/bin/python -m pip install {names}"
+
+
 def _no_venv(need: list[str], course: Path | None) -> str:
-    """不在 venv 裡、也找不到課程的 .venv：一句白話，說明為什麼不裝、接下來怎麼做。"""
+    """不在 venv 裡、也找不到課程的 .venv：白話說明為什麼不裝，再一步一步（macOS）能照著做的做法。"""
     head = f"缺 {'、'.join(need)}，而且不裝進電腦本身的 Python。"
     if course is None:
-        return (f"{head}這份作業不在課程資料夾裡（上面找不到 hk_tk.py），不知道該裝進哪一個 .venv：把它放進課程資料夾再跑；"
-                "或在終端機進到作業所在的資料夾，打 python3 -m venv .venv，再用 .venv 裡的 python 跑這個檔。")
-    return (f"{head}課程的 .venv 還沒建：在 iPLoT 按「科學計算」裝課程套件；或在終端機進到 {course}，"
-            "打 python3 -m venv .venv，再用 .venv 裡的 python 跑這個檔。")
+        return (f"{head}這份作業不在課程資料夾裡（上面找不到 hk_tk.py），不知道該裝進哪一個 .venv。"
+                "請先把它放進課程資料夾（有 hk_tk.py 的那一個），再重新執行一次。")
+    return (f"{head}課程資料夾裡還沒有 .venv。請照下面做（macOS；Windows 未經實機驗證，指令不一樣）：\n"
+            "1. 打開「終端機」，貼上這一行、按 Enter，進到課程資料夾：\n"
+            f"   cd {shlex.quote(str(course))}\n"
+            "2. 貼上這一行、按 Enter，建立課程專用的 .venv：\n"
+            f"   {MAKE_VENV}\n"
+            "3. 貼上這一行、按 Enter，安裝缺的套件（要等幾分鐘）：\n"
+            f"   {VENV_PIP.format(names=' '.join(need))}\n"
+            "4. 回到 iPLoT，重新雙擊這個模組。\n"
+            "（也可以在 iPLoT 雙擊「科學計算」，它會替你做第 2、3 步，裝的是整門課的套件。）")
 
 
 def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[str] | None = None) -> None:

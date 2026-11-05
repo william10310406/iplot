@@ -6,6 +6,7 @@
 import gc
 import io
 import re
+import shlex
 import sys
 import types
 import weakref
@@ -117,16 +118,27 @@ def test_ensure_outside_a_venv_passes_the_rerun_exit_code_on(tmp_path, load, sta
 
 
 def test_ensure_outside_a_venv_without_the_course_venv_says_what_to_do(tmp_path, load, standalone, monkeypatch):
+    """沒有課程的 .venv：不裝、不叫 pip，丟一段一步一步的白話（macOS），指令能直接複製貼上；README 寫同一套。"""
     hp = load("hk_page")
     monkeypatch.delenv("HK_NO_INSTALL")
     file, _ = course_with_venv(tmp_path, venv=False)
+    course = Path(file).parents[1]
     monkeypatch.setattr(sys, "base_prefix", sys.prefix)
     popen = FakePopen()
     with pytest.raises(RuntimeError) as err:
-        hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
+        hp.ensure(["no-such-pkg-m6", "other-pkg"], file, popen=popen, argv=[file])
     said = str(err.value)
-    assert said.startswith("缺 no-such-pkg-m6") and "不裝進電腦本身的 Python" in said
-    assert "按「科學計算」" in said and "-m venv" in said and "--user" not in said
+    assert said.startswith("缺 no-such-pkg-m6、other-pkg，而且不裝進電腦本身的 Python。")
+    lines = said.split("\n")
+    commands = [ln.strip() for ln in lines if ln.startswith("   ")]  # 縮排三格的就是要貼的指令
+    assert commands == [f"cd {shlex.quote(str(course))}", "python3 -m venv .venv",
+                        ".venv/bin/python -m pip install no-such-pkg-m6 other-pkg"]
+    assert [ln[:2] for ln in lines if ln[:1].isdigit()] == ["1.", "2.", "3.", "4."]
+    assert "macOS" in said and "Windows 未經實機驗證" in said and "重新雙擊這個模組" in said and "--user" not in said
+    readme = (COURSE.parents[1] / "README.md").read_text(encoding="utf-8")  # 兩套說法不能不一樣
+    section = readme.split("### 科學計算課的環境（.venv）", 1)[1].split("\n## ", 1)[0]
+    for command in commands[1:]:
+        assert command.replace("no-such-pkg-m6 other-pkg", "套件名") in section, command
     assert popen.calls == []
 
 
