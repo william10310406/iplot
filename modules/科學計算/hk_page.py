@@ -12,7 +12,6 @@ import importlib.metadata
 import os
 import platform
 import re
-import site
 import subprocess
 import sys
 import traceback
@@ -189,8 +188,19 @@ def _hand_off(file: Path, need: list[str], popen) -> None:
     sys.exit(0)
 
 
+def _no_venv(need: list[str], course: Path | None) -> str:
+    """不在 venv 裡、也找不到課程的 .venv：一句白話，說明為什麼不裝、接下來怎麼做。"""
+    head = f"缺 {'、'.join(need)}，而且不裝進電腦本身的 Python。"
+    if course is None:
+        return (f"{head}這份作業不在課程資料夾裡（上面找不到 hk_tk.py），不知道該裝進哪一個 .venv：把它放進課程資料夾再跑；"
+                "或在終端機進到作業所在的資料夾，打 python3 -m venv .venv，再用 .venv 裡的 python 跑這個檔。")
+    return (f"{head}課程的 .venv 還沒建：在 iPLoT 按「科學計算」裝課程套件；或在終端機進到 {course}，"
+            "打 python3 -m venv .venv，再用 .venv 裡的 python 跑這個檔。")
+
+
 def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[str] | None = None) -> None:
-    """作業檔第二行：缺的套件裝進正在跑的這個 Python（不在 venv 裡就加 --user），裝完才往下 import。
+    """作業檔第二行：缺的套件裝進正在跑的這個 venv，裝完才往下 import。不在 venv 裡（系統的 Python）就裝進課程的 .venv、
+    再用它重跑這個檔，沒有課程的 .venv 就說怎麼建；絕不裝進使用者自己的 Python。
     學生自己跑自己的檔時，先把檔裡 import 了、REQUIRES 沒寫的補進 REQUIRES 那一行。
     在 iPLoT 的面板程序裡絕不裝、絕不改檔：缺了就交給課程的 .venv（回報第 0 節「要定的事」第 2 條）。"""
     requires = [requires] if isinstance(requires, str) else list(requires)
@@ -223,13 +233,20 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
         if os.environ.get(BATCH):  # 批次名單開的：沒有「科學計算」那顆按鈕（看記號，不看上面有沒有 hk_tk.py）
             raise RuntimeError(f"缺 {'、'.join(need)}：批次模式要先建好 venv（--venv，或 zip 旁邊的 科學計算-venv）")
         raise RuntimeError(f"缺 {'、'.join(need)}：先按「科學計算」裝課程套件（不裝進 iPLoT 自己的 Python）")
+    python, rerun = sys.executable, None
+    if not in_venv:  # 學生用系統的 Python 跑自己的檔：裝進課程的 .venv，裝好用它重跑（不碰使用者的 Python）
+        course = _course(Path(file))
+        python = _venv_python(course)
+        if python is None:
+            raise RuntimeError(_no_venv(need, course))
+        rerun = [str(python), str(Path(file).resolve()), *(argv if argv is not None else sys.argv)[1:]]
     print(f"在裝 {'、'.join(need)}（第一次要幾分鐘）…")
-    argv_pip = [sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check",
-                *([] if in_venv else ["--user"]), *need]
+    argv_pip = [str(python), "-m", "pip", "install", "--no-input", "--disable-pip-version-check", *need]
     if popen(argv_pip).wait() != 0:
-        raise RuntimeError(f"裝不了 {'、'.join(need)}：在終端機 {sys.executable} -m pip install {' '.join(need)}")
-    if not in_venv:  # 剛建好的 user site 不在 sys.path 上（Python 啟動時它還不在）
-        site.addsitedir(site.getusersitepackages())
+        raise RuntimeError(f"裝不了 {'、'.join(need)}：在終端機 {python} -m pip install {' '.join(need)}")
+    if rerun:
+        print("已裝進課程的 .venv，改用它再跑一次")
+        sys.exit(popen(rerun, cwd=str(Path(file).resolve().parent)).wait())
     importlib.invalidate_caches()
 
 
