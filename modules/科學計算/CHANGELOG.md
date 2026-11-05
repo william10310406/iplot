@@ -2,7 +2,9 @@
 
 「科學計算」這個模組的版本紀錄，格式跟 iPLoT 的 CHANGELOG.md 一樣（[Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)）。`tools/publish.py` 取最上面那一節的版本號當工作坊裡的版本，取那一節的第一段當清單頁上的「這一版」。
 
-## [Unreleased]
+## [0.1.1] - 2026-11-05
+
+作業檔缺套件時不再裝進電腦本身的 Python（不再 pip install --user）：裝進課程的 .venv；沒有 .venv 時一步一步說怎麼建。
 
 ### 修正
 - `hk_page.ensure` 不再 `pip install --user`（D120）：在 venv 裡照舊裝進那個 venv；不在 venv 裡就找課程資料夾的 `.venv`，用它的 Python 裝、裝好用它把同一個檔重跑一次；找不到 `.venv`（或作業不在課程資料夾裡）時，用白話說明為什麼不裝進電腦本身的 Python、怎麼建 `.venv`。也不再把 user site 加進 `sys.path`。
