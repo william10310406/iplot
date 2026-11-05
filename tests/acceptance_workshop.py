@@ -151,7 +151,9 @@ def workshop(acc, home, webview, js, logs):
     record("清單最上面那一行是 notice", notice == data["notice"], {"頁面上": notice, "index.json 的 notice": data["notice"]})
     ws = load_workshop()
     shown_by = {r[0]: r[4] for r in listing}
-    record("每一列有上傳者", all(shown_by[e["name"]] == ws.uploader(e.get("author")) for e in index) and all(r[4] for r in listing),
+    def by(author):  # 維護者那一列多「（維護者）」（D120）；別人的一列剛好是 uploader()，不能有它
+        return ws.uploader(author) + ("（維護者）" if ws.by_maintainer(author) else "")
+    record("每一列有上傳者", all(shown_by[e["name"]] == by(e.get("author")) for e in index) and all(r[4] for r in listing),
            {"上傳者": shown_by})
     shown = {r[0]: r[3] for r in listing}
     record("有 notes 的列有「這一版」", all(shown[e["name"]] == (f"這一版：{e['notes']}" if e.get("notes") else None) for e in index),
