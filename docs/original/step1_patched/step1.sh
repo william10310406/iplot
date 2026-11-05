@@ -6,7 +6,7 @@
 # macOS 沒有 timeout，改用「背景執行 & + sleep + kill -0」判斷 8 秒後是否還活著。
 # 執行時螢幕上會短暫跳出 Tk 視窗，正常。
 
-SRC=/Users/waiheng/Documents/6000_work/iplot
+SRC="$HOME/Documents/6000_work/iplot"
 WAIT=8
 export PYTHONUNBUFFERED=1
 
