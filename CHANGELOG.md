@@ -6,7 +6,7 @@
 
 這一段還沒發版（分支 `fix/safety-and-vision`，等人工驗收）。
 
-**D80 的第三個例外（D119）**：`core/create.py` 的 `new_module` 在父資料夾不存在時一併建立（`mkdir(parents=True)`），`ui/tk.py` 與 `ui/app.js` 讓 `modules/` 被刪掉時「這一層」仍有 ＋。原因：修種子從零啟動的缺陷——刪掉 `modules/` 之後，「這一層」沒有 ＋，就算按到也是「No such file or directory」（2026-11-05 現況盤點報告 5.3）。核心邏輯有效行 501，上限 505，沒有增加；`app` 沒變，`api_version` 仍是 3。
+**D80 的第三個例外（D119）**：`core/create.py` 的 `new_module` 在父資料夾不存在時一併建立（`mkdir(parents=True)`），`ui/tk.py` 與 `ui/app.js` 讓 `modules/` 被刪掉時「這一層」仍有 ＋。原因：修種子從零啟動的缺陷——刪掉 `modules/` 之後，「這一層」沒有 ＋，就算按到也是「No such file or directory」（2026-11-05 現況盤點）。核心邏輯有效行 501，上限 505，沒有增加；`app` 沒變，`api_version` 仍是 3。
 
 ### 修正
 - 刪掉 `modules/` 之後，按「這一層」的 ＋ 建得出第一個模組（`modules/` 會一併建立）。其他讀不到的根目錄照舊沒有 ＋。
