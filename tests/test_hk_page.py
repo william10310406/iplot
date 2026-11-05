@@ -6,6 +6,7 @@
 import gc
 import io
 import re
+import shlex
 import sys
 import types
 import weakref
@@ -70,29 +71,102 @@ def test_ensure_all_present_does_not_call_pip(tmp_path, load, standalone):
     assert popen.calls == []
 
 
-def test_ensure_installs_missing_with_user_flag_outside_venv(tmp_path, load, standalone, monkeypatch, capsys):
+def course_with_venv(tmp_path, venv=True):
+    """課程資料夾（有 hk_tk.py）與裡面的作業檔；venv 為真就放一個假的 .venv/bin/python。回 (file, python 或 None)。"""
+    course = tmp_path / "科學計算"
+    course.mkdir()
+    (course / "hk_tk.py").write_text("", encoding="utf-8")
+    python = None
+    if venv:
+        python = course / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        python.parent.mkdir(parents=True)
+        python.write_text("", encoding="utf-8")
+    return str(homework(course / "HK1")), python
+
+
+def test_hk_page_never_installs_into_the_users_python(load):
+    """不碰使用者的 Python：原始碼裡沒有 pip 的 --user，也不把 user site 加進 sys.path。"""
+    source = (COURSE / "hk_page.py").read_text(encoding="utf-8")
+    assert "--user" not in source and "getusersitepackages" not in source
+
+
+def test_ensure_outside_a_venv_installs_into_the_course_venv_and_reruns_there(tmp_path, load, standalone, monkeypatch, capsys):
     hp = load("hk_page")
     monkeypatch.delenv("HK_NO_INSTALL")
-    added = []
-    monkeypatch.setattr(hp.site, "addsitedir", added.append)
-    file = str(homework(tmp_path))
-    monkeypatch.setattr(sys, "base_prefix", sys.prefix)  # 不在 venv 裡
+    file, python = course_with_venv(tmp_path)
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)  # 不在 venv 裡（學生用系統的 Python 跑自己的檔）
     popen = FakePopen()
-    hp.ensure(["numpy", "no-such-pkg-m6"], file, popen=popen, argv=["別的.py"])
+    with pytest.raises(SystemExit) as done:
+        hp.ensure(["numpy", "no-such-pkg-m6"], file, popen=popen, argv=[file, "--all"])
+    assert done.value.code == 0
+    pip, rerun = popen.argvs
+    assert pip == [str(python), "-m", "pip", "install", "--no-input", "--disable-pip-version-check", "no-such-pkg-m6"]
+    assert rerun == [str(python), str(Path(file).resolve()), "--all"]  # 裝好之後用課程的 .venv 再跑一次，參數照舊
+    assert "--user" not in pip and "shell" not in popen.calls[0][1]
+    assert "課程的 .venv" in capsys.readouterr().out
+
+
+def test_ensure_outside_a_venv_passes_the_rerun_exit_code_on(tmp_path, load, standalone, monkeypatch):
+    hp = load("hk_page")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    file, python = course_with_venv(tmp_path)
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)
+    with pytest.raises(SystemExit) as done:
+        hp.ensure(["no-such-pkg-m6"], file, popen=FakePopen(fail=lambda argv: argv[1:2] == [str(Path(file).resolve())]),
+                  argv=[file])
+    assert done.value.code == 1
+
+
+def test_ensure_outside_a_venv_without_the_course_venv_says_what_to_do(tmp_path, load, standalone, monkeypatch):
+    """沒有課程的 .venv：不裝、不叫 pip，丟一段一步一步的白話（macOS），指令能直接複製貼上；README 寫同一套。"""
+    hp = load("hk_page")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    file, _ = course_with_venv(tmp_path, venv=False)
+    course = Path(file).parents[1]
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)
+    popen = FakePopen()
+    with pytest.raises(RuntimeError) as err:
+        hp.ensure(["no-such-pkg-m6", "other-pkg"], file, popen=popen, argv=[file])
+    said = str(err.value)
+    assert said.startswith("缺 no-such-pkg-m6、other-pkg，而且不裝進電腦本身的 Python。")
+    lines = said.split("\n")
+    commands = [ln.strip() for ln in lines if ln.startswith("   ")]  # 縮排三格的就是要貼的指令
+    assert commands == [f"cd {shlex.quote(str(course))}", "python3 -m venv .venv",
+                        ".venv/bin/python -m pip install no-such-pkg-m6 other-pkg"]
+    assert [ln[:2] for ln in lines if ln[:1].isdigit()] == ["1.", "2.", "3.", "4."]
+    assert "macOS" in said and "Windows 未經實機驗證" in said and "重新雙擊這個模組" in said and "--user" not in said
+    readme = (COURSE.parents[1] / "README.md").read_text(encoding="utf-8")  # 兩套說法不能不一樣
+    section = readme.split("### 科學計算課的環境（.venv）", 1)[1].split("\n## ", 1)[0]
+    for command in commands[1:]:
+        assert command.replace("no-such-pkg-m6 other-pkg", "套件名") in section, command
+    assert popen.calls == []
+
+
+def test_ensure_outside_a_venv_and_outside_the_course_folder_says_so(tmp_path, load, standalone, monkeypatch):
+    hp = load("hk_page")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    file = str(homework(tmp_path))  # 上面沒有 hk_tk.py：不知道哪一個是課程的 .venv
+    monkeypatch.setattr(sys, "base_prefix", sys.prefix)
+    popen = FakePopen()
+    with pytest.raises(RuntimeError, match="不在課程資料夾裡"):
+        hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
+    assert popen.calls == []
+
+
+def test_ensure_in_a_venv_installs_there(tmp_path, load, standalone, monkeypatch):
+    hp = load("hk_page")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    monkeypatch.setattr(sys, "base_prefix", "/某個/別的/prefix")  # 在 venv 裡：照裝
+    popen = FakePopen()
+    hp.ensure(["no-such-pkg-m6"], str(homework(tmp_path)), popen=popen, argv=["別的.py"])
     assert popen.argvs == [[sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check",
-                            "--user", "no-such-pkg-m6"]]
-    assert "shell" not in popen.calls[0][1]
-    assert added == [hp.site.getusersitepackages()]  # 剛建好的 user site 也進 sys.path
-    assert "no-such-pkg-m6" in capsys.readouterr().out
-    monkeypatch.setattr(sys, "base_prefix", "/某個/別的/prefix")  # 在 venv 裡：不加 --user
-    popen = FakePopen()
-    hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=["別的.py"])
-    assert "--user" not in popen.argvs[0]
+                            "no-such-pkg-m6"]]
 
 
 def test_ensure_failed_pip_says_the_command(tmp_path, load, standalone, monkeypatch):
     hp = load("hk_page")
     monkeypatch.delenv("HK_NO_INSTALL")
+    monkeypatch.setattr(sys, "base_prefix", "/某個/別的/prefix")  # 在 venv 裡
     with pytest.raises(RuntimeError, match=r"裝不了 no-such-pkg-m6：在終端機 .* -m pip install no-such-pkg-m6"):
         hp.ensure(["no-such-pkg-m6"], str(homework(tmp_path)), popen=FakePopen(fail=lambda argv: True),
                   argv=["別的.py"])
@@ -573,7 +647,7 @@ def test_ensure_from_iplot_never_installs_outside_a_venv(tmp_path, load, standal
     with pytest.raises(RuntimeError, match="先按「科學計算」裝課程套件"):
         hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
     assert popen.calls == []
-    monkeypatch.setattr(sys, "base_prefix", "/某個/別的/prefix")  # 課程的 .venv：照裝，不加 --user
+    monkeypatch.setattr(sys, "base_prefix", "/某個/別的/prefix")  # 課程的 .venv：照裝
     hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
     assert popen.argvs[0][-1] == "no-such-pkg-m6" and "--user" not in popen.argvs[0]
 

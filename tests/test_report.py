@@ -1538,6 +1538,43 @@ def test_page_reminds_to_log_in_and_paste(load, tmp_path, monkeypatch, opened):
     assert "存不了檔" in r["sentence"] and "完整的回報只在剪貼簿裡" in r["sentence"]
 
 
+WARNING = "這會公開在網路上，任何人都看得到。送出前請自己再看一次，刪掉姓名、學號等個人資料。"
+
+
+def test_public_warning_sentence(load):
+    assert load("report").PUBLIC_WARNING == WARNING
+
+
+def test_page_warns_right_above_the_send_button(load):
+    """預覽頁：送出（「在瀏覽器打開」）那顆鈕的正上方有一句明顯的公開提示；字從 render 的資料來，page.html 不另抄一份。"""
+    page = PAGE.read_text(encoding="utf-8")
+    tree = Tree(page)
+    tag, attrs, parents = tree.ids["warning"]
+    assert ("section", {"id": "edit"}) in parents and attrs.get("class") == "warning"
+    assert WARNING not in page and '$("warning").textContent = data.warning' in page
+    between = page[page.index('id="warning"'):page.index('id="open"')]
+    assert between.count("<p") == 1 and "<textarea" not in between and "<label" not in between  # 中間隔著的只有它自己那一段
+
+
+def test_both_pages_carry_the_warning_in_their_data(tmp_path, web, opened):
+    for hook in ("on_error", "run"):
+        home = tmp_path / hook / "iPLoT"  # copied() 每次把模組複製進 home/modules：各用各的
+        args = (sample_error(home),) if hook == "on_error" else ()
+        view = View()
+        result, _ = press(home, view, hook, *args)
+        assert result.ok, result.error
+        assert page_data(view.events[0][2])["warning"] == WARNING, hook
+
+
+def test_tk_confirm_starts_with_the_public_warning(tmp_path, tk, monkeypatch, opened):
+    home = tmp_path / "iPLoT"
+    view = View()
+    view.answers = [False]
+    result, _ = press(home, view, "on_error", sample_error(home))
+    assert result.ok, result.error
+    assert view.confirmed[0].startswith(WARNING) and "草稿在 回報/" in view.confirmed[0]
+
+
 def test_on_error_opens_the_preview_page(tmp_path, web, opened):
     home = tmp_path / "iPLoT"
     view = View()

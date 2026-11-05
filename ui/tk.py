@@ -82,7 +82,7 @@ class Panel:
         head = tk.Frame(self.body)
         head.pack(fill="x", padx=8, pady=(8, 0))
         tk.Label(head, text=group.label, font=("", 13, "bold")).pack(side="left")
-        if group.note is None:  # 根目錄讀不到時沒有地方可以建，不給 ＋
+        if group.note is None or group.level == "here":  # 其他根目錄讀不到時沒有地方可以建，不給 ＋；modules/ 被刪掉 create 會重建
             tk.Button(head, text="＋", command=lambda: self._create(group.root)).pack(side="right")
         if not group.modules:
             tk.Label(self.body, text=group.note or T["empty_group"], fg="gray").pack(anchor="w", padx=24)

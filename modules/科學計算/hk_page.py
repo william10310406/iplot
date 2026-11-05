@@ -12,7 +12,7 @@ import importlib.metadata
 import os
 import platform
 import re
-import site
+import shlex
 import subprocess
 import sys
 import traceback
@@ -189,8 +189,30 @@ def _hand_off(file: Path, need: list[str], popen) -> None:
     sys.exit(0)
 
 
+MAKE_VENV = "python3 -m venv .venv"  # README「科學計算課的環境（.venv）」寫同一行，test_hk_page 核對
+VENV_PIP = ".venv/bin/python -m pip install {names}"
+
+
+def _no_venv(need: list[str], course: Path | None) -> str:
+    """不在 venv 裡、也找不到課程的 .venv：白話說明為什麼不裝，再一步一步（macOS）能照著做的做法。"""
+    head = f"缺 {'、'.join(need)}，而且不裝進電腦本身的 Python。"
+    if course is None:
+        return (f"{head}這份作業不在課程資料夾裡（上面找不到 hk_tk.py），不知道該裝進哪一個 .venv。"
+                "請先把它放進課程資料夾（有 hk_tk.py 的那一個），再重新執行一次。")
+    return (f"{head}課程資料夾裡還沒有 .venv。請照下面做（macOS；Windows 未經實機驗證，指令不一樣）：\n"
+            "1. 打開「終端機」，貼上這一行、按 Enter，進到課程資料夾：\n"
+            f"   cd {shlex.quote(str(course))}\n"
+            "2. 貼上這一行、按 Enter，建立課程專用的 .venv：\n"
+            f"   {MAKE_VENV}\n"
+            "3. 貼上這一行、按 Enter，安裝缺的套件（要等幾分鐘）：\n"
+            f"   {VENV_PIP.format(names=' '.join(need))}\n"
+            "4. 回到 iPLoT，重新雙擊這個模組。\n"
+            "（也可以在 iPLoT 雙擊「科學計算」，它會替你做第 2、3 步，裝的是整門課的套件。）")
+
+
 def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[str] | None = None) -> None:
-    """作業檔第二行：缺的套件裝進正在跑的這個 Python（不在 venv 裡就加 --user），裝完才往下 import。
+    """作業檔第二行：缺的套件裝進正在跑的這個 venv，裝完才往下 import。不在 venv 裡（系統的 Python）就裝進課程的 .venv、
+    再用它重跑這個檔，沒有課程的 .venv 就說怎麼建；絕不裝進使用者自己的 Python。
     學生自己跑自己的檔時，先把檔裡 import 了、REQUIRES 沒寫的補進 REQUIRES 那一行。
     在 iPLoT 的面板程序裡絕不裝、絕不改檔：缺了就交給課程的 .venv（回報第 0 節「要定的事」第 2 條）。"""
     requires = [requires] if isinstance(requires, str) else list(requires)
@@ -223,13 +245,20 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
         if os.environ.get(BATCH):  # 批次名單開的：沒有「科學計算」那顆按鈕（看記號，不看上面有沒有 hk_tk.py）
             raise RuntimeError(f"缺 {'、'.join(need)}：批次模式要先建好 venv（--venv，或 zip 旁邊的 科學計算-venv）")
         raise RuntimeError(f"缺 {'、'.join(need)}：先按「科學計算」裝課程套件（不裝進 iPLoT 自己的 Python）")
+    python, rerun = sys.executable, None
+    if not in_venv:  # 學生用系統的 Python 跑自己的檔：裝進課程的 .venv，裝好用它重跑（不碰使用者的 Python）
+        course = _course(Path(file))
+        python = _venv_python(course)
+        if python is None:
+            raise RuntimeError(_no_venv(need, course))
+        rerun = [str(python), str(Path(file).resolve()), *(argv if argv is not None else sys.argv)[1:]]
     print(f"在裝 {'、'.join(need)}（第一次要幾分鐘）…")
-    argv_pip = [sys.executable, "-m", "pip", "install", "--no-input", "--disable-pip-version-check",
-                *([] if in_venv else ["--user"]), *need]
+    argv_pip = [str(python), "-m", "pip", "install", "--no-input", "--disable-pip-version-check", *need]
     if popen(argv_pip).wait() != 0:
-        raise RuntimeError(f"裝不了 {'、'.join(need)}：在終端機 {sys.executable} -m pip install {' '.join(need)}")
-    if not in_venv:  # 剛建好的 user site 不在 sys.path 上（Python 啟動時它還不在）
-        site.addsitedir(site.getusersitepackages())
+        raise RuntimeError(f"裝不了 {'、'.join(need)}：在終端機 {python} -m pip install {' '.join(need)}")
+    if rerun:
+        print("已裝進課程的 .venv，改用它再跑一次")
+        sys.exit(popen(rerun, cwd=str(Path(file).resolve().parent)).wait())
     importlib.invalidate_caches()
 
 

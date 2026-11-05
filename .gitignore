@@ -7,6 +7,9 @@ __pycache__/
 .ruff_cache/
 .venv/
 .coverage
+# 工作坊安裝模組時產生的每機標記檔（來源與安裝狀態、第一次執行前要確認），各台電腦自己的，不進 git
+modules/*/.origin
+modules/*/.unconfirmed
 # 「互通」自己產生的：捷徑與紀錄（各台電腦自己的，不進 git、不進發佈的包）
 modules/互通/捷徑/
 modules/互通/.python

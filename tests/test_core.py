@@ -130,10 +130,18 @@ def test_entered_folder_deleted(home, view):
     assert c.scope.crumbs == ("iPLoT",) and view.reports == []
 
 
-def test_create_in_missing_root_logs(home, view):
+def test_create_in_missing_root_builds_it(home, view):
+    """D119：根目錄不存在（modules/ 被刪掉）就一併建立。"""
     c = started(home, view)
-    assert c.create(home / "nope", "A") is None
-    assert view.logs[-1].startswith(f"無法在 {home / 'nope'} 建立模組")
+    folder = c.create(home / "nope", "A")
+    assert folder == home / "nope" / "A" and (folder / "iplot.py").is_file()
+
+
+def test_create_where_the_parent_is_a_file_logs(home, view):
+    c = started(home, view)
+    (home / "檔").write_text("x", encoding="utf-8")
+    assert c.create(home / "檔", "A") is None
+    assert view.logs[-1].startswith(f"無法在 {home / '檔'} 建立模組")
 
 
 def test_snapshot_failure_still_runs_and_rescans(home, view, monkeypatch):

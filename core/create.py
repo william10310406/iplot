@@ -32,12 +32,12 @@ def _bad_name(name: str) -> bool:
 def new_module(parent: Path, name: str) -> Path:
     """在 parent 底下做一個叫 name 的模組，回傳它的資料夾。
 
-    資料夾不存在就建立；已存在但沒有 iplot.py 就只寫入 iplot.py，把它變成模組。"""
+    資料夾不存在就建立（父資料夾也是，modules/ 被刪掉時 ＋ 仍能用）；已存在但沒有 iplot.py 就只寫入 iplot.py，把它變成模組。"""
     if _bad_name(name):
         raise BadName(name)
     file = parent / name / "iplot.py"
     if file.exists():  # 不分大小寫：原版的 iPLoT.py 也算，絕不覆寫
         raise AlreadyExists(name)
-    file.parent.mkdir(exist_ok=True)
+    file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(template(), encoding="utf-8")
     return file.parent

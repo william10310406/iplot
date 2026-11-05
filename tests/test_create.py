@@ -24,6 +24,13 @@ def test_creates_folder_and_file(tmp_path):
     assert (folder / "iplot.py").read_text(encoding="utf-8") == template()
 
 
+def test_creates_missing_parent_folders(tmp_path):
+    """modules/ 被刪掉時 ＋ 也要能用：父資料夾不存在就一併建立（種子要能從零啟動）。"""
+    folder = new_module(tmp_path / "modules", "A")
+    assert folder == tmp_path / "modules" / "A"
+    assert (folder / "iplot.py").read_text(encoding="utf-8") == template()
+
+
 def test_existing_folder_without_iplot_becomes_module(tmp_path):
     (tmp_path / "Documents").mkdir()
     (tmp_path / "Documents" / "keep.txt").write_text("x", encoding="utf-8")

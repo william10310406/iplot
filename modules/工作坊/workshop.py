@@ -31,6 +31,9 @@ BUTTONS = {"absent": "安裝", "update": "更新", "modified": "覆蓋", "unknow
 # iPLoT 自己要用的隨附模組：工作坊不覆蓋（覆蓋之後帶著 .unconfirmed，右鍵動作每次先問、啟動時要安裝介面卻沒辦法回答）
 BUNDLED = ("作業系統", "更新", "工作坊")
 BUNDLED_NOTE = "這是 iPLoT 自己要用的隨附模組，工作坊不覆蓋它；要換新版，自己把新的資料夾複製進 modules/。"
+# 清單上標「維護者」的 GitHub 帳號（不分大小寫）：其他人上傳的模組沒有經過審查，按「安裝」前清單頁要先讓人看這一句
+MAINTAINERS = ("william10310406",)
+RISK_NOTE = "這是其他人寫的程式，沒有經過審查，能讀寫你電腦上的所有檔案。只安裝你信任的人做的模組。"
 CONFIRM = "需要確認"  # 已修改、版本未知的要先確認才覆蓋：page.html 看到這個回答就不會當成裝好了
 NEEDED = ("name", "version", "zip_url", "sha256")  # 索引的每一筆至少要有這幾項
 MISMATCH = "無法安裝：下載的檔案跟清單對不上。清單可能剛更新過，關掉工作坊再開一次；再不行就是檔案有問題"
@@ -377,6 +380,11 @@ def uploader(author):
     return f"上傳者：@{author}" if re.fullmatch(r"[A-Za-z0-9-]+", author) else f"上傳者：{author}"
 
 
+def by_maintainer(author):
+    """上傳者是維護者（author 是帳號名，不分大小寫；沒有 author 的清單看不出是誰，不算）。"""
+    return isinstance(author, str) and author.casefold() in MAINTAINERS
+
+
 def render(entries, modules_dir, template, notice=""):
     """把清單變成 page.html 裡的一列列（放進 template 的 {rows}），清單最上面那一行放進 {notice}。
     清單是從網路來的，裡面的字一律當文字，不當 HTML；notice、author、warning 不是字串、或只有空白，就當沒有。"""
@@ -387,12 +395,15 @@ def render(entries, modules_dir, template, notice=""):
     for entry in entries:
         now = state(entry, modules_dir)
         name = html.escape(str(entry["name"]), quote=True)
-        button = (f'<button type="button" data-name="{name}" data-ask="{int(now in ("modified", "unknown"))}">'
+        mine = by_maintainer(entry.get("author"))
+        risk = "" if mine else f' data-risk="{html.escape(RISK_NOTE, quote=True)}"'  # 按之前先問一次，page.html 照這句顯示
+        ask = int(now in ("modified", "unknown") or not mine)
+        button = (f'<button type="button" data-name="{name}" data-ask="{ask}"{risk}>'
                   f"{BUTTONS[now]}</button>") if now in BUTTONS else ""
         note = f'<div class="note">{BUNDLED_NOTE}</div>' if now == "bundled" else ""
         notes = entry.get("notes") or ""  # 這一版改了什麼（D78）；舊的索引沒有這一項
         notes = f'<div class="notes">這一版：{html.escape(str(notes))}</div>' if notes else ""
-        line = uploader(entry.get("author"))
+        line = uploader(entry.get("author")) + ("（維護者）" if mine else "")
         author = f'<div class="author">{html.escape(line)}</div>' if line else ""
         w = entry.get("warning")
         warning = f'<div class="warning">⚠ {html.escape(w)}</div>' if isinstance(w, str) and w.strip() else ""

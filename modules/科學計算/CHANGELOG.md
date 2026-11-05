@@ -2,6 +2,13 @@
 
 「科學計算」這個模組的版本紀錄，格式跟 iPLoT 的 CHANGELOG.md 一樣（[Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)）。`tools/publish.py` 取最上面那一節的版本號當工作坊裡的版本，取那一節的第一段當清單頁上的「這一版」。
 
+## [0.1.1] - 2026-11-05
+
+作業檔缺套件時不再裝進電腦本身的 Python（不再 pip install --user）：裝進課程的 .venv；沒有 .venv 時一步一步說怎麼建。
+
+### 修正
+- `hk_page.ensure` 不再 `pip install --user`（D120）：在 venv 裡照舊裝進那個 venv；不在 venv 裡就找課程資料夾的 `.venv`，用它的 Python 裝、裝好用它把同一個檔重跑一次；找不到 `.venv`（或作業不在課程資料夾裡）時，用白話說明為什麼不裝進電腦本身的 Python、怎麼建 `.venv`。也不再把 user site 加進 `sys.path`。
+
 ## [0.1.0] - 2026-10-16
 
 第一版：一門課一顆「科學計算」。按下去裝課程套件（分兩批，裝進這個資料夾自己的 .venv）；下一層的「匯入作業包」選老師的 t2026fscSpace，長出 HK1–HK12；「收作業」選 TronClass 下載的檔（一人一個 .zip 或 .txt，或全班一包的 zip），每個學生長出一顆；按一個學生＝用課程的 Python 另開一個 Tk 視窗，照原樣跑他交的 HKn.txt；照 docs/09 寫的新格式作業也收得進來，由新格式的殼 hk_page.py 開 matplotlib 的視窗。沒有 iPLoT 的助教用 `python hk_tk.py --batch HK5.zip --kit t2026fscSpace`。

@@ -12,14 +12,37 @@
    - Linux：這一版沒有網頁面板，開的是 tkinter 面板。發行版的 Python 加上 `python3-tk` 套件（Debian／Ubuntu：`sudo apt install python3-tk`）。
 2. 到 [https://william10310406.github.io/iplot-workshop/](https://william10310406.github.io/iplot-workshop/) 下載 `iPLoT-vX.Y.Z.zip`（那一頁也列了工作坊裡的模組），解壓縮，資料夾放哪裡都可以（例如 `~/iPLoT`）。
 3. 啟動：
-   - macOS：雙擊 `iPLoT.command`。第一次 macOS 可能問你要不要打開，選「打開」。
+   - macOS：雙擊 `iPLoT.command`。從網路下載的檔沒有 Apple 的簽章，macOS 會擋下來，要過一關（逐步的說明在 [docs/08_操作說明-0.6.1.md](docs/08_操作說明-0.6.1.md) 的第 6 步）：
+     - macOS 15 以後：跳出對話框時按「完成」；打開蘋果選單 → 系統設定 → 隱私權與安全性，捲到「安全性」那一段，按「iPLoT.command」旁邊的「強制打開」，再按一次「強制打開」，輸入密碼或用 Touch ID。之後再雙擊就會打開。
+     - macOS 14 以前：不要直接雙擊；在 `iPLoT.command` 上按右鍵（或 Control＋按），選「打開」，對話框裡再按「打開」。
+     - 不想走上面的步驟：在終端機執行 `xattr -dr com.apple.quarantine ~/iPLoT`（把路徑換成自己放 iPLoT 的資料夾），之後直接雙擊。
+     - 這兩種 macOS 的畫面都沒有親眼看過，按鈕的字可能因系統版本不同。
    - Windows：雙擊 `iPLoT.bat`。**未經實機驗證。**
    - Linux：執行 `./iPLoT.sh` 或 `python3 main.py`。終端機先說一句網頁面板還不支援 Linux，接著開後備的 tkinter 面板，照常掃上一層與 `ROOTS`；加 `--safe` 才是安全模式，只掃 `modules/`（見下一節）。**只由測試驗過參數，沒有在真的 Linux 桌面上跑過。**
 4. 第一次啟動會自動安裝介面（Linux 沒有這一步），要網路：終端機顯示「第一次啟動：正在安裝介面（需要網路，約 40 MB）…」和 pip 的進度，套件裝進 iPLoT 資料夾裡的 `lib/`，裝完視窗自己出現。在開發用的 Mac 上，乾淨下載花了 1 分 46 秒（看網路速度），`lib/` 裝完 36 MB。之後每次啟動直接開視窗，不用網路（例外：按「更新」換了版本、新版要的套件跟舊版不一樣時，下一次啟動會重裝一次，見「更新與工作坊」）。沒有網路或裝不起來時，終端機會說原因，並自動改開後備的 tkinter 面板——不是安全模式，見下一節；有網路後重新啟動 iPLoT 就會再裝一次。
 
 三個系統的差別都在 `modules/作業系統/` 這一個模組裡（打開檔案、開終端機、垃圾桶各系統的做法，以及第一次啟動要裝哪一份、缺什麼）；現況與怎麼驗見 [docs/07_接口與邊界.md](docs/07_接口與邊界.md) 第 9 節。
 
-不用自己安裝任何套件：介面要用的套件由 iPLoT 第一次啟動時裝進它自己的 `lib/`（版本釘死在 `requirements/`），不碰系統的 Python。要移除就把整個資料夾丟進垃圾桶（pip 自己的下載快取不在這個資料夾裡，那是 pip 的）。開發端另外需要 `pip install -r requirements-dev.txt`（pytest、pytest-cov、ruff）。
+不用自己安裝任何套件：介面要用的套件由 iPLoT 第一次啟動時裝進它自己的 `lib/`（版本釘死在 `requirements/`），不碰系統的 Python。要移除就把整個資料夾丟進垃圾桶，但用過某些模組之後，有幾樣東西會留在資料夾外面，見下一節〈完整移除〉。開發端另外需要 `pip install -r requirements-dev.txt`（pytest、pytest-cov、ruff）。
+
+## 完整移除
+
+iPLoT 本身（`core/`、`ui/`、`lib/`、`modules/`、`logs/`、`.history/`、`.backup/`）都在它的資料夾裡：整個資料夾丟進垃圾桶，這些就跟著消失。下面這些是模組在資料夾**外面**留下的，用過那個模組才會有，丟掉資料夾不會自己消失。要全部清乾淨，照下表一項一項處理；沒用過那個模組的項目可以跳過。
+
+| 留在外面的東西 | 哪個模組留的 | 在哪裡 | 怎麼清 |
+|---|---|---|---|
+| 行事曆的資料（行程、心情、照片、產生的網頁） | 行事曆 | 預設 `~/Documents/行事曆/`；在行事曆的 ⚙ 按過「換資料夾」的話，是換去的那個資料夾（`modules/行事曆/設定.json` 記著），先把它找出來 | 這是你自己寫的日記，所以刻意放在 iPLoT 外面，丟掉 iPLoT 不會刪它。要保留就留著，要刪就把那個資料夾丟進垃圾桶（刪掉就沒有了，先想清楚要不要備份） |
+| macOS 的「檔案與檔案夾」授權（TCC） | 互通（捷徑、面板外執行） | 系統設定 → 隱私權與安全性 → 檔案與檔案夾，在 Python 底下的「文件」「桌面」「下載項目」 | 打開系統設定到那一頁，把 Python 底下的開關關掉（或整個 Python 項目的授權收回）。這份授權記在 Python 名下，不是 iPLoT 名下，所以其他用同一個 Python 的程式也會受影響 |
+| Dock 上的捷徑 | 互通 | 你自己拖到 Dock 的 `modules/互通/捷徑/` | 丟掉資料夾之後，Dock 上那個圖示會變成問號或打不開；把它拖出 Dock，放開就會消失 |
+| Spotlight 的搜尋結果 | 互通 | `modules/互通/捷徑/` 裡的 `.app`，Spotlight 會收錄 | 資料夾丟進垃圾桶、清空垃圾桶之後，搜尋結果通常會自己消失（這一點還沒有實測）；還搜得到的話，先等幾分鐘、重新開機一次；仍然在，就把 Spotlight 的索引重建（做法依 macOS 版本不同，這裡沒有實測） |
+| 批次批改的輸出 | 科學計算（`hk_tk.py --batch`） | 你給的 zip 旁邊：`<zip 名>_收件/`（收進來的作業）與 `科學計算-venv/`（批次用的套件） | 把這兩個資料夾丟進垃圾桶。在面板裡按「收作業」收的，在 `modules/科學計算/` 裡，跟著 iPLoT 的資料夾走 |
+| 課程模型與 pip 快取 | 科學計算 | `~/.cache/huggingface/hub`（HK9 的模型）；`~/Library/Caches/pip`（pip 的下載快取，不只 iPLoT 在用） | 不需要的話丟進垃圾桶；pip 的快取也可以用 `python3 -m pip cache purge` 清掉 |
+| 垃圾桶裡的東西 | 作業系統（「移到垃圾桶」） | `~/.Trash` | 這是設計（模組只搬進垃圾桶，不真的刪），想清掉就清空垃圾桶 |
+
+另外兩件事：
+
+- 模組可以自己決定寫到哪裡（它是一個 Python 檔，能做任何事）。上表只列隨附的和已知的模組；從工作坊裝的別人的模組，打開它的程式碼看它寫到哪裡（右鍵 → 打開程式碼）。
+- 這一節寫的是 macOS。Windows 與 Linux 的對應位置（資料夾的位置不同）**未經實機驗證**。
 
 ## 安全模式
 
@@ -138,7 +161,7 @@ UPDATE_URL = "https://william10310406.github.io/iplot-workshop/update.json"
 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"
 ```
 
-從 0.5.x 換上來的，照 CHANGELOG 0.6.0 那一段做（按「更新」跳出來的說明就是它；`docs/08_操作說明-0.6.0.md` 第 1.2 節）。從 0.5.0、0.5.1 換上來、沒做過 0.5.2 那兩件事的（`WORKSHOP_URL` 還指著 `iplot-workshop/index.json`，或 `modules/工作坊` 還沒照 0.5.2 的說明換過），照那一段最後幾句做：用 0.6.0 的包裡 `iPLoT-v0.6.0/modules` 的「回報與討論」「互通」「工作坊」換掉自己 `modules/` 裡的，把 `WORKSHOP_URL` 換成上面那一行，執行「重新啟動」，再在面板雙擊一次「互通」把捷徑重新做好（做法見 docs/08 第 1.2 節第 6 步）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
+從 0.5.x 換上來的，照 CHANGELOG 0.6.1 那一段做（按「更新」跳出來的說明就是它；`docs/08_操作說明-0.6.1.md` 第 1.2 節）。從 0.5.0、0.5.1 換上來、沒做過 0.5.2 那兩件事的（`WORKSHOP_URL` 還指著 `iplot-workshop/index.json`，或 `modules/工作坊` 還沒照 0.5.2 的說明換過），照那一段最後幾句做：用 0.6.0 的包裡 `iPLoT-v0.6.0/modules` 的「回報與討論」「互通」「工作坊」換掉自己 `modules/` 裡的，把 `WORKSHOP_URL` 換成上面那一行，執行「重新啟動」，再在面板雙擊一次「互通」把捷徑重新做好（做法見 docs/08 第 1.2 節第 6 步）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
 
 不想連網：把網址換成 `None`（不加引號），存檔，執行「重新啟動」；按下去只會說一句怎麼設定。要用別人放檔案的地方：換成那個人給的網址（字串，要加引號）。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，照上面那三行自己加上去；不加等於沒設定（`None`）。
 
@@ -274,7 +297,7 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 
 ### 上傳自己的模組
 
-要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.6.0.md](docs/08_操作說明-0.6.0.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
+要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.6.1.md](docs/08_操作說明-0.6.1.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
 
 ## 在面板外打開模組
 
@@ -317,11 +340,30 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 - **「匯入作業包」**（在「科學計算」的下一層）：選老師的 `t2026fscSpace` 資料夾，每個 `HKn.txt` 長成一格。
 - **「收作業」**（同一層）：選 TronClass 下載的檔（一人一個 `.zip` 或 `.txt`，或全班一包的 zip），可以多選；檔名裡看得出 HKn 就收進那一份，看不出來會問一次。
 - **批次模式（不開面板）**：在 `modules/科學計算/` 裡執行 `python3 hk_tk.py --batch ~/Downloads/HK5.zip --kit ~/Downloads/t2026fscSpace`，收進 zip 旁邊的 `HK5_收件/`（套件裝進 zip 旁邊的 `科學計算-venv/`），開一個全班名單的視窗，雙擊一個就開；Windows 未經實機驗證。
-- 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.6.0.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
+- 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.6.1.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
+
+### 科學計算課的環境（.venv）
+
+課程的套件只裝進課程資料夾裡的 `.venv`，不裝進電腦本身的 Python。在 iPLoT 雙擊「科學計算」就會建好；沒有 `.venv` 時，單獨執行一份作業會停下來，說明下面這幾步（macOS；Windows 未經實機驗證，指令不一樣）：
+
+1. 打開「終端機」，進到課程資料夾（有 `hk_tk.py` 的那一個）：`cd 課程資料夾的路徑`
+2. 建立課程專用的 `.venv`：
+
+   ```
+   python3 -m venv .venv
+   ```
+
+3. 安裝缺的套件（把「套件名」換成訊息裡寫的，要等幾分鐘）：
+
+   ```
+   .venv/bin/python -m pip install 套件名
+   ```
+
+4. 回到 iPLoT，重新雙擊那個模組。
 
 ## 回報問題與討論
 
-錯誤訊息旁邊的「回報這個問題」（隨附的模組「回報與討論」）會先遮掉路徑與使用者名稱、給你看、讓你改，再用瀏覽器開到 `https://github.com/william10310406/iplot/discussions` 的新增頁，標題、內文都填好；雙擊面板上「回報與討論」這一格，可以回報沒有錯誤訊息的問題、提建議、問問題、看論壇。要有 GitHub 帳號，送出是你在瀏覽器裡按：iPLoT 不登入、不連網，只把內容填進網址交給瀏覽器。論壇是公開的，學生的名字請自己再看一次（錯誤訊息裡直接寫著的名字遮不到）。iPLoT 打不開的時候，直接到那個網址發；怎麼按、遮了什麼、沒遮什麼，見 [docs/08](docs/08_操作說明-0.6.0.md) 第 10 節。
+錯誤訊息旁邊的「回報這個問題」（隨附的模組「回報與討論」）會先遮掉路徑與使用者名稱、給你看、讓你改，再用瀏覽器開到 `https://github.com/william10310406/iplot/discussions` 的新增頁，標題、內文都填好；雙擊面板上「回報與討論」這一格，可以回報沒有錯誤訊息的問題、提建議、問問題、看論壇。要有 GitHub 帳號，送出是你在瀏覽器裡按：iPLoT 不登入、不連網，只把內容填進網址交給瀏覽器。論壇是公開的，學生的名字請自己再看一次（錯誤訊息裡直接寫著的名字遮不到）。iPLoT 打不開的時候，直接到那個網址發；怎麼按、遮了什麼、沒遮什麼，見 [docs/08](docs/08_操作說明-0.6.1.md) 第 10 節。
 
 ## 文件
 

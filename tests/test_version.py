@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.6.0")
+    assert core.__version__.startswith("0.6.1")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
@@ -64,6 +64,30 @@ def test_0_6_0_notes_carry_the_manual_steps():
     assert notes.rindex("重新啟動") < notes.index("雙擊一次「互通」")  # 捷徑在新的核心起來之後才重做
 
 
-def test_docs_08_repeats_the_0_6_0_notes():
-    doc = (ROOT / "docs" / "08_操作說明-0.6.0.md").read_text(encoding="utf-8")
-    assert _notes("0.6.0") in doc
+def test_0_6_1_notes_carry_both_paths():
+    """0.6.1 的「要更新嗎？」：0.6.0 的人直接按「確定」；還在 0.5.x 的人看到的也只有這一段，所以 0.6.0 那套
+    「先到工作坊換互通、再按更新」的退路照樣帶著（版本號換成 0.6.1）。"""
+    notes = _notes("0.6.1")
+    assert notes
+    assert "\n" not in notes
+    assert "`" not in notes
+    for part in (
+        "modules/ 資料夾被刪掉時",
+        "這會公開在網路上",
+        "已經是 0.6.0 的人：按「確定」",
+        "還在 0.5.x 的人請先按「取消」",
+        "互通 0.1.0 支援 iPLoT 0.5",
+        ".backup/download-0.6.1.zip",
+        "iPLoT-v0.6.1/modules",
+        'WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"',
+        "雙擊一次「互通」",
+        "按送出前，請先看一下 GitHub 內文裡有沒有人名或學號，有的話不要送出，直接告訴我。",
+    ):
+        assert part in notes, part
+    assert "0.6.0.zip" not in notes and "iPLoT-v0.6.0" not in notes
+    assert notes.index("「互通」按「覆蓋」或「更新」") < notes.index("再回來按「更新」")
+
+
+def test_docs_08_repeats_the_0_6_1_notes():
+    doc = (ROOT / "docs" / "08_操作說明-0.6.1.md").read_text(encoding="utf-8")
+    assert _notes("0.6.1") in doc
