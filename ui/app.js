@@ -48,7 +48,7 @@ function groupEl(g) {
   if (!g.modules.length) section.append(el("div", "empty", g.note || T.empty_group));
   const tiles = el("div", "tiles");
   tiles.append(...g.modules.map(tileEl));
-  if (g.note == null) tiles.append(addTile(g));  // 根目錄讀不到時沒有地方可以建，不給 ＋
+  if (g.note == null || g.level === "here") tiles.append(addTile(g));  // 其他根目錄讀不到時沒有地方可以建，不給 ＋；modules/ 被刪掉 create 會重建
   section.append(tiles);
   return section;
 }

@@ -132,3 +132,9 @@ def test_style_css_keeps_colors_in_the_variables_at_the_top():
     stray = [line for line in code if literal.search(line) and not line.startswith("--")]
     assert not stray, stray
     assert "prefers-color-scheme: dark" in css
+
+
+def test_app_js_gives_the_here_group_a_plus_even_when_its_folder_is_missing():
+    """modules/ 被刪掉時「這一層」有 note，仍要有 ＋（create 會建立它）；其他讀不到的根目錄照舊不給。"""
+    code = JS_COMMENT.sub("", _page("app.js"))
+    assert 'g.note == null || g.level === "here"' in code

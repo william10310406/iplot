@@ -114,6 +114,15 @@ def test_unreadable_root_has_note_and_no_plus(home, panel):
     assert [b.cget("text") for b in widgets(panel.body, tkinter.Button)].count("＋") == 1
 
 
+def test_missing_modules_folder_still_gets_plus_and_create_builds_it(home, panel):
+    """modules/ 被刪掉：「這一層」有 note 也要有 ＋，按了建得出模組（create 會一併建立 modules/）。"""
+    shutil.rmtree(home / "modules")
+    core = started(home, panel)
+    assert [b.cget("text") for b in widgets(panel.body, tkinter.Button)].count("＋") == 2
+    folder = core.create((home / "modules").resolve(), "第一個")
+    assert folder is not None and (folder / "iplot.py").is_file()
+
+
 def test_report_keeps_plain_sentence_at_the_end(home, panel):
     make_module(home / "modules", "A", "def run(app):\n    x = 1\n    1/0\n")
     started(home, panel)
