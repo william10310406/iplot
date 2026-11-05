@@ -932,6 +932,42 @@ def test_render_shows_uploader_between_name_and_description(workshop, mods, entr
     assert '<b>整理桌面</b><div class="author">上傳者：@someone</div><div class="desc">' in html
 
 
+RISK = "這是其他人寫的程式，沒有經過審查，能讀寫你電腦上的所有檔案。只安裝你信任的人做的模組。"
+
+
+def test_risk_sentence(workshop):
+    assert workshop.RISK_NOTE == RISK
+
+
+@pytest.mark.parametrize("author", ["someone", "william10310406x", "x-william10310406", "帳號已刪除", "", None, 5])
+def test_render_asks_first_for_a_module_from_anyone_but_the_maintainer(workshop, mods, entry, author):
+    """安裝別人上傳的模組：按鈕先問一次，風險那句放在按鈕上（page.html 照它顯示）；沒有 author 的也算別人。"""
+    html = workshop.render([{**entry, "author": author}], mods, "{rows}")
+    assert 'data-ask="1"' in html and f'data-risk="{RISK}"' in html and "維護者" not in html
+
+
+@pytest.mark.parametrize("author", ["william10310406", "William10310406"])  # GitHub 帳號名不分大小寫
+def test_render_marks_the_maintainer_and_does_not_warn(workshop, mods, entry, author):
+    html = workshop.render([{**entry, "author": author}], mods, "{rows}")
+    assert f'<div class="author">上傳者：@{author}（維護者）</div>' in html
+    assert 'data-ask="0"' in html and "data-risk" not in html and RISK not in html
+
+
+def test_render_keeps_the_risk_on_update_and_overwrite(workshop, mods, entry):
+    stranger = {**entry, "author": "someone"}
+    workshop.install(stranger, mods)
+    assert 'data-risk="' in workshop.render([{**stranger, "version": "2.0.0"}], mods, "{rows}")  # 更新
+    (mods / "整理桌面" / "helper.py").write_text("改過", encoding="utf-8")
+    assert 'data-risk="' in workshop.render([stranger], mods, "{rows}")  # 覆蓋
+    assert "data-risk" not in workshop.render([{**stranger, "author": "william10310406"}], mods, "{rows}")
+
+
+def test_the_risk_text_comes_from_python_not_from_the_page():
+    page = _page()
+    assert RISK not in page and "button.dataset.risk" in page
+    assert page.index("function ask") < page.index("button.dataset.risk") < page.index('list.addEventListener("click"')
+
+
 def test_render_without_author_has_no_uploader_line(workshop, mods, entry):
     for bad in ({}, {"author": 5}, {"author": None}, {"author": ""}, {"author": "  "}):
         html = workshop.render([{**entry, **bad}], mods, "{rows}")
