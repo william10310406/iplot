@@ -63,9 +63,9 @@ class CwApp(FakeApp):
 
 
 class _FakeProcess:
-    def __init__(self, argv, kwargs, returncode, lines):
+    def __init__(self, argv, kwargs, returncode, lines, errors=()):
         self.args, self.kwargs, self.returncode = list(argv), kwargs, returncode
-        self.stdout = iter(lines)
+        self.stdout, self.stderr = iter(lines), iter(errors)
         self._lines = list(lines)
 
     def wait(self, timeout=None):
@@ -80,14 +80,14 @@ class _FakeProcess:
 
 class FakePopen:
     """假的 subprocess.Popen：FakePopen(fail=…, lines=…) 這個物件當 popen 注入；每次被叫就在 calls
-    記下 (argv, kwargs)。fail(argv) 為真時 returncode 是 1，否則 0；stdout 依序給 lines。"""
+    記下 (argv, kwargs)。fail(argv) 為真時 returncode 是 1，否則 0；stdout 依序給 lines，stderr 給 stderr。"""
 
-    def __init__(self, fail=None, lines=()):
-        self.calls, self.fail, self.lines = [], fail, list(lines)
+    def __init__(self, fail=None, lines=(), stderr=()):
+        self.calls, self.fail, self.lines, self.errors = [], fail, list(lines), list(stderr)
 
     def __call__(self, argv, **kwargs):
         self.calls.append((list(argv), kwargs))
-        return _FakeProcess(argv, kwargs, 1 if self.fail and self.fail(argv) else 0, self.lines)
+        return _FakeProcess(argv, kwargs, 1 if self.fail and self.fail(argv) else 0, self.lines, self.errors)
 
 
 def make_course(root: Path, name: str = "測試課", **settings) -> Path:

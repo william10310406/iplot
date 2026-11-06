@@ -462,6 +462,25 @@ def test_main_outside_iplot_opens_no_window_for_a_traceback(cw, agg, monkeypatch
     assert texts == []
 
 
+def test_main_from_iplot_says_on_stderr_that_it_opened_an_error_window(cw, agg, monkeypatch, capsys):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    monkeypatch.setattr(cw, "_show_text", lambda title, text, show_fn=None: None)
+    cw.main(make_hw([], fail={"case-1"}), argv=["--all"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg))
+    assert capsys.readouterr().err.splitlines() == [cw.SHOWN_MARK]  # 兩個 case 只壞一個：一行
+
+
+def test_main_outside_iplot_never_prints_the_mark(cw, agg, capsys):
+    cw.main(make_hw([], fail={"case-1"}), argv=["--all"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg))
+    assert cw.SHOWN_MARK not in capsys.readouterr().err
+
+
+def test_cli_show_text_opens_a_text_window(cw, monkeypatch):
+    texts = []
+    monkeypatch.setattr(cw, "_show_text", lambda title, text, show_fn=None: texts.append((title, text)))
+    assert cw.cli(["--show-text", "HK6", "第一行\n第二行"]) == 0
+    assert texts == [("HK6", "第一行\n第二行")]
+
+
 def test_main_sets_installed_chinese_fonts_before_drawing(cw, agg):
     import matplotlib
 

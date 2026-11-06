@@ -304,6 +304,9 @@ def _header(hw: dict) -> list[str]:
     return lines
 
 
+SHOWN_MARK = "[coursework] 錯誤已經開了視窗"  # iPLoT 另開時印到 stderr 的一行；框架看到它就不再開錯誤視窗（D142）
+
+
 def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=None) -> int:
     """作業檔最後一行：先印 NAME、NOTE、DOCS；選 case（--case <名>、--all 不問）；每個 case 先 compute，
     印 text 與 stats，有 draw 就開一個 matplotlib 視窗（關掉才下一個）。iPLoT 另開的（CW_FROM_IPLOT）
@@ -319,7 +322,7 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
     chosen = _choose(cases, hw, list(sys.argv[1:] if argv is None else argv), ask, out)
     if chosen is None:
         return 2
-    failed, header_shown = False, False
+    failed, header_shown, marked = False, False, False
     for i, case in enumerate(chosen):
         print(f"── {case} ──", file=out)
         title = f"{hw['name']} — {case}"
@@ -357,6 +360,9 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
                 header_shown = True
                 with contextlib.suppress(Exception):  # 連文字視窗都開不了（matplotlib 壞了）：上面已經印了
                     _show_text(title, "\n".join(shown + [f"{case} 出錯了：", error.rstrip()]), show_fn)
+                    if not marked:  # 告訴另開這個程序的框架：錯誤已經給人看了，不用再開一個（D142）
+                        print(SHOWN_MARK, file=sys.stderr, flush=True)
+                        marked = True
     return 1 if failed else 0
 
 
@@ -751,12 +757,16 @@ def check(file: Path) -> list[Problem]:
 
 def cli(argv: list[str], version=sys.version_info) -> int:
     """python coursework.py --check <作業檔>：擋的印 ✗ R<n> 第 <行> 行：<句子>、只警告的印 ⚠ 開頭；
-    有擋的回 1，沒有就印「通過」回 0；用錯回 2。Python 不到 3.10：跟 ensure 同一句、回 1（D139）。"""
+    有擋的回 1，沒有就印「通過」回 0；用錯回 2。Python 不到 3.10：跟 ensure 同一句、回 1（D139）。
+    python coursework.py --show-text <標題> <文字>：開一個文字視窗（框架在作業開始跑之前就出錯時用，D142）。"""
     with contextlib.suppress(AttributeError, ValueError):
         sys.stdout.reconfigure(encoding="utf-8")
     if tuple(version[:2]) < MIN_PYTHON:
         print(TOO_OLD.format(have=".".join(str(v) for v in version[:3])))
         return 1
+    if len(argv) == 3 and argv[0] == "--show-text":
+        _show_text(argv[1], argv[2])
+        return 0
     if len(argv) != 2 or argv[0] != "--check":
         print("用法：python coursework.py --check <作業檔>", file=sys.stderr)
         return 2

@@ -92,7 +92,7 @@ def requires(file: Path) -> set[str]:
     return {r for r in written if isinstance(r, str) and r} if isinstance(written, list) else set()
 
 
-def _shell():
+def shell():
     """從檔案載入旁邊的 coursework.py（換個名字，不動 sys.modules 裡的 coursework：那可能是別人的）。
     dataclass 要在 sys.modules 找得到自己的模組，所以載入期間放著、載完拿掉。"""
     name = "_coursework_for_check"
@@ -109,7 +109,7 @@ def _shell():
 def check(file: Path) -> list:
     """docs/09 第 3 節的規則（R1–R28）：coursework.check 的 Problem(rule, line, text) 清單；空的就是通過。
     作業那一格只警告、檢查與打包時擋（D131），由框架決定。不執行作業檔。"""
-    return _shell().check(Path(file))
+    return shell().check(Path(file))
 
 
 V0_HINT = "這是規範 v0 的檔：把 hk_page 換成 coursework、尾段換成 v2 的三行（docs/09 第 6 節）"
@@ -124,7 +124,25 @@ def hint(file: Path) -> str | None:
 def argv(file: Path, python: Path, case: str | None) -> tuple[list[str], dict[str, str]]:
     """在 iPLoT 裡另開程序跑：課的 Python 跑作業檔，--case <名> 或 --all；殼靠 PYTHONPATH 找（不複製進作業資料夾）。"""
     run = [str(python), str(file), *(["--case", case] if case is not None else ["--all"])]
-    return run, {"PYTHONPATH": str(Path(__file__).resolve().parent), "CW_FROM_IPLOT": "1"}
+    return run, {"PYTHONPATH": str(Path(__file__).resolve().parent), "CW_FROM_IPLOT": "1",
+                 "PYTHONIOENCODING": "utf-8"}  # stderr 用 UTF-8：框架讀回來給老師看（D142）
+
+
+ERROR_TAIL = 40  # 開始跑之前就出錯時，給老師看 stderr 的最後幾行
+
+
+def shown_mark() -> str:
+    """殼自己開了錯誤視窗時印到 stderr 的那一行（框架看到就不再開）。"""
+    return shell().SHOWN_MARK
+
+
+def error_window(file: Path, python: Path, returncode: int, tail: list[str]) -> list[str]:
+    """作業在殼的 main 開始之前就出錯（頂層的錯、import 錯）：用課的 Python 跑殼的 --show-text 開一個文字視窗，
+    開頭一句白話，接 stderr 的最後幾行；stderr 是空的就說結束碼（D142）。"""
+    code = Path(file).stem
+    body = "".join(tail).rstrip("\n") or f"（Python 沒有留下錯誤訊息，結束碼 {returncode}）"
+    text = f"{code} 在開始跑之前就出錯了，下面是 Python 的錯誤訊息：\n\n{body}"
+    return [str(python), str(Path(__file__).resolve().parent / f"{SHELL}.py"), "--show-text", code, text]
 
 
 def new(folder: Path, code: str) -> Path:

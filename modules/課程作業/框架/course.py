@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import collections
+import contextlib
 import importlib.util
 import json
 import os
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -461,16 +463,20 @@ def case_prompt(code: str, cases: list[tuple[str, str]]) -> str:
     lines = [f"{code} 要跑哪一個？"]
     lines += [f"{n}) {name}  {label}".rstrip() for n, (name, label) in enumerate(cases, 1)]
     lines.append("0) 全部")
-    which = "1 跑這一個 case" if len(cases) == 1 else f"1–{len(cases)} 跑一個 case"
+    which = "1 跑這個 case" if len(cases) == 1 else f"1–{len(cases)} 跑一個 case"
     lines.append(f"打 {which}，打 0 全部跑：")
     return "\n".join(lines)
 
 
+def _in_background(job) -> None:
+    threading.Thread(target=job, daemon=True).start()
+
+
 def homework_button(app, folder: Path, popen=subprocess.Popen, now=datetime.now,
-                    apple_silicon: bool | None = None) -> None:
+                    apple_silicon: bool | None = None, background=_in_background) -> None:
     """作業那一格（D128）：留一份作業檔的版本 → --check 有問題就列出來、照跑（D131）→ 課的 .venv 不在或缺
-    REQUIRES 就問一次、裝 → app.ask 選 case（0 全部；沒有 case 就不問）→ 用課的 .venv 另開程序跑，不等它。
-    只用 ast 讀作業檔，從不執行它；讀不到檔說一句話。"""
+    REQUIRES 就問一次、裝 → app.ask 選 case（0 全部；沒有 case 就不問）→ 用課的 .venv 另開程序跑，不等它：
+    背景讀它的 stderr，開始跑之前就出錯時另開一個文字視窗（D142）。只用 ast 讀作業檔，從不執行它；讀不到檔說一句話。"""
     folder = Path(folder)
     course_folder = course_root(folder)
     if course_folder is None:
@@ -488,12 +494,13 @@ def homework_button(app, folder: Path, popen=subprocess.Popen, now=datetime.now,
         return
     code, file = found
     try:
-        _press(app, course, kinds, code, file, popen, now, _apple_silicon() if apple_silicon is None else apple_silicon)
+        _press(app, course, kinds, code, file, popen, now, _apple_silicon() if apple_silicon is None else apple_silicon,
+               background)
     except OSError as exc:
         app.log(f"{code}：{_unreadable(file, exc)}，沒跑")
 
 
-def _press(app, course: Course, kinds, code: str, file: Path, popen, now, apple: bool) -> None:
+def _press(app, course: Course, kinds, code: str, file: Path, popen, now, apple: bool, background) -> None:
     kind = _kind_of(file, kinds)
     snapshot_homework(file, now=now)
     if kind is None:  # 不是 v2 的作業（語法錯、不是 UTF-8、規範 v0、不是作業）：列問題、說一句、不跑
@@ -528,8 +535,26 @@ def _press(app, course: Course, kinds, code: str, file: Path, popen, now, apple:
             return
         case = cases[int(answer) - 1][0] if int(answer) else None
     argv, env = kind.argv(file, python, case)
-    popen(argv, cwd=str(file.parent), env={**os.environ, **env})
+    proc = popen(argv, cwd=str(file.parent), env={**os.environ, **env},
+                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     app.log(f"{code}：{case or '全部'} 的視窗開了（在 Dock 上找 Python）")
+    background(lambda: _watch(proc, kind, file, python, popen))
+
+
+def _watch(proc, kind, file: Path, python: Path, popen) -> None:
+    """讀完子程序的 stderr、等它結束：結束碼不是 0、而且殼沒說它已經開了錯誤視窗（作業在 main 開始之前就出錯），
+    就用作業類型給的指令另開一個文字視窗放 stderr 的最後幾行（D142）。在背景跑，面板不等；這裡不碰 app。"""
+    mark, shown = kind.shown_mark(), False
+    tail: collections.deque[str] = collections.deque(maxlen=kind.ERROR_TAIL)
+    for line in proc.stderr or ():
+        if line.rstrip("\r\n") == mark:
+            shown = True
+        else:
+            tail.append(line)
+    returncode = proc.wait()
+    if returncode != 0 and not shown:
+        with contextlib.suppress(OSError):  # 連課的 Python 都叫不起來：沒有別的地方能說了
+            popen(kind.error_window(file, python, returncode, list(tail)), cwd=str(file.parent))
 
 
 def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool) -> bool:

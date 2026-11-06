@@ -273,7 +273,7 @@ def test_cli_on_real_old_python(tmp_path):
     assert done.stdout.startswith("這份作業要 Python 3.10 以上")
 
 
-@pytest.mark.parametrize("argv", [[], ["--check"], ["HK1.py"], ["--check", "a.py", "b.py"]])
+@pytest.mark.parametrize("argv", [[], ["--check"], ["HK1.py"], ["--check", "a.py", "b.py"], ["--show-text", "HK1"]])
 def test_cli_usage_returns_2(cw, argv, capsys):
     assert cw.cli(argv) == 2
     assert "--check" in capsys.readouterr().err

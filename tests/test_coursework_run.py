@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timedelta
 
 import pytest
@@ -40,8 +41,8 @@ def fake_venv(course):
     return python
 
 
-def popen_with(installed=HAVE):
-    return FakePopen(lines=[json.dumps(installed)])
+def popen_with(installed=HAVE, **kw):
+    return FakePopen(lines=[json.dumps(installed)], **kw)
 
 
 def template_homework(course, n=1):
@@ -61,8 +62,14 @@ def press(course_mod, file, *answers, popen=None, now=None, confirms=(), **kw):
     app = CwApp(file.parent)
     app.answers_ask, app.answers = list(answers), list(confirms)
     popen = popen if popen is not None else popen_with()
-    course_mod.homework_button(app, file.parent, popen=popen, now=now or datetime.now, **kw)
+    course_mod.homework_button(app, file.parent, popen=popen, now=now or datetime.now,
+                               background=lambda job: job(), **kw)
     return app, popen
+
+
+def windows(popen):
+    """框架為了「開始跑之前就出錯」另開的文字視窗：coursework.py --show-text <標題> <文字>。"""
+    return [argv for argv, _ in popen.calls if "--show-text" in argv]
 
 
 def runs(popen, file):
@@ -80,6 +87,8 @@ def test_answer_2_runs_case_2_with_the_course_python(course_mod, hw):
     assert kw["cwd"] == str(file.parent)
     assert kw["env"]["PYTHONPATH"] == str(TYPE_DIR) and kw["env"]["CW_FROM_IPLOT"] == "1"
     assert kw["env"]["PATH"] == os.environ["PATH"]  # 其他環境變數照帶
+    assert kw["env"]["PYTHONIOENCODING"] == "utf-8"  # stderr 要讀回來給老師看（D142）
+    assert kw["stderr"] == subprocess.PIPE
     assert app.logs[-1] == "HK1：case-2 的視窗開了（在 Dock 上找 Python）"
 
 
@@ -106,7 +115,8 @@ def test_the_prompt_with_one_case_and_no_label(course_mod, tmp_path):
     file = make_homework(course, 1)  # CASES = {"case-1": dict(label="第一個")}
     file.write_text(file.read_text(encoding="utf-8").replace('dict(label="第一個")', "dict()"), encoding="utf-8")
     app, _ = press(course_mod, file, None)
-    assert app.asks[0][0].splitlines()[1:] == ["1) case-1", "0) 全部", "打 1 跑這一個 case，打 0 全部跑："]
+    assert app.asks[0][0].splitlines()[1:] == ["1) case-1", "0) 全部", "打 1 跑這個 case，打 0 全部跑："]
+    assert "1–1" not in app.asks[0][0]
 
 
 def test_cancel_runs_nothing(course_mod, hw):
@@ -456,7 +466,114 @@ def test_versions_folder_is_not_a_panel_child(course_mod, mod, tmp_path):
 
 def test_type_argv(kind, tmp_path):
     file, python = tmp_path / "HK1.py", tmp_path / ".venv" / "bin" / "python"
-    env = {"PYTHONPATH": str(TYPE_DIR), "CW_FROM_IPLOT": "1"}
+    env = {"PYTHONPATH": str(TYPE_DIR), "CW_FROM_IPLOT": "1", "PYTHONIOENCODING": "utf-8"}
     assert kind.argv(file, python, "case-2") == ([str(python), str(file), "--case", "case-2"], env)
     assert kind.argv(file, python, None) == ([str(python), str(file), "--all"], env)
 
+
+
+# ── 開始跑之前就出錯（D142）：框架讀子程序的 stderr，結束碼不是 0、殼又沒開過錯誤視窗時，開一個文字視窗 ──
+
+def test_failure_before_main_opens_a_window_with_the_last_40_lines(course_mod, hw):
+    _, file, python = hw
+    err = [f"雜訊 {i}\n" for i in range(60)] + ["Traceback (most recent call last):\n", "ZeroDivisionError: division by zero\n"]
+    popen = popen_with(fail=lambda argv: argv[1:2] == [str(file)], stderr=err)
+    press(course_mod, file, "1", popen=popen)
+    [argv] = windows(popen)
+    assert argv[:3] == [str(python), str(TYPE_DIR / "coursework.py"), "--show-text"] and argv[3] == "HK1"
+    text = argv[4]
+    lines = text.splitlines()
+    assert lines[0] == "HK1 在開始跑之前就出錯了，下面是 Python 的錯誤訊息："
+    assert lines[1] == "" and lines[2:] == [line.rstrip("\n") for line in err[-40:]]
+
+
+def test_a_clean_exit_opens_no_window(course_mod, hw):
+    _, file, _ = hw
+    popen = popen_with(stderr=["UserWarning: 只是警告\n"])
+    press(course_mod, file, "1", popen=popen)
+    assert windows(popen) == []
+
+
+def test_no_window_when_the_shell_already_opened_one(course_mod, hw, kind):
+    _, file, _ = hw
+    mark = kind.shell().SHOWN_MARK
+    popen = popen_with(fail=lambda argv: argv[1:2] == [str(file)], stderr=["前面\n", mark + "\n", "後面\n"] + ["x\n"] * 50)
+    press(course_mod, file, "1", popen=popen)
+    assert windows(popen) == []  # 記號在最後 40 行之外也算
+
+
+def test_failure_without_any_stderr_still_says_so(course_mod, hw):
+    _, file, _ = hw
+    popen = popen_with(fail=lambda argv: argv[1:2] == [str(file)])
+    press(course_mod, file, "1", popen=popen)
+    [argv] = windows(popen)
+    assert argv[4].splitlines()[0].startswith("HK1 在開始跑之前就出錯了") and "結束碼 1" in argv[4]
+
+
+def test_the_watch_runs_in_the_background_by_default(course_mod, hw, monkeypatch):
+    _, file, _ = hw
+    started = []
+
+    class Thread:
+        def __init__(self, target, daemon):
+            started.append(daemon)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(course_mod.threading, "Thread", Thread)
+    app = CwApp(file.parent)
+    app.answers_ask = ["1"]
+    popen = popen_with(fail=lambda argv: argv[1:2] == [str(file)], stderr=["boom\n"])
+    course_mod.homework_button(app, file.parent, popen=popen)
+    assert started == [True] and windows(popen) == []  # 沒有等子程序：面板馬上回來
+
+
+# 真的開子程序（用跑測試的這個 Python 當課的 .venv）；文字視窗那一次不真的開，只記下來
+
+@pytest.fixture
+def real(hw, monkeypatch):
+    monkeypatch.setenv("MPLBACKEND", "Agg")
+    course, file, python = hw
+    shown = []
+
+    def popen(argv, **kw):
+        if "--show-text" in argv:
+            shown.append(argv)
+            return FakePopen()(argv, **kw)
+        if argv[:1] == [str(python)]:
+            argv = [sys.executable, *argv[1:]]
+        return subprocess.Popen(argv, **kw)
+
+    return file, popen, shown
+
+
+def put_after_marker(file, code):
+    text = file.read_text(encoding="utf-8")
+    file.write_text(text.replace("# ── 從這裡開始是作業 ──", f"# ── 從這裡開始是作業 ──\n{code}", 1), encoding="utf-8")
+    return file.read_text(encoding="utf-8").splitlines().index(code) + 1
+
+
+def test_real_top_level_error_shows_zero_division_and_the_line(course_mod, real):
+    file, popen, shown = real
+    line = put_after_marker(file, "1 / 0")
+    press(course_mod, file, "1", popen=popen)
+    [argv] = shown
+    text = argv[4]
+    assert text.startswith("HK1 在開始跑之前就出錯了，下面是 Python 的錯誤訊息：\n")
+    assert "ZeroDivisionError" in text and f"line {line}" in text and "HK1.py" in text
+
+
+def test_real_clean_run_opens_no_error_window(course_mod, real):
+    file, popen, shown = real
+    press(course_mod, file, "1", popen=popen)
+    assert shown == []
+
+
+def test_real_case_error_is_shown_by_the_shell_not_again(course_mod, real):
+    file, popen, shown = real
+    text = file.read_text(encoding="utf-8")
+    file.write_text(text.replace("def compute(case):", "def compute(case):\n    raise ValueError(\"算壞了\")", 1),
+                    encoding="utf-8")
+    press(course_mod, file, "1", popen=popen)
+    assert shown == []  # 殼自己開了錯誤視窗（Agg 下 show 不開東西），框架不再開
