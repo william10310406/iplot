@@ -63,6 +63,9 @@ def _folder(value: object, line: int) -> str:
     if not isinstance(value, str) or len(FOLDER_SLOT.findall(value)) != 1 \
             or re.search(r"[{}]", FOLDER_SLOT.sub("", value)):
         raise _fail("FOLDER", line, "要是字串，而且剛好有一個 {n} 或 {n:0kd}（k 是 1–4，例如 \"HK{n:02d}\"）")
+    if re.search(r"[/\\]", value) or value.startswith("."):  # D136：作業資料夾一定在課裡、面板掃得到
+        raise _fail("FOLDER", line, "是作業資料夾的名字，作業資料夾要放在這門課的資料夾裡：不能有 / 或 \\，"
+                                    "也不能用 . 開頭（. 開頭的資料夾面板看不到）")
     return value
 
 
@@ -126,7 +129,7 @@ def read_course(folder: Path) -> Course:
         except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError) as exc:
             raise _fail(name, node.lineno, "只能寫字面值（字串、數字、list、dict、tuple）") from exc
         values[name] = CHECKS[name](value, node.lineno)
-    return Course(
+    course = Course(
         folder=folder,
         name=values.get("NAME", folder.name),  # type: ignore[arg-type]
         code=values.get("CODE", "HK{n}"),  # type: ignore[arg-type]
@@ -135,6 +138,15 @@ def read_course(folder: Path) -> Course:
         packages=values.get("PACKAGES", ()),  # type: ignore[arg-type]
         only_on=values.get("ONLY_ON", {}),  # type: ignore[arg-type]
     )
+    # D136：用 FOLDER 組出來的作業資料夾，解析後（連結、..）一定在課的資料夾之內
+    first = (folder / folder_of(course, 1)).resolve()
+    if first.parent != folder.resolve():
+        line = next((n.lineno for n in tree.body if isinstance(n, ast.Assign)
+                     and getattr(n.targets[0], "id", "") == "FOLDER"), None)
+        where = f"第 {line} 行：" if line else ""
+        raise CourseError(f"{where}FOLDER 組出來的作業資料夾 {folder_of(course, 1)} 實際上指到這門課的資料夾外面"
+                          "（可能是連結），作業資料夾要放在這門課的資料夾裡")
+    return course
 
 
 def code_of(course: Course, n: int) -> str:

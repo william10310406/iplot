@@ -97,11 +97,29 @@ def test_good_code_is_accepted(course_mod, tmp_path, code):
 @pytest.mark.parametrize("folder", [
     "HK{n:05d}", "HK{n:00d}", "HK{n:d}", "HK{n:2d}", "HK{n}{n}", "HK{n}{n:02d}", "HK{n.real}", "HK{n!r}",
     "HK", "HK{n:02d", "HK{x}{n}",
+    "../{n}", "a/HK{n:02d}", "HK{n}/x", "HK\\{n}", ".HK{n}", "./{n}", "/{n}",  # 路徑分隔符與 . 開頭（面板不掃）
 ])
 def test_bad_folder_format_is_refused(course_mod, tmp_path, folder):
     with pytest.raises(course_mod.CourseError) as err:
         read(course_mod, tmp_path, f"FOLDER = {folder!r}\n")
     assert "FOLDER" in str(err.value)
+
+
+def test_folder_that_resolves_outside_the_course_is_refused(course_mod, tmp_path):
+    """D136：連結把作業資料夾指到課外面也擋；錯誤說哪一行、為什麼。"""
+    outside = tmp_path / "外面"
+    outside.mkdir()
+    folder = write(tmp_path / "課", "# 註解\nFOLDER = 'HK{n:02d}'\n")
+    (folder / "HK01").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(course_mod.CourseError) as err:
+        course_mod.read_course(folder)
+    assert "第 2 行" in str(err.value) and "外面" in str(err.value)
+
+
+def test_separator_message_says_why(course_mod, tmp_path):
+    with pytest.raises(course_mod.CourseError) as err:
+        read(course_mod, tmp_path, "FOLDER = '../HK{n}'\n")
+    assert "第 1 行" in str(err.value) and "/" in str(err.value) and "課的資料夾裡" in str(err.value)
 
 
 @pytest.mark.parametrize("folder", ["HK{n}", "HK{n:01d}", "HK{n:02d}", "Lab{n:03d}", "作業{n:04d}"])
