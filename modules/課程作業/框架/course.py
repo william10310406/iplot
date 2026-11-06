@@ -4,9 +4,15 @@
 from __future__ import annotations
 
 import ast
+import collections
 import importlib.util
+import json
 import os
+import platform
 import re
+import subprocess
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -21,6 +27,9 @@ KEEP_PY = 20  # .版本/ 裡作業檔的 .py 最多留幾份
 FRAMEWORK = Path("框架") / "course.py"  # 往上找框架時認的檔
 TYPES_DIR = "作業類型"  # 框架所在的資料夾底下：每種作業一個資料夾，裡面是 type.py
 PIP_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# 子程序裡列出這個 Python 裝了哪些套件（不 import 它們）
+LIST_INSTALLED = ("import importlib.metadata, json; "
+                  "print(json.dumps([d.metadata['Name'] for d in importlib.metadata.distributions()]))")
 FOLDER_SLOT = re.compile(r"\{n(?::0([1-4])d)?\}")  # {n} 或 {n:01d}…{n:04d}；不用 str.format 驗使用者給的字串
 
 
@@ -203,3 +212,183 @@ def load_type(name: str, framework: Path) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)  # type: ignore[union-attr]
     return module
+
+
+# ── 課的 .venv：建、列已裝、缺的問一次、一個一個裝（從科學計算的 hk_tk 複製來改，不 import 它）──
+
+def python_in(venv_dir: Path) -> Path:
+    """venv 裡 Python 的位置（不查在不在）。"""
+    return Path(venv_dir) / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+
+
+def venv_python(course: Path | None) -> Path | None:
+    """課 .venv 的 Python；還沒建（或 course 是 None）回 None。"""
+    if course is None:
+        return None
+    python = python_in(Path(course) / ".venv")
+    return python if python.is_file() else None
+
+
+def _normal(dist: str) -> str:
+    return re.sub(r"[-_.]+", "-", dist).lower()
+
+
+def ensure_venv(venv_dir: Path, say, popen=subprocess.Popen, python: str = sys.executable) -> Path:
+    """venv_dir 的 Python；還沒有就用 python -m venv 建（不帶 --system-site-packages）。"""
+    venv_dir = Path(venv_dir)
+    exe = python_in(venv_dir)
+    if exe.is_file():
+        return exe
+    if os.environ.get(NO_INSTALL):
+        raise RuntimeError(f"{NO_INSTALL}：不建 .venv")
+    say(f"在建 {venv_dir.parent.name}/{venv_dir.name} …")
+    code = popen([str(python), "-m", "venv", str(venv_dir)]).wait()
+    if code != 0:
+        raise RuntimeError(f"建不了 {venv_dir}：代碼 {code}")
+    return exe
+
+
+def installed(python: Path, popen=subprocess.Popen) -> set[str]:
+    """python 那個環境裝了哪些套件（名字正規化成小寫、- 連接）；問不到回空集合。"""
+    proc = popen([str(python), "-c", LIST_INSTALLED], stdout=subprocess.PIPE, text=True)
+    out, _ = proc.communicate()
+    try:
+        return {_normal(n) for n in json.loads(out)}
+    except (ValueError, TypeError):
+        return set()
+
+
+def missing(python: Path, pkgs, popen=subprocess.Popen) -> list[str]:
+    """pkgs 裡 python 那個環境還沒有的，照原順序、不重複。"""
+    have, out = installed(python, popen=popen), []
+    for pkg in pkgs:
+        if _normal(pkg) not in have and _normal(pkg) not in map(_normal, out):
+            out.append(pkg)
+    return out
+
+
+def install(python: Path, pkgs: list[str], say, popen=subprocess.Popen, clock=time.monotonic):
+    """一個一個 pip install 進 python 那個環境；一個裝不了，其他照裝。
+    pip 的輸出一行一行讀，每 5 秒 say 一次最後一行。回（裝好的, [(裝不了的, 原因)]）。"""
+    ok, failed = [], []
+    for pkg in pkgs:
+        if not PIP_NAME.fullmatch(pkg):  # fullmatch：$ 會放過結尾的換行
+            failed.append((pkg, "名字不合法"))
+        elif os.environ.get(NO_INSTALL):
+            failed.append((pkg, NO_INSTALL))
+        else:
+            proc = popen([str(python), "-m", "pip", "install", "--no-input", "--disable-pip-version-check", pkg],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            tail, last = collections.deque(maxlen=5), clock()
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if not line:
+                    continue
+                tail.append(line)
+                now = clock()
+                if now - last >= 5:
+                    say(f"{pkg}：{line}")
+                    last = now
+            if proc.wait() == 0:
+                ok.append(pkg)
+            else:
+                errors = [t.strip() for t in tail if t.strip().startswith("ERROR")]
+                failed.append((pkg, " / ".join(errors or [t.strip() for t in tail])))
+    return ok, failed
+
+
+def summary_of_install(ok, failed) -> str:
+    """「已裝 a、b；裝不了 c（原因）」；兩個都空回空字串。"""
+    parts = []
+    if ok:
+        parts.append("已裝 " + "、".join(ok))
+    if failed:
+        parts.append("裝不了 " + "、".join(f"{p}（{why}）" for p, why in failed))
+    return "；".join(parts)
+
+
+# ── 課那一格 ──
+
+def _apple_silicon() -> bool:
+    return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
+def homeworks(course: Course) -> list[tuple[str, Path]]:
+    """這門課的作業（代號, 作業檔），照數字排：課裡每個資料夾（. 開頭的不算）底下名字剛好是 <代號>.py 的檔，
+    而且是 TYPES 裡某一種認得的作業（classify 說 mine）。只看檔名與 ast，不執行。"""
+    found: list[tuple[int, str, Path]] = []
+    try:
+        folders = sorted(p for p in course.folder.iterdir() if p.is_dir() and not p.name.startswith("."))
+    except OSError:
+        return []
+    for sub in folders:
+        for file in sorted(sub.glob("*.py")):
+            n = code_number(course, file.stem)
+            if n is not None and file.stem == code_of(course, n):
+                found.append((n, file.stem, file))
+    return [(code, file) for _, code, file in sorted(found)]
+
+
+def _requires(course: Course, kinds: list[ModuleType]) -> dict[str, set[str]]:
+    """代號 → 這份作業要的 pip 名；不是任何一種 TYPES 認得的作業就不算。"""
+    out: dict[str, set[str]] = {}
+    for code, file in homeworks(course):
+        kind = next((k for k in kinds if k.classify(file)[0] == "mine"), None)
+        if kind is not None:
+            out[code] = kind.requires(file)
+    return out
+
+
+def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool | None = None) -> None:
+    """課那一格：把這門課要的套件裝進課的 .venv。PACKAGES 有就一批一批問（一次只問一批），沒有就裝每份作業
+    REQUIRES 的聯集；ONLY_ON 的套件在不對的機器上不裝，句子說哪幾份作業在這裡看不了。先問、確定了才建 .venv。"""
+    folder = Path(folder)
+    apple = _apple_silicon() if apple_silicon is None else apple_silicon
+    try:
+        course = read_course(folder)
+        framework = Path(__file__).resolve().parent.parent
+        needs = _requires(course, [load_type(name, framework) for name in course.types])
+    except CourseError as exc:
+        app.log(f"{folder.name}：{exc}")
+        return
+    if course.packages:
+        batches = [(f"{why}：", list(pkgs), size) for pkgs, why, size in course.packages]
+    else:
+        batches = [("", sorted(set().union(*needs.values()), key=str.lower), "")]
+    off = {_normal(p) for p in course.only_on} if not apple else set()
+    skipped = [p for _, pkgs, _ in batches for p in pkgs if _normal(p) in off]
+    batches = [(label, [p for p in pkgs if _normal(p) not in off], size) for label, pkgs, size in batches]
+    note = ""
+    if skipped:
+        users = [code for code, req in needs.items() if {_normal(r) for r in req} & {_normal(p) for p in skipped}]
+        note = f"這台機器裝不了 {'、'.join(skipped)}（只有 Apple Silicon 的 Mac 裝得了）"
+        if users:
+            note += f"，用到它的作業 {'、'.join(users)} 在這裡看不了"
+    python = venv_python(folder)
+    pending = [(label, pkgs if python is None else missing(python, pkgs, popen), size)
+               for label, pkgs, size in batches if pkgs]
+    pending = [item for item in pending if item[1]]
+    if not pending:
+        said = "課程套件都在" if any(pkgs for _, pkgs, _ in batches) else "這門課還沒有需要裝的套件（沒有作業，或作業的 REQUIRES 都是空的）"
+        app.log(f"{said}；{note}" if note else said)
+        return
+    label, need, size = pending[0]
+    if os.environ.get(NO_INSTALL):
+        app.log(f"{NO_INSTALL}：不建 .venv、不裝套件（還缺 {'、'.join(need)}）")
+        return
+    ask = f"要裝{course.name}的課程套件嗎？{label}{'、'.join(need)}。{size + '，' if size else ''}裝進 {folder.name}/.venv" \
+          + ("（還沒建，會先建）" if python is None else "") + "；網路慢的話要很久，裝的時候別的按鈕要等它裝完"
+    if not app.confirm(f"{ask}。{note}" if note else ask):
+        app.log("沒裝")
+        return
+    try:
+        python = ensure_venv(folder / ".venv", say=app.log, popen=popen)
+    except RuntimeError as exc:
+        app.log(str(exc))
+        return
+    ok, failed = install(python, need, say=app.log, popen=popen)
+    said = summary_of_install(ok, failed)
+    if len(pending) > 1:
+        later = pending[1]
+        said += f"；{later[0].rstrip('：')}{'（' + later[2] + '）' if later[2] else ''}再按一次「{course.name}」"
+    app.log(f"{said}；{note}" if note else said)
