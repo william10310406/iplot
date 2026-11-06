@@ -197,7 +197,7 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
     """作業檔第二行：缺的套件在這一行裝好，裝完才往下 import。
     1. Python 不到 3.10：說一句話、結束碼 1。
     2. 不在 venv 裡（系統的 Python）：找得到 .venv（作業旁邊，或上面的課程資料夾）就用它重跑同一個檔、
-       帶原本的參數、結束碼照它的（先重跑，不先查缺什麼）；找不到就只看缺不缺，缺了說 README 的兩行，絕不叫 pip。
+       帶原本的參數、結束碼照它的（先重跑，不先查缺什麼）；找不到就只看缺不缺，缺了印 README 的兩行、結束碼 1，絕不叫 pip。
     3. 在 venv 裡：學生自己跑自己的檔時，先把 import 了、REQUIRES 沒寫的補進 REQUIRES 那一行；缺的裝進這個 venv。"""
     if tuple(version[:2]) < MIN_PYTHON:
         print(TOO_OLD.format(have=".".join(str(v) for v in version[:3])))
@@ -210,8 +210,9 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
             sys.exit(popen([str(python), str(Path(file).resolve()), *argv[1:]],
                            cwd=str(Path(file).resolve().parent)).wait())
         need = missing(requires)
-        if need:
-            raise RuntimeError(_no_venv(need, Path(file)))
+        if need:  # D138：跟版本那句一樣說完就結束，學生看到的不是 traceback
+            print(_no_venv(need, Path(file)))
+            sys.exit(1)
         return
     extra = []
     own = bool(argv) and Path(file).resolve() == Path(argv[0]).resolve()

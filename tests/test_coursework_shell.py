@@ -116,12 +116,16 @@ def test_outside_venv_finds_the_course_venv_but_prefers_the_one_next_to_the_file
     assert popen.calls[1][0][0] == str(own)
 
 
-def test_outside_venv_without_a_venv_says_the_readme_lines_and_never_calls_pip(cw, tmp_path, outside_venv):
+def test_outside_venv_without_a_venv_says_the_readme_lines_and_never_calls_pip(cw, tmp_path, outside_venv, capsys):
+    """D138：跟版本那句一樣，印白話、結束碼 1，不丟例外（學生看不到 traceback）。"""
     file = homework(tmp_path / "HK1")
     popen = FakePopen()
-    with pytest.raises(RuntimeError) as err:
+    with pytest.raises(SystemExit) as done:
         cw.ensure(["numpy", "no-such-pkg-cw"], str(file), popen=popen, argv=[str(file)])
-    said = str(err.value)
+    assert done.value.code == 1
+    captured = capsys.readouterr()
+    said = captured.out.rstrip("\n")
+    assert captured.err == "" and said == cw._no_venv(["no-such-pkg-cw"], file)
     assert "no-such-pkg-cw" in said and "numpy" not in said.split("\n")[0].replace("no-such-pkg-cw", "")
     lines = [ln.strip() for ln in said.split("\n") if ln.startswith("    ")]  # 四個空格的是要打的指令
     assert lines == [cw.MAKE_VENV, cw.RUN.format(file="HK1.py"), cw.WIN_MAKE_VENV, cw.WIN_RUN.format(file="HK1.py")]
