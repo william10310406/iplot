@@ -2,6 +2,7 @@
 自動補 REQUIRES；main（Task 5）。CW_NO_INSTALL=1、Popen 一律假的、不連網。"""
 
 import ast
+import io
 import sys
 from pathlib import Path
 
@@ -268,3 +269,168 @@ def test_fill_requires_keeps_a_bom_and_dedupes(cw, tmp_path):
     assert cw.fill_requires(file, ["scipy", "numpy", "scipy"]) is True
     assert file.read_bytes() == b'\xef\xbb\xbfREQUIRES = ["numpy", "scipy"]  # x\nimport scipy\n'
     assert cw.fill_requires(file, []) is False
+
+
+# ── A10：main ──
+
+@pytest.fixture
+def agg():
+    """main 會 import matplotlib.pyplot：測試用 Agg，不開視窗；rcParams 用完還原；沒有 matplotlib 的機器跳過。"""
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with matplotlib.rc_context():
+        yield plt
+    plt.close("all")
+
+
+def make_hw(calls, draw=True, text=None, fail=(), stats=True):
+    """兩個 case 的作業 dict（規範 v2 的 HOMEWORK）；calls 記下 compute／draw 被怎麼叫。"""
+    def compute(case):
+        calls.append(("compute", case))
+        if case in fail:
+            raise ValueError(f"{case} 算壞了")
+        run = {"case": case, "x": [0, 1, 2]}
+        if text:
+            run["text"] = text
+        return run
+
+    def draw_fn(fig, run):
+        from matplotlib.animation import FuncAnimation
+
+        calls.append(("draw", type(fig).__name__, run["case"]))
+        (line,) = fig.add_subplot(111).plot(run["x"], run["x"])
+        return FuncAnimation(fig, lambda i: (line,), frames=3, interval=10)
+
+    return dict(name="HK1 範例", note="筆記寫這裡。\n第二行。",
+                docs=[("Circular motion", "https://example.invalid/circle"), ("角速度", "https://example.invalid/w")],
+                cases={"case-1": dict(label="第一個"), "case-2": dict(label="第二個")},
+                compute=compute, draw=draw_fn if draw else None,
+                stats=(lambda run: [("點數", str(len(run["x"])))]) if stats else None, file=__file__)
+
+
+def drawn(plt, then=None):
+    """假的 plt.show：把現在的圖畫一次（動畫才算有畫過），再做 then。"""
+    def show_fn():
+        plt.gcf().canvas.draw()
+        if then:
+            then()
+    return show_fn
+
+
+def no_ask(prompt):
+    raise AssertionError("有 --case、--all 就不問")
+
+
+def test_main_prints_name_note_docs_first(cw, agg):
+    out = io.StringIO()
+    assert cw.main(make_hw([]), argv=["--case", "case-1"], ask=no_ask, out=out, show_fn=drawn(agg)) == 0
+    lines = out.getvalue().splitlines()
+    assert lines[:5] == ["HK1 範例", "筆記寫這裡。", "第二行。", "Circular motion：https://example.invalid/circle",
+                         "角速度：https://example.invalid/w"]
+
+
+def test_main_without_note_or_docs_prints_only_the_name(cw, agg):
+    hw = make_hw([])
+    hw.update(note="", docs=[])
+    out = io.StringIO()
+    cw.main(hw, argv=["--case", "case-1"], ask=no_ask, out=out, show_fn=drawn(agg))
+    assert out.getvalue().splitlines()[0] == "HK1 範例" and "：https" not in out.getvalue()
+    assert out.getvalue().splitlines()[1].startswith("── case-1")
+
+
+def test_main_case_flag_runs_only_that_one(cw, agg):
+    calls, out = [], io.StringIO()
+    assert cw.main(make_hw(calls), argv=["--case", "case-2"], ask=no_ask, out=out, show_fn=drawn(agg)) == 0
+    assert calls == [("compute", "case-2"), ("draw", "Figure", "case-2")]
+    assert cw.main(make_hw(calls), argv=["--case", "case-9"], ask=no_ask, out=out, show_fn=drawn(agg)) == 2
+    assert "沒有 case-9" in out.getvalue()
+
+
+def test_main_all_flag_runs_every_case_without_asking(cw, agg):
+    calls = []
+    assert cw.main(make_hw(calls), argv=["--all"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg)) == 0
+    assert [c for c in calls if c[0] == "compute"] == [("compute", "case-1"), ("compute", "case-2")]
+
+
+def test_main_asks_for_a_number(cw, agg):
+    calls, out, asked = [], io.StringIO(), []
+    assert cw.main(make_hw(calls), argv=[], ask=lambda p: asked.append(p) or "2", out=out, show_fn=drawn(agg)) == 0
+    assert calls == [("compute", "case-2"), ("draw", "Figure", "case-2")]
+    text = out.getvalue()
+    assert "1) case-1  第一個" in text and "2) case-2  第二個" in text and "0) 全部" in text
+    assert text.index("Circular motion") < text.index("1) case-1")  # 先 NAME、NOTE、DOCS，再列 case
+    calls.clear()
+    assert cw.main(make_hw(calls), argv=[], ask=lambda p: "0", out=io.StringIO(), show_fn=drawn(agg)) == 0
+    assert [c[1] for c in calls if c[0] == "compute"] == ["case-1", "case-2"]
+
+
+@pytest.mark.parametrize("answer", ["x", "", "9", "①", "²", EOFError])
+def test_main_bad_number_returns_2(cw, agg, answer):
+    def ask(prompt):
+        if answer is EOFError:
+            raise EOFError
+        return answer
+
+    calls, out = [], io.StringIO()
+    assert cw.main(make_hw(calls), argv=[], ask=ask, out=out, show_fn=drawn(agg)) == 2
+    assert calls == [] and "選" in out.getvalue().splitlines()[-1]
+
+
+def test_main_continues_after_an_exception_and_returns_1(cw, agg):
+    calls, out = [], io.StringIO()
+    assert cw.main(make_hw(calls, fail={"case-1"}), argv=["--all"], ask=no_ask, out=out, show_fn=drawn(agg)) == 1
+    assert "Traceback" in out.getvalue() and "ValueError: case-1 算壞了" in out.getvalue()
+    assert ("compute", "case-2") in calls and ("draw", "Figure", "case-2") in calls
+
+
+def test_main_text_only_homework_opens_no_figure(cw, agg):
+    shown, out = [], io.StringIO()
+    hw = make_hw([], draw=False, text="hi there", stats=False)
+    assert cw.main(hw, argv=["--all"], ask=no_ask, out=out, show_fn=drawn(agg, lambda: shown.append(1))) == 0
+    assert "hi there" in out.getvalue() and shown == []
+
+
+def test_main_prints_text_and_stats(cw, agg):
+    out = io.StringIO()
+    cw.main(make_hw([], text="結果是 3"), argv=["--case", "case-1"], ask=no_ask, out=out, show_fn=drawn(agg))
+    assert "結果是 3" in out.getvalue() and "點數：3" in out.getvalue()
+
+
+def test_main_from_iplot_opens_text_then_figure_per_case(cw, agg, monkeypatch):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    shown = []
+    assert cw.main(make_hw([], text="t"), argv=["--all"], ask=no_ask, out=io.StringIO(),
+                   show_fn=drawn(agg, lambda: shown.append(agg.gcf().canvas.manager.get_window_title()))) == 0
+    assert shown == ["HK1 範例 — case-1（文字）", "HK1 範例 — case-1", "HK1 範例 — case-2（文字）", "HK1 範例 — case-2"]
+
+
+def test_main_from_iplot_first_text_window_has_name_note_and_every_doc(cw, agg, monkeypatch):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    texts = []
+    monkeypatch.setattr(cw, "_show_text", lambda title, text, show_fn=None: texts.append(text))
+    cw.main(make_hw([], text="結果"), argv=["--all"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg))
+    first, second = texts
+    assert first.startswith("HK1 範例\n筆記寫這裡。\n第二行。")
+    assert "https://example.invalid/circle" in first and "https://example.invalid/w" in first and "結果" in first
+    assert "筆記" not in second and "https://" not in second and "結果" in second
+
+
+def test_main_from_iplot_opens_the_first_text_window_even_without_text(cw, agg, monkeypatch):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    texts = []
+    monkeypatch.setattr(cw, "_show_text", lambda title, text, show_fn=None: texts.append(text))
+    cw.main(make_hw([], stats=False), argv=["--all"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg))
+    assert len(texts) == 1 and "筆記寫這裡" in texts[0]  # 第二個 case 沒有字：不開空的文字視窗
+
+
+def test_main_sets_installed_chinese_fonts_before_drawing(cw, agg):
+    import matplotlib
+
+    seen = []
+    hw = make_hw([])
+    hw["draw"] = lambda fig, run: seen.append(list(matplotlib.rcParams["font.sans-serif"]))
+    cw.main(hw, argv=["--case", "case-1"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg))
+    [fonts] = seen
+    assert fonts[-1] == "DejaVu Sans" and set(fonts[:-1]) <= set(cw.TEXT_FONTS)

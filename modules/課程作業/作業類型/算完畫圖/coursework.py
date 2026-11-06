@@ -10,6 +10,7 @@ ensure 第一件事檢查版本，說一句話就結束，不是一段 traceback
 from __future__ import annotations
 
 import ast
+import contextlib
 import importlib
 import importlib.metadata
 import os
@@ -17,6 +18,7 @@ import platform
 import re
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 NO_INSTALL = "CW_NO_INSTALL"  # 設了就不跑 pip，缺了只報（測試用）
@@ -234,3 +236,116 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
     if popen(argv_pip).wait() != 0:
         raise RuntimeError(f"裝不了 {'、'.join(need)}：在終端機 {sys.executable} -m pip install {' '.join(need)}")
     importlib.invalidate_caches()
+
+
+# ── 跑：單獨跑是終端機選 case＋matplotlib 的視窗；iPLoT 另開的程序帶 --case 或 --all，文字也開視窗 ──
+
+
+def _choose(cases: list[str], hw: dict, argv: list[str], ask, out) -> list[str] | None:
+    """要跑哪幾個 case：--case <名> 直接指定、--all 全部；不然列出來問，0 是全部。選不了印一句、回 None。"""
+    if "--all" in argv:
+        return cases
+    if "--case" in argv:
+        i = argv.index("--case")
+        name = argv[i + 1] if i + 1 < len(argv) else ""
+        if name in cases:
+            return [name]
+        print(f"沒有 {name}：有 {'、'.join(cases)}", file=out)
+        return None
+    for n, name in enumerate(cases, 1):
+        print(f"{n}) {name}  {hw['cases'][name].get('label', '')}", file=out)
+    print("0) 全部", file=out)
+    try:
+        answer = ask("選：").strip()
+    except EOFError:
+        answer = ""
+    number = int(answer) if answer.isdecimal() else -1  # ①、² 這種 isdigit 但 int() 不收的，當作沒選
+    if number == 0:
+        return cases
+    if 1 <= number <= len(cases):
+        return [cases[number - 1]]
+    print(f"要選 0 到 {len(cases)} 之間的數字", file=out)
+    return None
+
+
+TEXT_FONTS = ("PingFang TC", "Heiti TC", "Microsoft JhengHei", "Noto Sans CJK TC", "Arial Unicode MS")
+
+
+def _fonts() -> list[str]:
+    """這台電腦裝了的中文字型，加 DejaVu Sans（只列裝了的：不然 matplotlib 一直警告）。"""
+    from matplotlib import font_manager
+
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    return [f for f in TEXT_FONTS if f in installed] + ["DejaVu Sans"]
+
+
+def _show_text(title: str, text: str, show_fn=None) -> None:
+    """把文字放進一個 matplotlib 視窗（iPLoT 另開的程序沒有終端機，印出來沒人看得到）。"""
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(7, 6))
+    try:
+        with contextlib.suppress(AttributeError):
+            fig.canvas.manager.set_window_title(f"{title}（文字）")
+        fig.text(0.03, 0.97, text, va="top", ha="left", fontfamily=_fonts(), fontsize=11, wrap=True)
+        (show_fn or plt.show)()
+    finally:
+        plt.close(fig)
+
+
+def _header(hw: dict) -> list[str]:
+    """NAME、NOTE（有才有）、DOCS（每個一行「顯示名：網址」）。"""
+    lines = [hw["name"]]
+    if hw.get("note"):
+        lines += str(hw["note"]).splitlines()
+    lines += [f"{title}：{url}" for title, url in hw.get("docs") or []]
+    return lines
+
+
+def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=None) -> int:
+    """作業檔最後一行：先印 NAME、NOTE、DOCS；選 case（--case <名>、--all 不問）；每個 case 先 compute，
+    印 text 與 stats，有 draw 就開一個 matplotlib 視窗（關掉才下一個）。iPLoT 另開的（CW_FROM_IPLOT）
+    文字也開一個視窗，第一個的最前面放 NAME、NOTE、DOCS。一個 case 出錯印 traceback、接著跑下一個。
+    結束碼：都好 0、有 case 出錯 1、選不了 2。"""
+    out = out or sys.stdout
+    with contextlib.suppress(AttributeError, ValueError):
+        out.reconfigure(encoding="utf-8")
+    header = _header(hw)
+    for line in header:
+        print(line, file=out)
+    cases = list(hw["cases"])
+    chosen = _choose(cases, hw, list(sys.argv[1:] if argv is None else argv), ask, out)
+    if chosen is None:
+        return 2
+    failed = False
+    for i, case in enumerate(chosen):
+        print(f"── {case} ──", file=out)
+        title = f"{hw['name']} — {case}"
+        try:
+            run = hw["compute"](case)
+            lines = [run["text"]] if run.get("text") else []
+            lines += [f"{key}：{value}" for key, value in (hw.get("stats") or (lambda r: []))(run)]
+            for line in lines:
+                print(line, file=out)
+            if os.environ.get(FROM_IPLOT):  # 沒有終端機：第一個 case 連同 NAME、NOTE、DOCS 開文字視窗
+                shown = (header + [""] + lines) if i == 0 else lines
+                if shown:
+                    _show_text(title, "\n".join(shown), show_fn)
+            if hw.get("draw"):
+                import matplotlib
+                import matplotlib.pyplot as plt  # 只有要畫圖時才 import（頂層只 import 標準庫）
+
+                matplotlib.rcParams["font.sans-serif"] = _fonts()
+                fig = plt.figure(figsize=(7, 6))
+                try:
+                    with contextlib.suppress(AttributeError):
+                        fig.canvas.manager.set_window_title(title)
+                    ani = hw["draw"](fig, run)  # 動畫要抓著，不然一回來就被回收、畫面不動
+                    (show_fn or plt.show)()
+                    del ani
+                finally:
+                    plt.close(fig)  # draw 畫到一半壞了也關掉，不然下一個 case 的視窗會一起跳出來
+        except Exception:  # noqa: BLE001  作業的 compute／draw 怎麼壞都印出來，接著跑下一個 case
+            traceback.print_exc(file=out)
+            failed = True
+    return 1 if failed else 0
