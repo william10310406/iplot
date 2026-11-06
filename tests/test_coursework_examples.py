@@ -15,7 +15,7 @@ pytestmark = pytest.mark.filterwarnings("ignore:Animation was deleted")  # 不 s
 
 TEMPLATE = TYPE_DIR / "範本.py"
 COURSE = CW / "範例課程" / "科學計算"
-EXAMPLES = {n: COURSE / n / f"{n}.py" for n in ("HK2", "HK6", "HK8")}
+EXAMPLES = {n: COURSE / f"HK{int(n[2:]):02d}" / f"{n}.py" for n in ("HK2", "HK6", "HK8")}  # 資料夾照 FOLDER 預設補零
 ALL = {"範本(HK1)": TEMPLATE, **EXAMPLES}
 
 

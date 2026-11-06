@@ -191,12 +191,29 @@ def test_add_example_copies_the_course_with_stubs(course_mod, mod, tmp_path):
     got, src = mod / "科學計算", mod / "範例課程" / "科學計算"
     assert app.rescans == 1
     assert (got / "課程.py").read_bytes() == (src / "課程.py").read_bytes()
-    for code in ("HK2", "HK6", "HK8"):
-        assert (got / code / f"{code}.py").read_bytes() == (src / code / f"{code}.py").read_bytes()
-        assert stub_of(got / code).title == code
+    for code, folder in (("HK2", "HK02"), ("HK6", "HK06"), ("HK8", "HK08")):
+        assert (got / folder / f"{code}.py").read_bytes() == (src / folder / f"{code}.py").read_bytes()
+        assert stub_of(got / folder).title == code
     for rel, title in (("", "科學計算"), ("新增作業", "新增作業"), ("檢查與打包", "檢查與打包")):
         assert stub_of(got / rel).title == title
     assert sorted(c.title for c in find_children(got, mod)) == sorted(["HK2", "HK6", "HK8", "新增作業", "檢查與打包"])
+
+
+def test_example_folders_follow_the_course_folder_format(course_mod):
+    info = course_mod.read_course(CW / "範例課程" / "科學計算")
+    found = course_mod.homeworks(info)
+    assert [(code, file.parent.name) for code, file in found] \
+        == [(code, course_mod.folder_of(info, course_mod.code_number(info, code))) for code, _ in found] \
+        == [("HK2", "HK02"), ("HK6", "HK06"), ("HK8", "HK08")]
+
+
+def test_add_example_then_new_homework_sorts_after_the_examples(course_mod, mod, tmp_path):
+    course_mod.add_example(CwApp(tmp_path), mod)
+    course = mod / "科學計算"
+    app = new_hw(course_mod, tmp_path, course)  # 直接按確定：預設 HK9
+    assert app.asks == [("作業代號：", "HK9")] and (course / "HK09" / "HK9.py").is_file()
+    titles = [c.title for c in find_children(course, mod) if c.title.startswith("HK")]
+    assert titles == ["HK2", "HK6", "HK8", "HK9"]
 
 
 def test_add_example_leaves_the_example_alone(course_mod, mod, tmp_path):
@@ -208,8 +225,8 @@ def test_add_example_leaves_the_example_alone(course_mod, mod, tmp_path):
 
 
 def test_add_example_does_not_copy_pycache(course_mod, mod, tmp_path):
-    (mod / "範例課程" / "科學計算" / "HK2" / "__pycache__").mkdir()
-    (mod / "範例課程" / "科學計算" / "HK2" / "__pycache__" / "x.pyc").write_bytes(b"x")
+    (mod / "範例課程" / "科學計算" / "HK02" / "__pycache__").mkdir()
+    (mod / "範例課程" / "科學計算" / "HK02" / "__pycache__" / "x.pyc").write_bytes(b"x")
     course_mod.add_example(CwApp(tmp_path), mod)
     assert not list((mod / "科學計算").rglob("__pycache__"))
 
@@ -223,7 +240,7 @@ def test_add_example_copy_is_a_course_whose_homeworks_check_clean(course_mod, ki
 
 def test_add_example_second_time_says_so_and_changes_nothing(course_mod, mod, tmp_path):
     course_mod.add_example(CwApp(tmp_path), mod)
-    mine = mod / "科學計算" / "HK2" / "HK2.py"
+    mine = mod / "科學計算" / "HK02" / "HK2.py"
     mine.write_text("# 學生改過的\n", encoding="utf-8")
     app = CwApp(tmp_path)
     course_mod.add_example(app, mod)
@@ -241,12 +258,12 @@ def test_add_example_without_the_example_folder(course_mod, mod, tmp_path):
 def test_tracked_add_example_button_works_from_the_module(mod, tmp_path):
     app = CwApp(tmp_path)
     run_stub(mod / "加入範例課程", mod, app)
-    assert (mod / "科學計算" / "HK6" / "iplot.py").is_file() and app.rescans == 1
+    assert (mod / "科學計算" / "HK06" / "iplot.py").is_file() and app.rescans == 1
 
 
 def test_example_homework_stub_points_at_the_homework_button(course_mod, mod, tmp_path):
     course_mod.add_example(CwApp(tmp_path), mod)
-    assert "course.homework_button(app, HERE)" in (mod / "科學計算" / "HK6" / "iplot.py").read_text(encoding="utf-8")
+    assert "course.homework_button(app, HERE)" in (mod / "科學計算" / "HK06" / "iplot.py").read_text(encoding="utf-8")
 
 
 # ── 新增作業（A5、A6）──
@@ -303,8 +320,11 @@ def test_new_homework_with_a_code_that_does_not_start_with_hk(course_mod, kind, 
     course = make_course(tmp_path, CODE="Lab{n}", FOLDER="Lab{n:02d}")
     app = new_hw(course_mod, tmp_path, course, "Lab3")
     file = course / "Lab03" / "Lab3.py"
-    assert kind.check(file) == [] and (course / "Lab03" / "Lab3Space").is_dir()
-    assert "HK1" not in file.read_text(encoding="utf-8")
+    space = course / "Lab03" / "Lab3Space"
+    assert kind.check(file) == [] and space.is_dir() and not list(space.iterdir())
+    text, template = file.read_text(encoding="utf-8"), (TYPE_DIR / "範本.py").read_text(encoding="utf-8")
+    assert "HK1" not in text and text == template.replace("HK1", "Lab3")  # 每個 HK1、HK1Space 都換成了 Lab3
+    assert 'NAME = "Lab3 範例' in text and '/ "Lab3Space"' in text and template.count("HK1") >= 2
     assert stub_of(course / "Lab03").title == "Lab3"
     assert app.edits == [(file, None)]
 
@@ -345,7 +365,7 @@ def test_new_homework_never_overwrites(course_mod, tmp_path):
 
 
 def test_new_homework_refuses_a_number_that_exists_under_another_folder_name(course_mod, tmp_path):
-    course = make_course(tmp_path)  # FOLDER 預設補零，範例課程的資料夾卻是 HK2（沒補零）
+    course = make_course(tmp_path)  # FOLDER 預設補零，老師自己建的資料夾卻是 HK2（沒補零）
     (course / "HK2").mkdir()
     (course / "HK2" / "HK2.py").write_text("# 範例\n", encoding="utf-8")
     app = new_hw(course_mod, tmp_path, course, "HK2")
