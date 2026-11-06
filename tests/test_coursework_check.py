@@ -231,3 +231,125 @@ def test_type_check_does_not_run_the_file(tmp_path):
     src, _ = inserted('open("寫了.txt", "w").close()')
     kind.check(write(tmp_path, src))
     assert not (tmp_path / "寫了.txt").exists()
+
+
+# ── R13–R26：禁止項（每個片段插在固定尾段前；（規則, 片段, 違規的是片段第幾行（0 起算））──
+
+FORBIDDEN = {
+    "R13-tkinter": ("R13", "import tkinter", 0),
+    "R13-submodule": ("R13", "from tkinter import ttk", 0),
+    "R13-turtle": ("R13", "def pen():\n    import turtle\n    return turtle", 1),
+    "R13-_tkinter": ("R13", "import _tkinter", 0),
+    "R14-import": ("R14", "from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg", 0),
+    "R14-module": ("R14", "import matplotlib.backends.backend_tk", 0),
+    "R14-name": ("R14", "def bar(c):\n    return c.NavigationToolbar2Tk", 1),
+    "R15-use": ("R15", 'import matplotlib\nmatplotlib.use("TkAgg")', 1),
+    "R15-rcparams": ("R15", 'import matplotlib as mpl\nmpl.rcParams["backend"] = "TkAgg"', 1),
+    "R16-alias": ("R16", "import matplotlib.pyplot as plt\nplt.show()", 1),
+    "R16-from-pyplot-as": ("R16", "from matplotlib import pyplot as P\nP.figure()", 1),
+    "R16-from-pyplot-import": ("R16", "from matplotlib.pyplot import subplots\nsubplots()", 1),
+    "R16-in-function": ("R16", "import matplotlib.pyplot as plt\ndef grab():\n    return plt.gca()", 2),
+    "R17-input": ("R17", "def ask():\n    return input()", 1),
+    "R17-stdin": ("R17", "import sys\ndef read():\n    return sys.stdin.read()", 2),
+    "R18-subprocess": ("R18", "import subprocess", 0),
+    "R18-webbrowser": ("R18", "from webbrowser import open as browse", 0),
+    "R18-system": ("R18", 'import os\nos.system("ls")', 1),
+    "R18-exec": ("R18", 'import os\nos.execv("a", ["a"])', 1),
+    "R18-spawn": ("R18", 'import os\nos.spawnl(0, "a")', 1),
+    "R18-startfile": ("R18", 'from os import startfile\nstartfile("a.pdf")', 1),
+    "R19": ("R19", "import os\nos.chdir(DATA)", 1),
+    "R20-posix": ("R20", 'SAMPLE = "/data/run/a.csv"', 0),
+    "R20-home": ("R20", 'SAMPLE = "~/a.csv"', 0),
+    "R20-drive": ("R20", 'SAMPLE = "C:\\\\data\\\\a.csv"', 0),
+    "R20-drive-slash": ("R20", 'SAMPLE = "D:/data/a.csv"', 0),
+    "R20-unc": ("R20", 'SAMPLE = "\\\\\\\\server\\\\share"', 0),
+    "R21-homedir": ("R21", 't2026fscHOMEDIR = "."', 0),
+    "R21-arg": ("R21", "def old(ich, LF_subWIN):\n    return ich", 0),
+    "R21-LF": ("R21", "def old2():\n    return LF", 1),
+    "R22-global": ("R22", "def bump():\n    global COUNT\n    COUNT = 1", 1),
+    "R22-nonlocal": ("R22", "def outer():\n    n = 0\n    def inner():\n        nonlocal n\n    return inner", 3),
+    "R23-w": ("R23", 'def save():\n    open("out.txt", "w").close()', 1),
+    "R23-mode-kw": ("R23", 'def log():\n    open("log.txt", mode="a").close()', 1),
+    "R24-list": ("R24", 'import matplotlib\nmatplotlib.rcParams["font.sans-serif"] = ["PingFang TC"]', 1),
+    "R24-str": ("R24", 'from matplotlib import rcParams\nrcParams["font.family"] = "PingFang TC"', 1),
+    "R25-title": ("R25", 'TITLE = "HK1"', 0),
+    "R25-icon": ("R25", 'ICON = "chart"', 0),
+    "R25-run": ("R25", "def run(app):\n    return app", 0),
+    "R25-on-files": ("R25", "def on_files(app, paths):\n    return paths", 0),
+    "R25-on-error": ("R25", "def on_error(app, exc):\n    return exc", 0),
+    "R26-sys-exit": ("R26", "import sys\nsys.exit(0)", 1),
+    "R26-exit": ("R26", "def stop():\n    exit()", 1),
+    "R26-quit": ("R26", "def stop():\n    quit()", 1),
+    "R26-os-exit": ("R26", "import os\ndef stop():\n    os._exit(1)", 2),
+}
+
+
+@pytest.mark.parametrize("case", list(FORBIDDEN))
+def test_each_forbidden_rule_alone(cw, tmp_path, case):
+    rule, snippet, offset = FORBIDDEN[case]
+    src, line = inserted(snippet, offset)
+    assert found(cw, write(tmp_path, src)) == [(rule, line)]
+
+
+@pytest.mark.parametrize("snippet", [
+    'SEP = "/"',                                             # R20：一個字元的分隔符
+    'UNIT = "km/s"',
+    'def keep():\n    open(DATA / "out.txt", "w").close()',   # R23：用變數組出來的路徑（寫在 DATA 底下）
+    'def peek():\n    return open(DATA / "in.txt").read()',
+    'import matplotlib\nmatplotlib.rcParams["font.sans-serif"] = ["PingFang TC", "DejaVu Sans"]',  # R24：有備選
+    "import matplotlib.pyplot as plt\ncolors = plt.cm.viridis",                                  # R16：不是開圖
+    "def shape(fig):\n    return fig.add_subplot(2, 1, 1)",
+])
+def test_allowed_things_are_not_reported(cw, tmp_path, snippet):
+    src, _ = inserted(snippet)
+    assert cw.check(write(tmp_path, src)) == []
+
+
+def test_tail_raise_is_not_r26(cw, tmp_path):
+    assert all(p.rule != "R26" for p in cw.check(write(tmp_path, good())))
+
+
+def test_every_rule_has_a_bad_file():
+    """每條規則都有一個只觸發它的壞檔測試（R27、R28 在上面各自的測試裡）。"""
+    covered = {rule for rule, _ in STRUCTURE.values()} | {rule for rule, _, _ in FORBIDDEN.values()} | {"R27", "R28"}
+    assert covered == set(load(SHELL, "coursework").RULES)
+
+
+# ── docs/09 第 3 節的表與 RULES 是同一份清單（D131、A13）──
+
+HEADER = "| 編號 | 規則 | --check | 擋到哪裡 |"
+
+
+def table_rows() -> list[list[str]]:
+    section = re.search(r"\n## 3\..*?(?=\n## )", SPEC.read_text(encoding="utf-8"), re.S).group(0)
+    lines = section.splitlines()
+    start = lines.index(HEADER)
+    block = []
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        block.append(line)
+    assert re.fullmatch(r"\|(-+\|){4}", block[1].replace(" ", ""))
+    rows = [[c.strip() for c in re.split(r"(?<!\\)\|", line)[1:-1]] for line in block[2:]]
+    return rows
+
+
+def test_rules_table_matches_docs(cw):
+    rows = table_rows()
+    assert [row[0] for row in rows] == list(cw.RULES)
+
+
+def test_rules_table_has_no_empty_cells():
+    for row in table_rows():
+        assert len(row) == 4 and all(row), row
+        assert re.fullmatch(r"R[0-9]+", row[0]), row
+
+
+def test_rules_table_is_one_block():
+    """表中間沒有空行（有空行 markdown 就斷成兩張表，後半讀不到）。"""
+    rows = table_rows()
+    assert len(rows) == len(re.findall(r"^\| R[0-9]+ \|", SPEC.read_text(encoding="utf-8"), re.M))
+
+
+def test_r28_row_says_best_effort():
+    assert "盡力而為" in dict((row[0], " ".join(row)) for row in table_rows())["R28"]

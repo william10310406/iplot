@@ -368,6 +368,20 @@ RULES = {
     "R10": "stats 是頂層 def、一個參數，或 stats = None",
     "R11": "固定尾段三行照樣",
     "R12": "用到的第三方套件都寫在 REQUIRES",
+    "R13": "不 import tkinter、_tkinter、turtle（含子模組）",
+    "R14": "不用 matplotlib 的 Tk 後端：backend_tkagg、backend_tk、FigureCanvasTkAgg、NavigationToolbar2Tk",
+    "R15": '不換後端：matplotlib.use(…)、rcParams["backend"]',
+    "R16": "不用 pyplot 開圖或拿圖：show、figure、subplots、subplot、gcf、gca、axes",
+    "R17": "不讀鍵盤：input()、sys.stdin",
+    "R18": "不自己開程式或網頁：os.system、os.popen、os.startfile、os.exec*、os.spawn*、subprocess、webbrowser",
+    "R19": "不 os.chdir",
+    "R20": "不寫絕對路徑",
+    "R21": "不用舊格式的全域 t2026fscHOMEDIR、LF、LF_subWIN",
+    "R22": "case 之間不共用狀態（不用 global、nonlocal）",
+    "R23": "寫檔只寫在 DATA 底下",
+    "R24": "不要只指定一個字型",
+    "R25": "不定義 iPLoT 的名字：run、on_files、on_error、TITLE、ICON",
+    "R26": "不結束整個程式：sys.exit、exit、quit、os._exit",
     "R27": "檔是 UTF-8、語法對",
     "R28": ("作業檔在 Python 3.9 也解析得了（學生的 3.9 才看得到殼的版本提示，而不是語法錯誤）；"
             "用 ast.parse(…, feature_version=(3, 9)) 查，這是盡力而為，不保證抓到所有 3.10 以後的語法"),
@@ -377,6 +391,18 @@ TAIL_KEYS = {"name": "NAME", "docs": "DOCS", "note": "NOTE", "cases": "CASES", "
              "stats": "stats", "file": "__file__"}
 TAIL_IF = 'if __name__ == "__main__":'
 TAIL_RAISE = "raise SystemExit(coursework.main(HOMEWORK))"
+NO_IMPORT = {"R13": ("tkinter", "_tkinter", "turtle"), "R18": ("subprocess", "webbrowser")}
+TK_BACKEND = "matplotlib.backends.backend_tk"
+TK_NAMES = ("FigureCanvasTkAgg", "NavigationToolbar2Tk")
+PYPLOT_OPEN = ("show", "figure", "subplots", "subplot", "gcf", "gca", "axes")
+RUN_CALLS = ("os.system", "os.popen", "os.startfile")
+RUN_PREFIXES = ("os.exec", "os.spawn")
+EXIT_CALLS = ("sys.exit", "exit", "quit", "os._exit")
+OLD_GLOBALS = ("t2026fscHOMEDIR", "LF", "LF_subWIN")
+IPLOT_NAMES = ("run", "on_files", "on_error", "TITLE", "ICON")
+FONT_KEYS = ("font.family", "font.sans-serif")
+# /x/、~/、X:\、X:/、\\ 開頭；"/" 這種一個字元的分隔符、"km/s" 不算
+ABSOLUTE_RE = r"^(/[^/]+/|~/|[A-Za-z]:[\\/]|\\\\)"
 
 
 @dataclass
@@ -558,6 +584,114 @@ def _newer_line(tree: ast.Module, exc: SyntaxError) -> int | None:
     return min((n.lineno for n in ast.walk(tree) if newer and isinstance(n, newer)), default=exc.lineno)
 
 
+def _aliases(tree: ast.Module) -> dict[str, str]:
+    """檔裡的 import 綁了哪些名字、各指到什麼（plt → matplotlib.pyplot、figure → matplotlib.pyplot.figure）。"""
+    out = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    out[a.asname] = a.name
+                else:
+                    top = a.name.split(".")[0]
+                    out[top] = top
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            for a in node.names:
+                out[a.asname or a.name] = f"{node.module}.{a.name}"
+    return out
+
+
+def _qual(node: ast.AST, aliases: dict[str, str]) -> str | None:
+    """名字或屬性鏈的全名（照 import 換開）；不是這兩種回 None。"""
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        base = _qual(node.value, aliases)
+        return f"{base}.{node.attr}" if base else None
+    return None
+
+
+def _rc_sets(tree: ast.Module, aliases: dict[str, str]):
+    """rcParams["鍵"] = 值 的（鍵, 值, 行號）。"""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if (isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                        and (_qual(t.value, aliases) or "").split(".")[-1] == "rcParams"):
+                    yield t.slice.value, node.value, node.lineno
+
+
+def _forbidden(tree: ast.Module) -> list[Problem]:
+    """R13–R26：只看 ast 看得到的（docs/09 第 3 節「擋到哪裡」那一欄）。"""
+    aliases, out = _aliases(tree), []
+
+    def add(rule, line, text):
+        if not any(p.rule == rule and p.line == line for p in out):
+            out.append(Problem(rule, line, text))
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.Import):
+                modules = [a.name for a in node.names]
+            else:
+                modules = [] if node.level or not node.module else \
+                    [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+            for name in modules:
+                top = name.split(".")[0]
+                if top in NO_IMPORT["R13"]:
+                    add("R13", node.lineno, f"不能 import {top}：畫面是殼的事")
+                if top in NO_IMPORT["R18"]:
+                    add("R18", node.lineno, f"不能用 {top}：作業不自己開程式或網頁（網址寫在 DOCS）")
+                if name.startswith(TK_BACKEND):
+                    add("R14", node.lineno, "不能用 matplotlib 的 Tk 後端（畫面是殼的事）")
+            if any(a.name in TK_NAMES or (a.asname or "") in TK_NAMES for a in node.names):
+                add("R14", node.lineno, "不能用 matplotlib 的 Tk 後端（畫面是殼的事）")
+        elif isinstance(node, ast.Name) and node.id in TK_NAMES or isinstance(node, ast.Attribute) and node.attr in TK_NAMES:
+            add("R14", node.lineno, "不能用 matplotlib 的 Tk 後端（畫面是殼的事）")
+        if isinstance(node, ast.Call):
+            name = _qual(node.func, aliases) or ""
+            if name == "matplotlib.use":
+                add("R15", node.lineno, "不能換 matplotlib 的後端：殼會設")
+            if name in {f"matplotlib.pyplot.{f}" for f in PYPLOT_OPEN}:
+                add("R16", node.lineno, f"不能用 pyplot 的 {name.rsplit('.', 1)[1]}()：圖畫在 draw 收到的 fig 上（要子圖用 fig.add_subplot）")
+            if name == "input":
+                add("R17", node.lineno, "不能用 input()：作業不讀鍵盤，參數寫在 CASES")
+            if name in RUN_CALLS or name.startswith(RUN_PREFIXES):
+                add("R18", node.lineno, f"不能用 {name}：作業不自己開程式或網頁")
+            if name == "os.chdir":
+                add("R19", node.lineno, "不能 os.chdir：路徑從 DATA 或 Path(__file__) 出發")
+            if name in EXIT_CALLS:
+                add("R26", node.lineno, f"不能用 {name}()：一個 case 出錯時殼會接著跑下一個，作業不結束整個程式")
+            if name == "open" and node.args and isinstance(node.args[0], ast.Constant) \
+                    and isinstance(node.args[0].value, str):
+                mode = node.args[1] if len(node.args) > 1 else next(
+                    (k.value for k in node.keywords if k.arg == "mode"), None)
+                if isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) & set("wax"):
+                    add("R23", node.lineno, f"寫檔要寫在 DATA 底下：open(DATA / \"{node.args[0].value}\", …)")
+        if isinstance(node, (ast.Name, ast.Attribute)) and _qual(node, aliases) == "sys.stdin":
+            add("R17", node.lineno, "不能讀 sys.stdin：作業不讀鍵盤，參數寫在 CASES")
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and re.match(ABSOLUTE_RE, node.value):
+            add("R20", node.lineno, f"不能寫絕對路徑：{node.value}（從 DATA 或 Path(__file__) 出發）")
+        if isinstance(node, ast.Name) and node.id in OLD_GLOBALS or isinstance(node, ast.arg) and node.arg in OLD_GLOBALS:
+            add("R21", node.lineno, f"{getattr(node, 'id', None) or node.arg} 是舊格式的全域：路徑用 DATA，畫面是殼的事")
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            add("R22", node.lineno, "不能用 global、nonlocal：case 之間不共用狀態，要傳的東西放在 run 裡")
+    for key, value, line in _rc_sets(tree, aliases):
+        if key == "backend":
+            add("R15", line, "不能換 matplotlib 的後端：殼會設")
+        if key in FONT_KEYS and (isinstance(value, ast.Constant)
+                                 or isinstance(value, (ast.List, ast.Tuple)) and len(value.elts) == 1):
+            add("R24", line, f"rcParams[\"{key}\"] 只指定一個字型：別的電腦沒有它就變方塊；給一串備選，或不設（殼會設）")
+    for node in tree.body:
+        names = [node.name] if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else \
+            [t.id for t in getattr(node, "targets", [getattr(node, "target", None)]) if isinstance(t, ast.Name)]
+        for name in names:
+            if name in IPLOT_NAMES:
+                add("R25", node.lineno, f"不要定義 {name}：作業檔不是 iPLoT 的模組，iPLoT 的格子是框架產生的")
+    return out
+
+
 def check(file: Path) -> list[Problem]:
     """docs/09 第 3 節的靜態檢查，照規則編號排；空的就是通過。只用 ast，不執行檔案。"""
     file = Path(file)
@@ -587,6 +721,7 @@ def check(file: Path) -> list[Problem]:
     problems += _tail(tree, lines)
     if requires is not None:
         problems += _forgotten_lines(tree, file, requires)
+    problems += _forbidden(tree)
     try:
         ast.parse(source, str(file), feature_version=(3, 9))
     except SyntaxError as exc:
