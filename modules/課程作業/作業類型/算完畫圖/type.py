@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -116,7 +117,17 @@ def argv(file: Path, python: Path, case: str | None):
 
 
 def new(folder: Path, code: str) -> Path:
-    raise NotImplementedError("Task 11：新增作業")
+    """在 folder 放 <code>.py（範本，裡面的代號 HK1 換成 code）和空的 <code>Space/，回傳作業檔。
+    換的是整個字（不是子字串）：HK12 裡的 HK1 不動，HK1Space 要換。已經有 <code>.py 就丟 FileExistsError。"""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    text = re.sub(r"(?<![A-Za-z0-9_])HK1(?!\d)", lambda _: code,
+                  (Path(__file__).resolve().parent / "範本.py").read_text(encoding="utf-8"))
+    file = folder / f"{code}.py"
+    with open(file, "x", encoding="utf-8", newline="\n") as out:  # x：已經有就不蓋
+        out.write(text)
+    (folder / f"{code}Space").mkdir(exist_ok=True)
+    return file
 
 
 def pack(folder: Path, code: str):

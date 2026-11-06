@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -24,6 +25,7 @@ VERSIONS = ".版本"  # 作業資料夾裡框架留的版本（D135）
 SENT = "發出去的"  # 一門課裡放學生包 zip 的資料夾
 KEEP_PY = 20  # .版本/ 裡作業檔的 .py 最多留幾份
 
+HERE = Path(__file__).resolve().parent  # 框架/；它的上一層是模組資料夾（作業類型/、範例課程/ 在那裡）
 FRAMEWORK = Path("框架") / "course.py"  # 往上找框架時認的檔
 TYPES_DIR = "作業類型"  # 框架所在的資料夾底下：每種作業一個資料夾，裡面是 type.py
 PIP_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -346,8 +348,7 @@ def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool
     apple = _apple_silicon() if apple_silicon is None else apple_silicon
     try:
         course = read_course(folder)
-        framework = Path(__file__).resolve().parent.parent
-        needs = _requires(course, [load_type(name, framework) for name in course.types])
+        needs = _requires(course, [load_type(name, HERE.parent) for name in course.types])
     except CourseError as exc:
         app.log(f"{folder.name}：{exc}")
         return
@@ -392,3 +393,161 @@ def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool
         later = pending[1]
         said += f"；{later[0].rstrip('：')}{'（' + later[2] + '）' if later[2] else ''}再按一次「{course.name}」"
     app.log(f"{said}；{note}" if note else said)
+
+
+# ── 墊片：面板上每一格的 iplot.py ──
+# 墊片只有幾行：往上找第一個有 框架/course.py 的資料夾，放進 sys.path、每次重讀 course、叫一個函式，
+# 所以框架更新後墊片不用換（跟科學計算的墊片同一個做法）。作業資料夾裡的 iplot.py 也是墊片，面板程序從不執行作業檔。
+
+STUB_MARK = "# 課程作業框架產生的墊片"  # 有這一行的 iplot.py 是框架產生的，可以換成這一版；沒有的是別人寫的，不碰
+STUB = '''"""{doc}"""
+{mark}（改了會被換掉；要自己寫格子，把這一行拿掉）
+import pathlib
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+TITLE = {title}
+FRAMEWORK = next(p for p in HERE.parents if (p / "框架" / "course.py").is_file()) / "框架"
+sys.modules.pop("course", None)  # 每次都讀框架現在那一份
+sys.path.insert(0, str(FRAMEWORK))
+try:
+    import course
+finally:
+    sys.path.remove(str(FRAMEWORK))
+
+
+def run(app):
+    course.{call}
+'''
+STUB_DOC = "課程作業框架產生的格子：按下去叫框架裡的函式。"
+
+# 每一種格子的（要叫的函式, 面板上的說明）；函式裡的 HERE 是墊片所在的資料夾
+COURSE_STUB = ("course_button(app, HERE)", "按下去：把這門課要的套件裝進課的 .venv。")
+HOMEWORK_STUB = ("homework_button(app, HERE)", "按下去：選一個 case，用課的 Python 另開視窗跑這份作業。")
+TOP_BUTTONS = {  # 模組資料夾底下、追蹤進 git 的兩顆
+    "新增一門課": ("new_course(app, HERE.parent)", "問課的名字，建一門新的課。"),
+    "加入範例課程": ("add_example(app, HERE.parent)", "把範例課程「科學計算」複製成一門課（不必裝）。"),
+}
+COURSE_BUTTONS = {  # 每門課底下的兩顆
+    "新增作業": ("new_homework(app, HERE.parent)", "問作業代號，從範本建一份新的作業並打開編輯器。"),
+    "檢查與打包": ("check_and_pack(app, HERE.parent)", "選一份作業：檢查、打成學生包 zip、在 Finder 顯示。"),
+}
+EXAMPLE = "科學計算"  # 範例課程/ 底下那一門
+
+
+def render_stub(title: str, call: str, doc: str = STUB_DOC) -> str:
+    """墊片的文字。title 用 repr 寫進去（引號、反斜線都安全）；doc 的引號跳脫，不會提早結束 docstring。"""
+    safe = doc.replace("\\", "\\\\").replace('"', '\\"')
+    return STUB.format(doc=safe, mark=STUB_MARK, title=repr(title), call=call)
+
+
+def write_stub(folder: Path, title: str, call: str, doc: str = STUB_DOC) -> Path:
+    """寫 folder/iplot.py 墊片。已經是這一版就不碰；是框架產生過的墊片（認記號行）就換成這一版；
+    是別的檔（老師自己寫的）不碰。回傳那個檔。"""
+    file = Path(folder) / "iplot.py"
+    text = render_stub(title, call, doc)
+    if file.exists():
+        old = file.read_text(encoding="utf-8", errors="replace")
+        if old == text or STUB_MARK not in old:
+            return file
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(text, encoding="utf-8", newline="\n")
+    return file
+
+
+def _course_buttons(folder: Path, title: str) -> None:
+    """課那一層的格子：課那一格、新增作業、檢查與打包。"""
+    write_stub(folder, title, *COURSE_STUB)
+    for name, (call, doc) in COURSE_BUTTONS.items():
+        write_stub(folder / name, name, call, doc)
+
+
+FORBIDDEN_CHARS = set('/\\:*?"<>|')  # 跟 core/create.py 同一套：課以後會被複製到別的電腦
+RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def _bad_name(name: str) -> bool:
+    return (name.startswith(".") or name != name.rstrip(". ")
+            or any(c in FORBIDDEN_CHARS or ord(c) < 32 for c in name)
+            or name.split(".")[0].upper() in RESERVED)
+
+
+def new_course(app, root: Path) -> None:
+    """新增一門課：問名字 → 在 root（模組資料夾）底下建 課程.py（只有 NAME）和四顆格子的墊片。不蓋已有的。"""
+    root = Path(root)
+    name = app.ask("課的名字：", "")
+    if name is None or not name.strip():
+        app.log("沒新增")
+        return
+    if _bad_name(name):
+        app.log("名稱不能是空白、以 . 開頭、結尾是 . 或空白、含 / \\ : * ? \" < > |，"
+                "也不能是 CON、NUL 這類 Windows 保留字（課要能複製到任何系統）")
+        return
+    folder = root / name
+    if folder.exists() or folder.is_symlink():
+        app.log(f"已經有叫「{name}」的資料夾了，沒有新增（不會蓋掉）")
+        return
+    template = (HERE / "範本" / MARK).read_text(encoding="utf-8")
+    folder.mkdir()
+    text = re.sub(r'^NAME = "[^"\n]*"', lambda _: f"NAME = {json.dumps(name, ensure_ascii=False)}", template,
+                  count=1, flags=re.MULTILINE)
+    (folder / MARK).write_text(text, encoding="utf-8", newline="\n")
+    _course_buttons(folder, name)
+    app.rescan()
+    app.log(f"已新增「{name}」：按它旁邊的 ▸ 進去，「新增作業」建第一份作業")
+
+
+def add_example(app, root: Path) -> None:
+    """加入範例課程：把 root/範例課程/科學計算 整個複製成 root/科學計算，每份作業和課那一層補上墊片。不蓋已有的。"""
+    root = Path(root)
+    src, dest = root / "範例課程" / EXAMPLE, root / EXAMPLE
+    if not (src / MARK).is_file():
+        app.log(f"找不到範例課程：{root.name}/範例課程/{EXAMPLE}/{MARK} 不在")
+        return
+    if dest.exists() or dest.is_symlink():
+        app.log(f"已經有「{EXAMPLE}」了，沒有再加（不會蓋掉）")
+        return
+    try:
+        course = read_course(src)
+    except CourseError as exc:
+        app.log(f"範例課程 {EXAMPLE}：{exc}")
+        return
+    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__"))
+    for code, file in homeworks(course):
+        write_stub(dest / file.parent.relative_to(src), code, *HOMEWORK_STUB)
+    _course_buttons(dest, course.name)
+    app.rescan()
+    app.log(f"已加入「{course.name}」：{len(homeworks(course))} 份作業，不用裝；按它旁邊的 ▸ 進去")
+
+
+def new_homework(app, course_folder: Path) -> None:
+    """新增作業：問代號（預設＝課裡最大的號碼＋1）→ 建作業資料夾、<代號>.py（範本）、<代號>Space/ 和墊片 → 打開編輯器。
+    不蓋已有的：代號的號碼課裡已經有（資料夾叫什麼都算）或資料夾已經在，都只說一句。"""
+    course_folder = Path(course_folder)
+    try:
+        course = read_course(course_folder)
+        if not course.types:
+            raise CourseError("TYPES 是空的，不知道要用哪一種作業的範本")
+        kind = load_type(course.types[0], HERE.parent)
+    except CourseError as exc:
+        app.log(f"{course_folder.name}：{exc}")
+        return
+    have = {code_number(course, code): file.parent.name for code, file in homeworks(course)}
+    default = code_of(course, max(have, default=0) + 1)
+    answer = app.ask("作業代號：", default)
+    if answer is None:
+        app.log("沒新增")
+        return
+    n = code_number(course, answer.strip())
+    if n is None:
+        app.log(f"認不出作業代號「{answer}」：要像 {default}（{course.code} 的 {{n}} 換成數字）")
+        return
+    code, folder = code_of(course, n), course_folder / folder_of(course, n)
+    if n in have or folder.exists() or folder.is_symlink():
+        app.log(f"已經有 {code}（資料夾 {have.get(n, folder.name)}）了，沒有新增（不會蓋掉）")
+        return
+    file = kind.new(folder, code)
+    write_stub(folder, code, *HOMEWORK_STUB)
+    app.edit(file)
+    app.rescan()
+    app.log(f"已新增 {code}：{folder.name}/{file.name}，編輯器打開了")
