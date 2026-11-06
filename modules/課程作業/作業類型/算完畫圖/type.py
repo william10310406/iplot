@@ -5,17 +5,11 @@
 from __future__ import annotations
 
 import ast
-import re
-import sys
 from pathlib import Path
 
 NAME = "算完畫圖"
 ACCEPTS = (".py",)  # 收作業時哪些副檔名算作業檔
 SHELL = "coursework"  # 殼：跟作業檔放在一起，不是 pip 套件
-# import 名 → pip 名（從 modules/科學計算/hk_page.py 的 PIP_NAMES 複製一份；那個檔不動）
-PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
-             "pywt": "PyWavelets", "yaml": "PyYAML", "bs4": "beautifulsoup4", "skimage": "scikit-image",
-             "dateutil": "python-dateutil", "mpl_toolkits": "matplotlib", "pylab": "matplotlib"}
 
 
 def _tree(file: Path) -> ast.Module | None:
@@ -82,41 +76,17 @@ def cases(file: Path) -> list[tuple[str, str]] | None:
     return [(k.value, _label(v)) for k, v in zip(value.keys, value.values, strict=True)]  # type: ignore[union-attr]
 
 
-def _normal(dist: str) -> str:
-    return re.sub(r"[-_.]+", "-", dist).lower()
-
-
 def requires(file: Path) -> set[str]:
-    """這份作業要的 pip 名：REQUIRES 那一行（字串 list 的字面值），聯集整個檔的 import 掃描（連函式裡的；
-    扣標準庫、扣 coursework、扣作業檔旁邊的 .py 與資料夾；import 名照 PIP_NAMES 換成 pip 名）。
-    跟 REQUIRES 寫的是同一個套件（大小寫、- _ . 不分）就不重複。讀不懂回空集合。"""
-    file = Path(file)
+    """這份作業要的 pip 名：頂層 REQUIRES = [...] 的字面值（ast 讀，D137）裡的非空字串。
+    import 了、REQUIRES 沒寫的不算在這裡：那是 --check 的 R12（只警告、打包時擋）。
+    沒有 REQUIRES、不是字串 list 的字面值、檔讀不懂 → 空集合。"""
     tree = _tree(file)
-    if tree is None:
-        return set()
-    line = _assigned(tree, "REQUIRES")
+    line = _assigned(tree, "REQUIRES") if tree else None
     try:
         written = ast.literal_eval(line) if line is not None else []
     except ValueError:
-        written = []
-    found = {r for r in written if isinstance(r, str)} if isinstance(written, list) else set()
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names |= {a.name.split(".")[0] for a in node.names}
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names.add(node.module.split(".")[0])
-    try:
-        siblings = {p.stem if p.suffix == ".py" else p.name for p in file.parent.iterdir()}
-    except OSError:
-        siblings = set()
-    have = {_normal(r) for r in found}
-    for name in sorted(names - set(sys.stdlib_module_names) - {"__future__", SHELL} - siblings):
-        dist = PIP_NAMES.get(name, name)
-        if _normal(dist) not in have:
-            have.add(_normal(dist))
-            found.add(dist)
-    return found
+        return set()
+    return {r for r in written if isinstance(r, str) and r} if isinstance(written, list) else set()
 
 
 def check(file: Path):

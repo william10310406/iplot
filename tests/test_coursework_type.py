@@ -135,22 +135,24 @@ def test_cases_not_utf8_is_none(kind, tmp_path):
 
 # ── requires ──
 
-def test_requires_unions_the_line_and_the_import_scan(kind, tmp_path):
+def test_requires_is_exactly_the_requires_line(kind, tmp_path):
+    """D137：以 ast 讀到的 REQUIRES 字面值為準；import 了沒寫的不算（那是 --check 的事，Task 7）。"""
     text = V2.replace("def compute(case): return {}",
-                      "def compute(case):\n    from sklearn.cluster import KMeans\n    import cv2, os, json\n"
-                      "    import helper\n    from . import x\n    return {}")
-    hw(tmp_path, "", "helper.py")  # 旁邊的 .py 不是套件
-    assert kind.requires(hw(tmp_path, text)) == {"numpy", "scikit-learn", "opencv-python"}
+                      "def compute(case):\n    from sklearn.cluster import KMeans\n    import cv2\n    return {}")
+    assert kind.requires(hw(tmp_path, text)) == {"numpy"}
+    text = 'REQUIRES = ["Pillow", "scikit-learn"]\nimport coursework\nimport PIL\nimport scipy\n'
+    assert kind.requires(hw(tmp_path, text, "HK2.py")) == {"Pillow", "scikit-learn"}
 
 
-def test_requires_does_not_repeat_what_the_line_already_says(kind, tmp_path):
-    text = 'REQUIRES = ["Pillow", "scikit-learn"]\nimport coursework\nimport PIL\nimport sklearn\nimport mpl_toolkits\n'
-    assert kind.requires(hw(tmp_path, text)) == {"Pillow", "scikit-learn", "matplotlib"}
-    lower = 'REQUIRES = ["pillow"]\nimport PIL\n'  # 大小寫、- _ . 不同也算同一個
-    assert kind.requires(hw(tmp_path, lower, "HK2.py")) == {"pillow"}
+@pytest.mark.parametrize("text", [
+    "import scipy\n",  # 沒有 REQUIRES
+    'REQUIRES = "numpy"\nimport yaml\n',  # 不是 list
+    'X = "numpy"\nREQUIRES = [X]\n',  # 不是字面值
+    "def f(:\n",  # 讀不懂
+])
+def test_requires_without_a_usable_line_is_empty(kind, tmp_path, text):
+    assert kind.requires(hw(tmp_path, text)) == set()
 
 
-def test_requires_without_a_line_or_unreadable(kind, tmp_path):
-    assert kind.requires(hw(tmp_path, "import scipy\n")) == {"scipy"}
-    assert kind.requires(hw(tmp_path, 'REQUIRES = "numpy"\nimport yaml\n', "HK2.py")) == {"PyYAML"}
-    assert kind.requires(hw(tmp_path, "def f(:\n", "HK3.py")) == set()
+def test_requires_keeps_only_the_strings(kind, tmp_path):
+    assert kind.requires(hw(tmp_path, 'REQUIRES = ["numpy", 1, "", "matplotlib"]\n')) == {"numpy", "matplotlib"}
