@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 
 NO_INSTALL = "CW_NO_INSTALL"  # 設了就不跑 pip，缺了只報（測試用）
@@ -350,3 +351,265 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
             traceback.print_exc(file=out)
             failed = True
     return 1 if failed else 0
+
+
+# ── --check：docs/09 第 3 節的規則（表與 RULES 是同一份清單，測試核對）；只用 ast，不執行作業檔 ──
+
+RULES = {
+    "R1": "第一行是 REQUIRES = [...]，字串 list 的字面值",
+    "R2": "第二行是 import coursework; coursework.ensure(REQUIRES, __file__)",
+    "R3": "NAME 是字串",
+    "R4": "DOCS 是 [(顯示名, 網址), …]，網址 http://、https:// 開頭",
+    "R5": "NOTE 是字串",
+    "R6": '有 DATA 的話，剛好是 Path(__file__).resolve().parent / "<代號>Space"，那個資料夾在',
+    "R7": "CASES 是 dict 字面值：鍵是字串、值是 dict(…) 或 {…}、label 是字串",
+    "R8": "compute 是頂層 def，一個參數",
+    "R9": "draw 是頂層 def、兩個參數，或 draw = None",
+    "R10": "stats 是頂層 def、一個參數，或 stats = None",
+    "R11": "固定尾段三行照樣",
+    "R12": "用到的第三方套件都寫在 REQUIRES",
+    "R27": "檔是 UTF-8、語法對",
+    "R28": ("作業檔在 Python 3.9 也解析得了（學生的 3.9 才看得到殼的版本提示，而不是語法錯誤）；"
+            "用 ast.parse(…, feature_version=(3, 9)) 查，這是盡力而為，不保證抓到所有 3.10 以後的語法"),
+}
+ENSURE_LINE = "import coursework; coursework.ensure(REQUIRES, __file__)"
+TAIL_KEYS = {"name": "NAME", "docs": "DOCS", "note": "NOTE", "cases": "CASES", "compute": "compute", "draw": "draw",
+             "stats": "stats", "file": "__file__"}
+TAIL_IF = 'if __name__ == "__main__":'
+TAIL_RAISE = "raise SystemExit(coursework.main(HOMEWORK))"
+
+
+@dataclass
+class Problem:
+    rule: str  # "R1"…"R28"
+    line: int | None  # 第幾行；整個檔的問題（不是 UTF-8、讀不到）是 None
+    text: str
+
+
+def _code(line: str) -> str:
+    """去註解、去頭尾空白（# 在字串裡的情形尾段與第二行沒有，不管）。"""
+    return line.split("#", 1)[0].strip()
+
+
+def _top(tree: ast.Module, name: str) -> ast.stmt | None:
+    """頂層最後一個定義 name 的敘述（def 或 name = …）。"""
+    found = None
+    for node in tree.body:
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name) or (
+                isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)):
+            found = node
+    return found
+
+
+def _literal(node: ast.AST | None):
+    try:
+        return ast.literal_eval(node) if node is not None else None
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None
+
+
+def _str_assign(tree: ast.Module, name: str, rule: str, what: str) -> list[Problem]:
+    node = _top(tree, name)
+    if node is None:
+        return [Problem(rule, None, f"少了 {name}：{what}")]
+    ok = isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    return [] if ok else [Problem(rule, node.lineno, f"{name} 要是字串，像 {what}")]
+
+
+def _positional(node: ast.FunctionDef) -> int | None:
+    """def 的位置參數個數；有 *args、**kw、只能用名字給的參數就回 None（殼只用位置給）。"""
+    a = node.args
+    if a.vararg or a.kwarg or a.kwonlyargs:
+        return None
+    return len(a.posonlyargs) + len(a.args)
+
+
+def _function(tree: ast.Module, name: str, count: int, rule: str, may_be_none: bool) -> list[Problem]:
+    node = _top(tree, name)
+    alt = f"，或寫一行 {name} = None" if may_be_none else ""
+    if node is None:
+        return [Problem(rule, None, f"少了 {name}：要是頂層的 def，{count} 個參數{alt}")]
+    if isinstance(node, ast.FunctionDef) and _positional(node) == count:
+        return []
+    if may_be_none and isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and node.value.value is None:
+        return []
+    return [Problem(rule, node.lineno, f"{name} 要是頂層的 def，剛好 {count} 個參數{alt}")]
+
+
+def _requires(tree: ast.Module, lines: list[str]) -> tuple[list[Problem], list[str] | None]:
+    """R1；回（問題, REQUIRES 裡的字串；不是字面值就 None，R12 不看）。"""
+    node = tree.body[0] if tree.body else None
+    is_req = (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+              and node.targets[0].id == "REQUIRES")
+    other = _top(tree, "REQUIRES")
+    value = _literal(other.value) if isinstance(other, ast.Assign) else None
+    names = [v for v in value if isinstance(v, str)] if isinstance(value, (list, tuple)) else None
+    want = '第一行要是 REQUIRES = ["numpy", "matplotlib"] 這樣：一行寫完的 list，裡面都是字串'
+    if not (is_req and node.lineno == 1 and node.end_lineno == 1):
+        return [Problem("R1", other.lineno if other else 1, want)], names
+    if not (isinstance(node.value, ast.List) and isinstance(value, list) and all(isinstance(v, str) for v in value)):
+        return [Problem("R1", 1, want)], names
+    return [], names
+
+
+def _data(tree: ast.Module, file: Path) -> list[Problem]:
+    node = _top(tree, "DATA")
+    if node is None:
+        return []
+    space = f"{Path(file).stem}Space"
+    want = f'Path(__file__).resolve().parent / "{space}"'
+    if not (isinstance(node, ast.Assign)
+            and ast.dump(node.value) == ast.dump(ast.parse(want, mode="eval").body)):
+        return [Problem("R6", node.lineno, f"DATA 要剛好寫成 DATA = {want}")]
+    if not (Path(file).parent / space).is_dir():
+        return [Problem("R6", node.lineno, f"DATA 指的資料夾 {space} 不在作業檔旁邊")]
+    return []
+
+
+def _cases(tree: ast.Module) -> list[Problem]:
+    node = _top(tree, "CASES")
+    if node is None:
+        return [Problem("R7", None, '少了 CASES：要寫成 CASES = {"case-1": dict(…, label="…"), …}')]
+    if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)):
+        return [Problem("R7", node.lineno, 'CASES 要是 {"case-1": dict(…), …} 這樣的字面值')]
+    out = []
+    for key, value in zip(node.value.keys, node.value.values, strict=True):
+        line = (key or value).lineno
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            out.append(Problem("R7", line, "CASES 的鍵要是字串常數（在 iPLoT 裡選 case 要靠它）"))
+            continue
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "dict":
+            label = next((k.value for k in value.keywords if k.arg == "label"), None)
+        elif isinstance(value, ast.Dict):
+            label = next((v for k, v in zip(value.keys, value.values, strict=True)
+                          if isinstance(k, ast.Constant) and k.value == "label"), None)
+        else:
+            out.append(Problem("R7", line, f"CASES 的 {key.value} 要是 dict(…) 或 {{…}}"))
+            continue
+        if label is not None and not (isinstance(label, ast.Constant) and isinstance(label.value, str)):
+            out.append(Problem("R7", label.lineno, f"CASES 的 {key.value} 的 label 要是字串"))
+    return out
+
+
+def _docs(tree: ast.Module) -> list[Problem]:
+    node = _top(tree, "DOCS")
+    want = '[("顯示名", "https://…"), …]，沒有就寫 DOCS = []'
+    if node is None:
+        return [Problem("R4", None, f"少了 DOCS：{want}")]
+    if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.List):
+        return [Problem("R4", node.lineno, f"DOCS 要寫成 {want}")]
+    for item in node.value.elts:
+        pair = _literal(item) if isinstance(item, ast.Tuple) else None
+        if not (isinstance(pair, tuple) and len(pair) == 2 and all(isinstance(v, str) for v in pair)):
+            return [Problem("R4", item.lineno, "DOCS 的每一個要是（顯示名, 網址）兩個字串的 tuple")]
+        if not pair[1].startswith(("http://", "https://")):
+            return [Problem("R4", item.lineno, f"DOCS 的網址要 http:// 或 https:// 開頭：{pair[1]}")]
+    return []
+
+
+def _tail(tree: ast.Module, lines: list[str]) -> list[Problem]:
+    """R11：最後三行是 HOMEWORK = dict(…八個鍵…)、if __name__ == "__main__":、raise SystemExit(coursework.main(HOMEWORK))。"""
+    end = len(lines)
+    body = tree.body
+    hw, last = (body[-2], body[-1]) if len(body) >= 2 else (None, None)
+    ok_hw = (isinstance(hw, ast.Assign) and len(hw.targets) == 1 and isinstance(hw.targets[0], ast.Name)
+             and hw.targets[0].id == "HOMEWORK" and isinstance(hw.value, ast.Call)
+             and isinstance(hw.value.func, ast.Name) and hw.value.func.id == "dict" and not hw.value.args)
+    if not ok_hw:
+        return [Problem("R11", hw.lineno if hw else end, "倒數第三行要是固定尾段的 HOMEWORK = dict(…)，照 docs/09 第 1 節")]
+    got = {k.arg: k.value.id if isinstance(k.value, ast.Name) else None for k in hw.value.keywords}
+    if got != TAIL_KEYS:
+        diff = sorted(set(TAIL_KEYS) ^ set(got) | {k for k in TAIL_KEYS if k in got and got[k] != TAIL_KEYS[k]})
+        return [Problem("R11", hw.lineno, f"HOMEWORK = dict(…) 被改了（{'、'.join(diff)}）：照 docs/09 第 1 節那一行")]
+    if not (isinstance(last, ast.If) and _code(lines[last.lineno - 1]) == TAIL_IF):
+        return [Problem("R11", last.lineno, f"倒數第二行要是 {TAIL_IF}")]
+    inner = last.body[0]
+    if not (len(last.body) == 1 and not last.orelse and inner.lineno == inner.end_lineno == last.end_lineno
+            and _code(lines[inner.lineno - 1]) == TAIL_RAISE):
+        return [Problem("R11", inner.lineno, f"最後一行要是 {TAIL_RAISE}")]
+    return []
+
+
+def _import_lines(tree: ast.Module) -> list[tuple[str, int]]:
+    """（頂層名字, 行號），連函式裡的；相對 import 不算。"""
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            out += [(a.name.split(".")[0], node.lineno) for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            out.append((node.module.split(".")[0], node.lineno))
+    return sorted(out, key=lambda x: x[1])
+
+
+def _forgotten_lines(tree: ast.Module, file: Path, requires: list[str]) -> list[Problem]:
+    """R12：import 了、REQUIRES 沒寫的；每個 pip 名報一次，在第一個 import 它的那一行。"""
+    left = third_party({n for n, _ in _import_lines(tree)}, Path(file).parent) - _covered(requires)
+    out, seen = [], {_normal(r) for r in requires}
+    for name, line in _import_lines(tree):
+        if name in left and _normal(dist_for(name)) not in seen:
+            seen.add(_normal(dist_for(name)))
+            out.append(Problem("R12", line, f"import 了 {name}，REQUIRES 沒寫：加上 \"{dist_for(name)}\""))
+    return out
+
+
+def _newer_line(tree: ast.Module, exc: SyntaxError) -> int | None:
+    """R28 的行號：檔裡有 match／except* 就報第一個的那一行（例外的行號常落在敘述結尾之後），不然照例外。"""
+    newer = tuple(getattr(ast, n) for n in ("Match", "TryStar") if hasattr(ast, n))
+    return min((n.lineno for n in ast.walk(tree) if newer and isinstance(n, newer)), default=exc.lineno)
+
+
+def check(file: Path) -> list[Problem]:
+    """docs/09 第 3 節的靜態檢查，照規則編號排；空的就是通過。只用 ast，不執行檔案。"""
+    file = Path(file)
+    try:
+        source = file.read_bytes().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return [Problem("R27", None, "這個檔不是 UTF-8：用編輯器另存成 UTF-8")]
+    except OSError as exc:
+        return [Problem("R27", None, f"讀不到這個檔：{exc.strerror or exc}")]
+    try:
+        tree = ast.parse(source, str(file))
+    except (SyntaxError, ValueError) as exc:
+        line = getattr(exc, "lineno", None)
+        return [Problem("R27", line, f"語法錯誤：{getattr(exc, 'msg', exc)}")]
+    lines = source.splitlines() or [""]
+    problems, requires = _requires(tree, lines)
+    if len(lines) < 2 or _code(lines[1]) != ENSURE_LINE:
+        problems.append(Problem("R2", 2, f"第二行要是 {ENSURE_LINE}"))
+    problems += _str_assign(tree, "NAME", "R3", 'NAME = "HK1 …"')
+    problems += _docs(tree)
+    problems += _str_assign(tree, "NOTE", "R5", 'NOTE = """…"""，沒有就寫 NOTE = ""')
+    problems += _data(tree, file)
+    problems += _cases(tree)
+    problems += _function(tree, "compute", 1, "R8", False)
+    problems += _function(tree, "draw", 2, "R9", True)
+    problems += _function(tree, "stats", 1, "R10", True)
+    problems += _tail(tree, lines)
+    if requires is not None:
+        problems += _forgotten_lines(tree, file, requires)
+    try:
+        ast.parse(source, str(file), feature_version=(3, 9))
+    except SyntaxError as exc:
+        problems.append(Problem("R28", _newer_line(tree, exc),
+                                "這份作業用了 Python 3.10 以後才有的寫法，學生在舊版 Python 上會看不到版本提示"))
+    order = list(RULES)
+    return sorted(problems, key=lambda p: (order.index(p.rule), p.line or 0))
+
+
+def cli(argv: list[str]) -> int:
+    """python coursework.py --check <作業檔>：每條印 ✗ R<n> 第 <行> 行：<句子>，有問題回 1；全過印「通過」回 0；用錯回 2。"""
+    with contextlib.suppress(AttributeError, ValueError):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if len(argv) != 2 or argv[0] != "--check":
+        print("用法：python coursework.py --check <作業檔>", file=sys.stderr)
+        return 2
+    problems = check(Path(argv[1]))
+    for p in problems:
+        print(f"✗ {p.rule} 第 {p.line} 行：{p.text}" if p.line else f"✗ {p.rule}：{p.text}")
+    if not problems:
+        print("通過")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(cli(sys.argv[1:]))

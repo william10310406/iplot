@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
+import sys
 from pathlib import Path
 
 NAME = "算完畫圖"
@@ -89,8 +91,24 @@ def requires(file: Path) -> set[str]:
     return {r for r in written if isinstance(r, str) and r} if isinstance(written, list) else set()
 
 
-def check(file: Path):
-    raise NotImplementedError("Task 7：--check 的規則")
+def _shell():
+    """從檔案載入旁邊的 coursework.py（換個名字，不動 sys.modules 裡的 coursework：那可能是別人的）。
+    dataclass 要在 sys.modules 找得到自己的模組，所以載入期間放著、載完拿掉。"""
+    name = "_coursework_for_check"
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parent / f"{SHELL}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
+def check(file: Path) -> list:
+    """docs/09 第 3 節的規則（R1–R28）：coursework.check 的 Problem(rule, line, text) 清單；空的就是通過。
+    作業那一格只警告、檢查與打包時擋（D131），由框架決定。不執行作業檔。"""
+    return _shell().check(Path(file))
 
 
 def argv(file: Path, python: Path, case: str | None):
