@@ -26,8 +26,10 @@ NO_INSTALL = "CW_NO_INSTALL"  # 設了就不跑 pip，缺了只報（測試用�
 FROM_IPLOT = "CW_FROM_IPLOT"  # iPLoT 另開的子程序都帶著：不自動補 REQUIRES、不問 case、文字開視窗
 MIN_PYTHON = (3, 10)
 # README 與錯誤句子都從這幾個常數來（學生包的 README 打包時代換進去，測試核對）
+VERSION = "python3 --version"
 MAKE_VENV = "python3 -m venv .venv"
 RUN = "python3 {file}"
+WIN_VERSION = "py --version"
 WIN_MAKE_VENV = "py -m venv .venv"
 WIN_RUN = "py {file}"
 TOO_OLD = "這份作業要 Python 3.10 以上，現在是 {have}。照 README 第 1 步裝 python.org 的 Python，再用 python3 跑一次。"

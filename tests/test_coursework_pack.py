@@ -242,32 +242,94 @@ def test_other_course_codes_and_folders(course_mod, tmp_path):
 
 # ── README ──
 
+def sections(text):
+    """README 的三大段：macOS、Windows、出問題的時候（以「== 標題 ==」切）。"""
+    parts = re.split(r"^== (.+?) ==$", text, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2], strict=True))
+
+
 def test_readme_is_filled_from_the_shell_constants(course_mod, course, cw):
     pack(course_mod, course, "HK1")
     text = readme_of(sent(course))
     assert re.search(r"\{[a-z_]+\}", text) is None
     commands = [line[4:] for line in text.splitlines() if line.startswith("    ")]
-    assert commands == [cw.MAKE_VENV, cw.RUN.format(file="HK1.py"), cw.WIN_MAKE_VENV, cw.WIN_RUN.format(file="HK1.py")]
+    run, win_run = cw.RUN.format(file="HK1.py"), cw.WIN_RUN.format(file="HK1.py")
+    assert commands == [cw.VERSION, cw.MAKE_VENV, run, cw.WIN_VERSION, cw.WIN_MAKE_VENV, win_run]
+    assert (cw.VERSION, cw.WIN_VERSION) == ("python3 --version", "py --version")
     assert "Windows（未經實機驗證）" in text
     assert "python.org" in text and "3.10" in text and "終端機" in text and "只交 HK1.py" in text
     assert "\r" not in text
 
 
-def test_readme_step_numbers_match_the_shell_sentences(course_mod, course, cw):
+def test_readme_sections_and_their_steps(course_mod, course, cw):
     pack(course_mod, course, "HK1")
     text = readme_of(sent(course))
-    assert "README 第 1 步" in cw.TOO_OLD
-    step1 = text[text.index("第 1 步"):text.index("第 2 步")]
-    assert "python.org" in step1  # 殼說「照 README 第 1 步裝 python.org 的 Python」
-    step3 = text[text.index("第 3 步"):text.index("第 4 步")]
-    assert cw.MAKE_VENV in step3 and "只要做一次" in step3
+    parts = sections(text)
+    mac = next(v for k, v in parts.items() if k == "macOS")
+    win = next(v for k, v in parts.items() if k.startswith("Windows"))
+    assert [int(n) for n in re.findall(r"^第 (\d) 步", mac, flags=re.M)] == [1, 2, 3, 4, 5]
+    assert [int(n) for n in re.findall(r"^第 (\d) 步", win, flags=re.M)] == [0, 1, 2, 3, 4, 5]
+    assert "第 1 步" in cw.TOO_OLD and "python.org" in step(mac, 1)  # 殼說「照 README 第 1 步裝 python.org 的 Python」
+    assert "python.org" in step(win, 1)
+
+
+def step(section, n):
+    m = re.search(rf"^第 {n} 步.*?(?=^第 \d 步|\Z)", section, flags=re.M | re.S)
+    return m.group(0)
+
+
+def test_readme_checks_the_python_version_before_making_the_venv(course_mod, course, cw):
+    pack(course_mod, course, "HK1")
+    parts = sections(readme_of(sent(course)))
+    mac, win = parts["macOS"], parts["Windows（未經實機驗證）"]
+    check = step(mac, 3)
+    assert "確認 Python 版本" in check and f"    {cw.VERSION}\n" in check and "3.10 以上" in check
+    assert "3.9" in check and "安裝命令列開發者工具" in check and "取消" in check
+    assert "⌘Q" in check and "重開" in check and "回到第 2 步" in check
+    assert cw.MAKE_VENV in step(mac, 4) and "只要做一次" in step(mac, 4)
+    assert cw.RUN.format(file="HK1.py") in step(mac, 5)
+    wcheck = step(win, 3)
+    assert "確認 Python 版本" in wcheck and f"    {cw.WIN_VERSION}\n" in wcheck and "3.10 以上" in wcheck
+    assert cw.WIN_MAKE_VENV in step(win, 4) and cw.WIN_RUN.format(file="HK1.py") in step(win, 5)
+
+
+def test_windows_starts_by_unzipping_the_download(course_mod, course):
+    pack(course_mod, course, "HK1")
+    win = next(v for k, v in sections(readme_of(sent(course))).items() if k.startswith("Windows"))
+    zero = step(win, 0)
+    assert "右鍵" in zero and "全部解壓縮" in zero and "不能在 zip 裡面" in zero
+    assert win.index("第 0 步") < win.index("第 1 步")
+
+
+def test_readme_says_where_the_homework_part_starts_and_ends(course_mod, course):
+    pack(course_mod, course, "HK1")
+    text = readme_of(sent(course))
+    assert "上半部" not in text
+    assert "「# ── 從這裡開始是作業 ──」和「# ── 以下不用改 ──」兩行中間的部分" in text
+    assert "再做一次第 5 步" in text
+    template = (TYPE_DIR / "範本.py").read_text(encoding="utf-8")
+    assert "# ── 從這裡開始是作業 ──" in template and "# ── 以下不用改 ──" in template  # README 說的兩行真的在範本裡
+
+
+def test_readme_has_a_trouble_section_with_exactly_two_items(course_mod, course, cw):
+    pack(course_mod, course, "HK1")
+    parts = sections(readme_of(sent(course)))
+    trouble = parts["出問題的時候"]
+    items = [line for line in trouble.splitlines() if line.startswith("- ")]
+    assert len(items) == 2
+    assert "這份作業要 Python 3.10 以上" in items[0] and "第 3 步" in items[0]
+    assert "這份作業要 Python 3.10 以上" in cw.TOO_OLD  # 殼真的會說這一句
+    assert "裝套件失敗" in items[1] and "網路" in items[1] and "第 5 步" in items[1]
+    assert list(parts) == ["macOS", "Windows（未經實機驗證）", "出問題的時候", "交作業"]
+    assert "macOS" not in trouble and "Windows" not in trouble  # 兩邊共用，步號相同
 
 
 def test_readme_template_has_every_placeholder_and_no_you(course_mod):
     text = README.read_text(encoding="utf-8")
-    for key in ("{code}", "{file}", "{make_venv}", "{run}", "{win_make_venv}", "{win_run}"):
+    for key in ("{code}", "{file}", "{make_venv}", "{run}", "{win_make_venv}", "{win_run}",
+                "{version_check}", "{win_version_check}"):
         assert key in text, key
-    assert "您" not in text
+    assert "您" not in text and "共用" not in text  # 學生包沒有 課程.py，學生端不會共用 .venv（D130）
 
 
 # ── .版本/ 的 zip（D135，A18 的 zip 那一半）──

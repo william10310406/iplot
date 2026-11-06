@@ -200,5 +200,6 @@ def left_out(folder: Path, code: str) -> list[Path]:
 def readme_values(code: str) -> dict[str, str]:
     """框架/學生README.txt 的佔位：指令都從殼的常數來，殼的錯誤句子與 README 是同一份。"""
     cw, file = shell(), f"{code}.py"
-    return {"code": code, "file": file, "make_venv": cw.MAKE_VENV, "run": cw.RUN.format(file=file),
+    return {"code": code, "file": file, "version_check": cw.VERSION, "make_venv": cw.MAKE_VENV,
+            "run": cw.RUN.format(file=file), "win_version_check": cw.WIN_VERSION,
             "win_make_venv": cw.WIN_MAKE_VENV, "win_run": cw.WIN_RUN.format(file=file)}
