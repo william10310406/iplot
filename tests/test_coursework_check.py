@@ -433,3 +433,10 @@ def test_rules_table_is_one_block():
 
 def test_r28_row_says_best_effort():
     assert "盡力而為" in dict((row[0], " ".join(row)) for row in table_rows())["R28"]
+
+
+def test_template_is_the_spec_example(cw, tmp_path):
+    """範本（「新增作業」放進去的起點）就是 docs/09 第 1 節那個檔，寫的是 HK1；放成 HK1.py 就過 --check。"""
+    template = TYPE_DIR / "範本.py"
+    assert template.read_text(encoding="utf-8") == good()
+    assert cw.check(write(tmp_path, template.read_text(encoding="utf-8"))) == []
