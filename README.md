@@ -365,6 +365,16 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 
 錯誤訊息旁邊的「回報這個問題」（隨附的模組「回報與討論」）會先遮掉路徑與使用者名稱、給你看、讓你改，再用瀏覽器開到 `https://github.com/william10310406/iplot/discussions` 的新增頁，標題、內文都填好；雙擊面板上「回報與討論」這一格，可以回報沒有錯誤訊息的問題、提建議、問問題、看論壇。要有 GitHub 帳號，送出是你在瀏覽器裡按：iPLoT 不登入、不連網，只把內容填進網址交給瀏覽器。論壇是公開的，學生的名字請自己再看一次（錯誤訊息裡直接寫著的名字遮不到）。iPLoT 打不開的時候，直接到那個網址發；怎麼按、遮了什麼、沒遮什麼，見 [docs/08](docs/08_操作說明-0.6.1.md) 第 10 節。
 
+## 授權
+
+iPLoT 以 MIT 授權公開，全文見 [LICENSE](LICENSE)；先前發佈的 0.5.x、0.6.x 也適用。
+
+對這個 repo 發 PR，依 GitHub 服務條款 D.6，以同一份授權（MIT）授出。
+
+工作坊的模組放在 [iplot-modules](https://github.com/william10310406/iplot-modules)，上傳的模組一律以 MIT 公開。
+
+最初的 iPLoT.py、iPLoT.txt 由研究助理的指導老師撰寫，經其同意一併以 MIT 公開。
+
 ## 文件
 
 - [docs/06_架構說明與試用.md](docs/06_架構說明與試用.md)：第一次接觸先看——保留了什麼、改了什麼、七步試用
