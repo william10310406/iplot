@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 MARK = "課程.py"  # 一門課就是一個有這個檔的資料夾
 NO_INSTALL = "CW_NO_INSTALL"  # 設了就不建 venv、不跑 pip，缺了只報
@@ -17,6 +19,7 @@ SENT = "發出去的"  # 一門課裡放學生包 zip 的資料夾
 KEEP_PY = 20  # .版本/ 裡作業檔的 .py 最多留幾份
 
 FRAMEWORK = Path("框架") / "course.py"  # 往上找框架時認的檔
+TYPES_DIR = "作業類型"  # 框架所在的資料夾底下：每種作業一個資料夾，裡面是 type.py
 PIP_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 FOLDER_SLOT = re.compile(r"\{n(?::0([1-4])d)?\}")  # {n} 或 {n:01d}…{n:04d}；不用 str.format 驗使用者給的字串
 
@@ -182,3 +185,21 @@ def course_root(start: Path) -> Path | None:
 def framework_root(start: Path) -> Path | None:
     """從 start 自己往上，第一個有 框架/course.py 的資料夾。"""
     return _up(start, FRAMEWORK)
+
+
+def load_type(name: str, framework: Path) -> ModuleType:
+    """載入作業類型 framework/作業類型/<name>/type.py（框架自己帶的程式，不是老師或學生的）。
+    name 不是 作業類型/ 底下的一個資料夾、或那裡沒有 type.py → CourseError。"""
+    base = Path(framework) / TYPES_DIR
+    file = base / name / "type.py"
+    if not name or re.search(r"[/\\]", name) or name.startswith(".") or not file.is_file() \
+            or file.resolve().parent.parent != base.resolve():
+        try:
+            have = sorted(p.name for p in base.iterdir() if (p / "type.py").is_file())
+        except OSError:
+            have = []
+        raise CourseError(f"沒有「{name}」這種作業：{TYPES_DIR}/ 底下有的是 {'、'.join(have) or '（沒有）'}")
+    spec = importlib.util.spec_from_file_location(f"cw_type_{name}", file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return module
