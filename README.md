@@ -273,7 +273,7 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 
 ### 按「工作坊」會發生什麼
 
-讀 `WORKSHOP_URL` 指的 `index.json`（有 `uploads` 就讀它，沒有才讀 `modules`），開一個視窗列出清單。清單最上面一行是清單給的 `notice`（新清單上是「這裡的模組是大家上傳的，沒有人審查。…」；舊的清單沒有這一行）。每個模組一列：圖示、名稱，名稱底下一行「上傳者：@<帳號>」（舊的清單沒有這一行；上傳的帳號刪掉了是「上傳者：帳號已刪除」）、說明（作者寫了這一版改了什麼的，底下多一行「這一版：…」）、被研究助理標了的那一列多一行紅字「⚠ …」、清單上的版本、在這台電腦上的狀態、一顆按鈕。清單上的字一律當文字顯示，不當 HTML。狀態有六種：
+讀 `WORKSHOP_URL` 指的 `index.json`（有 `uploads` 就讀它，沒有才讀 `modules`），開一個視窗列出清單。清單最上面一行是清單給的 `notice`（新清單上是「這裡的模組是大家上傳的，沒有人審查；都以 MIT 授權公開，可以改、可以再分享（保留 LICENSE）。…」；舊的清單沒有這一行）。每個模組一列：圖示、名稱，名稱底下一行「上傳者：@<帳號>」（舊的清單沒有這一行；上傳的帳號刪掉了是「上傳者：帳號已刪除」）、說明（作者寫了這一版改了什麼的，底下多一行「這一版：…」）、被研究助理標了的那一列多一行紅字「⚠ …」、清單上的版本、在這台電腦上的狀態、一顆按鈕。清單上的字一律當文字顯示，不當 HTML。狀態有六種：
 
 | 狀態 | 意思 | 按鈕 |
 |---|---|---|
@@ -297,7 +297,7 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 
 ### 上傳自己的模組
 
-要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.6.1.md](docs/08_操作說明-0.6.1.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
+要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」和「以 MIT 授權公開」兩格、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.6.1.md](docs/08_操作說明-0.6.1.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
 
 ## 在面板外打開模組
 
@@ -371,7 +371,7 @@ iPLoT 以 MIT 授權公開，全文見 [LICENSE](LICENSE)；先前發佈的 0.5.
 
 對這個 repo 發 PR，依 GitHub 服務條款 D.6，以同一份授權（MIT）授出。
 
-工作坊的模組放在 [iplot-modules](https://github.com/william10310406/iplot-modules)，上傳的模組一律以 MIT 公開。
+工作坊的模組放在 [iplot-modules](https://github.com/william10310406/iplot-modules)，從這一版的表單起，上傳的模組一律以 MIT 公開；更早上傳、沒有授權的少數模組，清單上會有紅字。
 
 最初的 iPLoT.py、iPLoT.txt 由研究助理的指導老師撰寫，經其同意一併以 MIT 公開。
 
