@@ -3,6 +3,7 @@
 
 import re
 import sys
+from pathlib import Path
 
 import pytest
 from cw_support import ROOT, TYPE_DIR, load
@@ -96,7 +97,7 @@ STRUCTURE = {
     "R11-key": ("R11", lambda: replaced("stats=stats, file=", "file=")),
     "R11-value": ("R11", lambda: replaced("name=NAME,", 'name="HK1",')),
     "R11-last": ("R11", lambda: replaced("    raise SystemExit(coursework.main(HOMEWORK))", "    coursework.main(HOMEWORK)")),
-    "R12": ("R12", lambda: inserted("import scipy")),
+    "R12": ("R12", lambda: inserted("import cv2")),
     "R12-in-function": ("R12", lambda: inserted("def helper():\n    from sklearn.cluster import KMeans\n    return KMeans", 1)),
 }
 
@@ -133,6 +134,48 @@ def test_r12_names_the_pip_package(cw, tmp_path):
     src, _ = inserted("import cv2")
     (p,) = cw.check(write(tmp_path, src))
     assert p.rule == "R12" and "opencv-python" in p.text
+
+
+def blocking(problems):
+    return [p for p in problems if p.block]
+
+
+def test_r12_table_name_blocks(cw, tmp_path):
+    """D141：import 名在對照表裡（cv2 → opencv-python）、REQUIRES 沒寫那個 pip 名：擋。"""
+    src, line = inserted("import cv2")
+    assert [(p.rule, p.line) for p in blocking(cw.check(write(tmp_path, src)))] == [("R12", line)]
+
+
+def test_r12_unknown_name_only_warns(cw, tmp_path):
+    """D141：不在對照表、也不是標準函式庫：只警告，打包不擋；句子請老師確認 REQUIRES 有寫它的 pip 名。"""
+    src, line = inserted("import scipy")
+    (p,) = cw.check(write(tmp_path, src))
+    assert (p.rule, p.line, p.block) == ("R12", line, False)
+    assert "scipy" in p.text and "REQUIRES" in p.text and "pip" in p.text
+
+
+def test_r12_crypto_with_pycryptodome_is_not_blocked(cw, tmp_path):
+    """import 名與 pip 名不同、對照表沒有的（import Crypto 是 pycryptodome）：老師寫對了，打包不能被擋。"""
+    src = good().replace('REQUIRES = ["numpy", "matplotlib"]', 'REQUIRES = ["numpy", "matplotlib", "pycryptodome"]')
+    src = src.replace(MARK, "from Crypto.Cipher import AES\n\n" + MARK)
+    file = write(tmp_path, src)
+    assert blocking(cw.check(file)) == []
+    kind = load(TYPE_DIR / "type.py", "cw_type")
+    assert blocking(kind.check(file)) == []
+
+
+def test_cli_warning_alone_passes(cw, tmp_path, capsys):
+    src, line = inserted("import scipy")
+    assert cw.cli(["--check", str(write(tmp_path, src))]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith(f"⚠ R12 第 {line} 行：") and out[-1] == "通過"
+
+
+def test_every_other_rule_blocks(cw, tmp_path):
+    """只有 R12 不在對照表的那一種是警告；其他規則都擋。"""
+    src, _ = replaced('NAME = "HK1 範例：一顆球繞圓"', "NAME = 1")
+    (p,) = cw.check(write(tmp_path, src))
+    assert p.block
 
 
 def test_r12_ignores_siblings_and_stdlib(cw, tmp_path):
@@ -192,6 +235,42 @@ def test_cli_without_line(cw, tmp_path, capsys):
 def test_cli_passes(cw, tmp_path, capsys):
     assert cw.cli(["--check", str(write(tmp_path, good()))]) == 0
     assert capsys.readouterr().out.strip() == "通過"
+
+
+def test_cli_too_old_says_the_version_line(cw, tmp_path, capsys):
+    """D139：Python 不到 3.10 時跟 ensure 同一句、結束碼 1，不檢查、不出 traceback。"""
+    file = write(tmp_path, good())
+    assert cw.cli(["--check", str(file)], version=(3, 9, 6)) == 1
+    out = capsys.readouterr()
+    assert out.out.strip() == cw.TOO_OLD.format(have="3.9.6") and out.err == ""
+
+
+APPLE = Path("/usr/bin/python3")
+
+
+def _apple_version():
+    import subprocess
+
+    if not APPLE.is_file():
+        return None
+    done = subprocess.run([str(APPLE), "-c", "import sys; print(sys.version_info[0], sys.version_info[1])"],
+                          capture_output=True, text=True)
+    return tuple(int(v) for v in done.stdout.split()) if done.returncode == 0 else None
+
+
+@pytest.mark.skipif(not (_apple_version() or (99,)) < (3, 10), reason="這台沒有 3.10 以前的 /usr/bin/python3")
+def test_cli_on_real_old_python(tmp_path):
+    """真的用 Apple 的 3.9 打 python3 coursework.py --check HK1.py：一句話、結束碼 1、沒有 traceback。"""
+    import shutil
+    import subprocess
+
+    shutil.copy(SHELL, tmp_path / "coursework.py")
+    write(tmp_path, good())
+    done = subprocess.run([str(APPLE), "coursework.py", "--check", "HK1.py"], cwd=tmp_path, capture_output=True,
+                          text=True, encoding="utf-8", env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1"})
+    assert done.returncode == 1, done.stderr
+    assert "Traceback" not in done.stdout + done.stderr
+    assert done.stdout.startswith("這份作業要 Python 3.10 以上")
 
 
 @pytest.mark.parametrize("argv", [[], ["--check"], ["HK1.py"], ["--check", "a.py", "b.py"]])
@@ -267,7 +346,6 @@ FORBIDDEN = {
     "R21-arg": ("R21", "def old(ich, LF_subWIN):\n    return ich", 0),
     "R21-LF": ("R21", "def old2():\n    return LF", 1),
     "R22-global": ("R22", "def bump():\n    global COUNT\n    COUNT = 1", 1),
-    "R22-nonlocal": ("R22", "def outer():\n    n = 0\n    def inner():\n        nonlocal n\n    return inner", 3),
     "R23-w": ("R23", 'def save():\n    open("out.txt", "w").close()', 1),
     "R23-mode-kw": ("R23", 'def log():\n    open("log.txt", mode="a").close()', 1),
     "R24-list": ("R24", 'import matplotlib\nmatplotlib.rcParams["font.sans-serif"] = ["PingFang TC"]', 1),
@@ -299,6 +377,8 @@ def test_each_forbidden_rule_alone(cw, tmp_path, case):
     'import matplotlib\nmatplotlib.rcParams["font.sans-serif"] = ["PingFang TC", "DejaVu Sans"]',  # R24：有備選
     "import matplotlib.pyplot as plt\ncolors = plt.cm.viridis",                                  # R16：不是開圖
     "def shape(fig):\n    return fig.add_subplot(2, 1, 1)",
+    # R22：nonlocal 在 draw 的 update 裡記狀態是正常寫法（D140）
+    "def blink(fig, run):\n    frame = 0\n    def update(i):\n        nonlocal frame\n        frame += 1\n        return ()\n    return update",
 ])
 def test_allowed_things_are_not_reported(cw, tmp_path, snippet):
     src, _ = inserted(snippet)

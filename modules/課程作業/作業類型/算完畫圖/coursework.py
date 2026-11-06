@@ -367,7 +367,8 @@ RULES = {
     "R9": "draw 是頂層 def、兩個參數，或 draw = None",
     "R10": "stats 是頂層 def、一個參數，或 stats = None",
     "R11": "固定尾段三行照樣",
-    "R12": "用到的第三方套件都寫在 REQUIRES",
+    "R12": ("用到的第三方套件都寫在 REQUIRES：import 名在對照表裡（cv2 → opencv-python 這種）而 REQUIRES 沒寫那個 pip 名才擋；"
+            "不在對照表、也不是標準函式庫的只警告（打包也不擋），請老師確認 REQUIRES 有寫它的 pip 名"),
     "R13": "不 import tkinter、_tkinter、turtle（含子模組）",
     "R14": "不用 matplotlib 的 Tk 後端：backend_tkagg、backend_tk、FigureCanvasTkAgg、NavigationToolbar2Tk",
     "R15": '不換後端：matplotlib.use(…)、rcParams["backend"]',
@@ -377,7 +378,7 @@ RULES = {
     "R19": "不 os.chdir",
     "R20": "不寫絕對路徑",
     "R21": "不用舊格式的全域 t2026fscHOMEDIR、LF、LF_subWIN",
-    "R22": "case 之間不共用狀態（不用 global、nonlocal）",
+    "R22": "case 之間不共用狀態（不用 global；nonlocal 可以，draw 的 update 用它記狀態）",
     "R23": "寫檔只寫在 DATA 底下",
     "R24": "不要只指定一個字型",
     "R25": "不定義 iPLoT 的名字：run、on_files、on_error、TITLE、ICON",
@@ -410,6 +411,7 @@ class Problem:
     rule: str  # "R1"…"R28"
     line: int | None  # 第幾行；整個檔的問題（不是 UTF-8、讀不到）是 None
     text: str
+    block: bool = True  # False：只警告，「檢查與打包」也不擋（D141：R12 不在對照表的 import）
 
 
 def _code(line: str) -> str:
@@ -568,13 +570,22 @@ def _import_lines(tree: ast.Module) -> list[tuple[str, int]]:
 
 
 def _forgotten_lines(tree: ast.Module, file: Path, requires: list[str]) -> list[Problem]:
-    """R12：import 了、REQUIRES 沒寫的；每個 pip 名報一次，在第一個 import 它的那一行。"""
+    """R12（D141）：import 了、REQUIRES 沒寫的；每個名字報一次，在第一個 import 它的那一行。
+    import 名在對照表（PIP_NAMES）裡：知道 pip 名，REQUIRES 沒寫就擋。
+    不在對照表：pip 名可能跟 import 名不同（import Crypto 是 pycryptodome），只警告、打包不擋。"""
     left = third_party({n for n, _ in _import_lines(tree)}, Path(file).parent) - _covered(requires)
     out, seen = [], {_normal(r) for r in requires}
     for name, line in _import_lines(tree):
-        if name in left and _normal(dist_for(name)) not in seen:
-            seen.add(_normal(dist_for(name)))
-            out.append(Problem("R12", line, f"import 了 {name}，REQUIRES 沒寫：加上 \"{dist_for(name)}\""))
+        if name not in left or name in seen:
+            continue
+        seen.add(name)
+        if name in PIP_NAMES:
+            if _normal(PIP_NAMES[name]) not in seen:
+                seen.add(_normal(PIP_NAMES[name]))
+                out.append(Problem("R12", line, f"import 了 {name}，REQUIRES 沒寫：加上 \"{PIP_NAMES[name]}\""))
+        else:
+            out.append(Problem("R12", line, f"import 了 {name}：確認 REQUIRES 有寫它的 pip 名（常常跟 import 名一樣，"
+                                            f"寫 \"{name}\"；不一樣的照套件的說明寫）", block=False))
     return out
 
 
@@ -675,8 +686,8 @@ def _forbidden(tree: ast.Module) -> list[Problem]:
             add("R20", node.lineno, f"不能寫絕對路徑：{node.value}（從 DATA 或 Path(__file__) 出發）")
         if isinstance(node, ast.Name) and node.id in OLD_GLOBALS or isinstance(node, ast.arg) and node.arg in OLD_GLOBALS:
             add("R21", node.lineno, f"{getattr(node, 'id', None) or node.arg} 是舊格式的全域：路徑用 DATA，畫面是殼的事")
-        if isinstance(node, (ast.Global, ast.Nonlocal)):
-            add("R22", node.lineno, "不能用 global、nonlocal：case 之間不共用狀態，要傳的東西放在 run 裡")
+        if isinstance(node, ast.Global):  # nonlocal 不算（D140）：draw 裡的 update 用它記狀態
+            add("R22", node.lineno, "不能用 global：case 之間不共用狀態，要傳的東西放在 run 裡")
     for key, value, line in _rc_sets(tree, aliases):
         if key == "backend":
             add("R15", line, "不能換 matplotlib 的後端：殼會設")
@@ -731,19 +742,25 @@ def check(file: Path) -> list[Problem]:
     return sorted(problems, key=lambda p: (order.index(p.rule), p.line or 0))
 
 
-def cli(argv: list[str]) -> int:
-    """python coursework.py --check <作業檔>：每條印 ✗ R<n> 第 <行> 行：<句子>，有問題回 1；全過印「通過」回 0；用錯回 2。"""
+def cli(argv: list[str], version=sys.version_info) -> int:
+    """python coursework.py --check <作業檔>：擋的印 ✗ R<n> 第 <行> 行：<句子>、只警告的印 ⚠ 開頭；
+    有擋的回 1，沒有就印「通過」回 0；用錯回 2。Python 不到 3.10：跟 ensure 同一句、回 1（D139）。"""
     with contextlib.suppress(AttributeError, ValueError):
         sys.stdout.reconfigure(encoding="utf-8")
+    if tuple(version[:2]) < MIN_PYTHON:
+        print(TOO_OLD.format(have=".".join(str(v) for v in version[:3])))
+        return 1
     if len(argv) != 2 or argv[0] != "--check":
         print("用法：python coursework.py --check <作業檔>", file=sys.stderr)
         return 2
     problems = check(Path(argv[1]))
     for p in problems:
-        print(f"✗ {p.rule} 第 {p.line} 行：{p.text}" if p.line else f"✗ {p.rule}：{p.text}")
-    if not problems:
+        mark = "✗" if p.block else "⚠"
+        print(f"{mark} {p.rule} 第 {p.line} 行：{p.text}" if p.line else f"{mark} {p.rule}：{p.text}")
+    blocked = any(p.block for p in problems)
+    if not blocked:
         print("通過")
-    return 1 if problems else 0
+    return 1 if blocked else 0
 
 
 if __name__ == "__main__":
