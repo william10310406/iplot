@@ -159,5 +159,46 @@ def new(folder: Path, code: str) -> Path:
     return file
 
 
-def pack(folder: Path, code: str):
-    raise NotImplementedError("Task 13：檢查與打包")
+def _space(folder: Path, code: str) -> tuple[list[tuple[Path, str]], list[Path]]:
+    """<code>Space/ 底下要放進學生包的（檔或資料夾, zip 裡相對於 <code>/ 的路徑；資料夾結尾是 /）與跳過的。
+    跳過 . 開頭的、__pycache__、符號連結（可能指到 Space 外面）；跳過的資料夾整個不看。
+    <code>Space/ 本身一定在（沒有或是連結就是一個空的資料夾），學生包永遠同一個樣子、跟 README 對得上。"""
+    space = Path(folder) / f"{code}Space"
+    kept: list[tuple[Path, str]] = [(space, f"{code}Space/")]
+    if space.is_symlink():
+        return kept, [space]
+    if not space.is_dir():
+        return kept, []
+    skipped: list[Path] = []
+    pending = [space]
+    while pending:
+        here = pending.pop()
+        for p in sorted(here.iterdir()):
+            if p.name.startswith(".") or p.name == "__pycache__" or p.is_symlink():
+                skipped.append(p)
+            elif p.is_dir():
+                kept.append((p, p.relative_to(Path(folder)).as_posix() + "/"))
+                pending.append(p)
+            elif p.is_file():
+                kept.append((p, p.relative_to(Path(folder)).as_posix()))
+    return kept, skipped
+
+
+def pack(folder: Path, code: str) -> list[tuple[Path, str]]:
+    """學生包裡的東西（檔或資料夾, zip 裡相對於 <code>/ 的路徑）：<code>.py、殼、<code>Space/ 底下的。
+    README.txt 由框架用 readme_values 的值另外寫進去。"""
+    folder = Path(folder)
+    shell_file = Path(__file__).resolve().parent / f"{SHELL}.py"
+    return [(folder / f"{code}.py", f"{code}.py"), (shell_file, f"{SHELL}.py"), *_space(folder, code)[0]]
+
+
+def left_out(folder: Path, code: str) -> list[Path]:
+    """<code>Space/ 底下沒放進學生包的（. 開頭、__pycache__、連結），給框架說一句。"""
+    return _space(folder, code)[1]
+
+
+def readme_values(code: str) -> dict[str, str]:
+    """框架/學生README.txt 的佔位：指令都從殼的常數來，殼的錯誤句子與 README 是同一份。"""
+    cw, file = shell(), f"{code}.py"
+    return {"code": code, "file": file, "make_venv": cw.MAKE_VENV, "run": cw.RUN.format(file=file),
+            "win_make_venv": cw.WIN_MAKE_VENV, "win_run": cw.WIN_RUN.format(file=file)}

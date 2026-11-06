@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -595,6 +596,100 @@ def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool) 
             app.log(f"{code} 要的套件沒裝齊，沒跑")
             return False
     return True
+
+
+# ── 檢查與打包：--check 擋 ✗（⚠ 照打包，D141）→ 發出去的/<代號>_學生包.zip → .版本/ 留一份同樣 bytes 的（D135）──
+
+PACK_SUFFIX = "_學生包.zip"
+README = HERE / "學生README.txt"
+
+
+def keep_pack(zip_path: Path, homework_folder: Path, now: datetime) -> Path:
+    """把打包好的 zip 原封不動複製成 <作業資料夾>/.版本/<代號>_<YYYY-MM-DD_HHMMSS>_學生包.zip；永遠不刪（D135）。
+    同一秒打包兩次，第二份是 <代號>_<時間>_1_學生包.zip。"""
+    code = Path(zip_path).name.removesuffix(PACK_SUFFIX)
+    folder = Path(homework_folder) / VERSIONS
+    folder.mkdir(exist_ok=True)
+    stamp = now.strftime("%Y-%m-%d_%H%M%S")
+    new, n = folder / f"{code}_{stamp}{PACK_SUFFIX}", 0
+    while new.exists():
+        n += 1
+        new = folder / f"{code}_{stamp}_{n}{PACK_SUFFIX}"
+    shutil.copyfile(zip_path, new)
+    return new
+
+
+def _write_zip(target: Path, code: str, members: list[tuple[Path, str]], readme: str, when: datetime) -> None:
+    """學生包：第一層是 <代號>/；成員照路徑排、時間都是打包那一刻、UTF-8 檔名。先寫到暫存檔再換上去。"""
+    stamp = when.timetuple()[:6]
+    entries = [(f"{code}/{arc}", path) for path, arc in members] + [(f"{code}/README.txt", None)]
+    tmp = target.with_name(target.name + ".tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for arc, path in sorted(entries, key=lambda e: e[0]):
+            info = zipfile.ZipInfo(arc, date_time=stamp)
+            info.flag_bits |= 0x800
+            if arc.endswith("/"):
+                info.external_attr = (0o40755 << 16) | 0x10
+                z.writestr(info, b"")
+            else:
+                info.external_attr, info.compress_type = 0o644 << 16, zipfile.ZIP_DEFLATED
+                z.writestr(info, readme.encode("utf-8") if path is None else path.read_bytes())
+    os.replace(tmp, target)
+
+
+def check_and_pack(app, course_folder: Path, now=datetime.now) -> None:
+    """檢查與打包：問哪一份（預設號碼最大的）→ --check 有 ✗ 就列出來、不打包（⚠ 列出來、照打包）→
+    寫 發出去的/<代號>_學生包.zip（作業檔、殼、<代號>Space/、README.txt）→ .版本/ 留一份 → 在 Finder 顯示。"""
+    course_folder = Path(course_folder)
+    try:
+        course = read_course(course_folder)
+        kinds = [load_type(name, HERE.parent) for name in course.types]
+    except CourseError as exc:
+        app.log(f"{course_folder.name}：{exc}")
+        return
+    found = homeworks(course)
+    if not found:
+        app.log(f"{course.name} 還沒有作業：先按「新增作業」")
+        return
+    by_number = {code_number(course, code): (code, file) for code, file in found}
+    answer = app.ask("要打包哪一份？", found[-1][0])
+    if answer is None:
+        app.log("沒打包")
+        return
+    n = code_number(course, answer.strip())
+    if n not in by_number:
+        app.log(f"沒有「{answer}」這份作業（有的是 {'、'.join(code for code, _ in found)}），沒打包")
+        return
+    code, file = by_number[n]
+    try:
+        kind = _kind_of(file, kinds)
+        lines = problem_lines((kind or kinds[0]).check(file)) if (kind or kinds) else []
+        for line in lines:
+            app.log(line)
+        if kind is None:
+            app.log(f"沒有打包：{file.name} 不是規範 v2 的作業檔")
+            return
+        if any(line.startswith("✗") for line in lines):
+            app.log("沒有打包：先改好上面 ✗ 的這幾條")
+            return
+        readme = README.read_text(encoding="utf-8")
+        for key, value in kind.readme_values(code).items():
+            readme = readme.replace("{" + key + "}", value)
+        when = now()
+        out = course_folder / SENT
+        out.mkdir(exist_ok=True)
+        target = out / f"{code}{PACK_SUFFIX}"
+        _write_zip(target, code, kind.pack(file.parent, code), readme, when)
+        kept = keep_pack(target, file.parent, when)
+    except OSError as exc:
+        app.log(f"{code}：{_unreadable(file, exc)}，沒有打包")
+        return
+    skipped = getattr(kind, "left_out", lambda folder, code: [])(file.parent, code)
+    if skipped:
+        app.log(f"{code}Space 裡這幾個沒放進學生包（. 開頭、__pycache__、連結）：{'、'.join(p.name for p in skipped)}")
+    app.log(f"已打包 {code}：發給學生的是 {course_folder.name}/{SENT}/{target.name}；"
+            f"同一份也存在 {file.parent.name}/{VERSIONS}/{kept.name}（不會自動刪）")
+    app.reveal(target)
 
 
 # ── 墊片：面板上每一格的 iplot.py ──
