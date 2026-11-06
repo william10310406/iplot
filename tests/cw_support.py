@@ -98,3 +98,34 @@ def make_course(root: Path, name: str = "測試課", **settings) -> Path:
     lines = ["# 測試用的課程設定：只寫字面值。"] + [f"{key} = {value!r}" for key, value in values.items()]
     (folder / "課程.py").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return folder
+
+
+HOMEWORK_SRC = """REQUIRES = ["numpy", "matplotlib"]
+import coursework; coursework.ensure(REQUIRES, __file__)
+
+NAME = "{code} 範例"
+DOCS = []
+NOTE = ""
+CASES = {"case-1": dict(label="第一個")}
+
+def compute(case): return {}
+def draw(fig, run): return None
+def stats(run): return ""
+
+HOMEWORK = dict(name=NAME, docs=DOCS, note=NOTE, cases=CASES, compute=compute, draw=draw, stats=stats, file=__file__)
+if __name__ == "__main__":
+    raise SystemExit(coursework.main(HOMEWORK))
+"""
+
+
+def make_homework(course: Path, n: int, src: str | None = None) -> Path:
+    """照課的 CODE 與 FOLDER 建第 n 份作業的資料夾與 <代號>.py（src 不給就用 HOMEWORK_SRC，{code} 換成代號），
+    回傳作業檔。代號與資料夾名由框架的 code_of、folder_of 算，跟真的程式同一份。"""
+    framework = load(FRAMEWORK, "course")
+    info = framework.read_course(course)
+    code, folder = framework.code_of(info, n), course / framework.folder_of(info, n)
+    folder.mkdir(parents=True, exist_ok=True)
+    file = folder / f"{code}.py"
+    text = HOMEWORK_SRC.replace("{code}", code) if src is None else src
+    file.write_text(text, encoding="utf-8", newline="\n")
+    return file
