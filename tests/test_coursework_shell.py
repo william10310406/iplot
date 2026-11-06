@@ -429,6 +429,39 @@ def test_main_from_iplot_opens_the_first_text_window_even_without_text(cw, agg, 
     assert len(texts) == 1 and "筆記寫這裡" in texts[0]  # 第二個 case 沒有字：不開空的文字視窗
 
 
+def test_main_from_iplot_shows_the_traceback_of_a_failed_case_in_a_text_window(cw, agg, monkeypatch):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    texts = []
+    monkeypatch.setattr(cw, "_show_text", lambda title, text, show_fn=None: texts.append((title, text)))
+    out = io.StringIO()
+    assert cw.main(make_hw([], text="結果", fail={"case-1", "case-2"}), argv=["--all"], ask=no_ask, out=out,
+                   show_fn=drawn(agg)) == 1
+    (t1, first), (t2, second) = texts
+    assert t1 == "HK1 範例 — case-1" and t2 == "HK1 範例 — case-2"
+    assert first.startswith("HK1 範例\n筆記寫這裡。") and "https://example.invalid/w" in first  # 第一個視窗照樣有 NAME、NOTE、DOCS
+    assert "case-1 出錯了" in first and "Traceback" in first and "ValueError: case-1 算壞了" in first
+    assert "筆記" not in second and "ValueError: case-2 算壞了" in second
+    assert out.getvalue().count("Traceback") == 2  # 輸出照樣印
+
+
+def test_main_from_iplot_draw_failure_after_the_header_window_does_not_repeat_it(cw, agg, monkeypatch):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    texts = []
+    monkeypatch.setattr(cw, "_show_text", lambda title, text, show_fn=None: texts.append(text))
+    hw = make_hw([], text="結果")
+    hw["draw"] = lambda fig, run: 1 / 0
+    assert cw.main(hw, argv=["--case", "case-1"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg)) == 1
+    header, error = texts
+    assert "筆記" in header and "筆記" not in error and "ZeroDivisionError" in error
+
+
+def test_main_outside_iplot_opens_no_window_for_a_traceback(cw, agg, monkeypatch):
+    texts = []
+    monkeypatch.setattr(cw, "_show_text", lambda title, text, show_fn=None: texts.append(text))
+    cw.main(make_hw([], fail={"case-1"}), argv=["--case", "case-1"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg))
+    assert texts == []
+
+
 def test_main_sets_installed_chinese_fonts_before_drawing(cw, agg):
     import matplotlib
 

@@ -319,7 +319,7 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
     chosen = _choose(cases, hw, list(sys.argv[1:] if argv is None else argv), ask, out)
     if chosen is None:
         return 2
-    failed = False
+    failed, header_shown = False, False
     for i, case in enumerate(chosen):
         print(f"── {case} ──", file=out)
         title = f"{hw['name']} — {case}"
@@ -332,6 +332,7 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
             if os.environ.get(FROM_IPLOT):  # 沒有終端機：第一個 case 連同 NAME、NOTE、DOCS 開文字視窗
                 shown = (header + [""] + lines) if i == 0 else lines
                 if shown:
+                    header_shown = header_shown or i == 0
                     _show_text(title, "\n".join(shown), show_fn)
             if hw.get("draw"):
                 import matplotlib
@@ -348,8 +349,14 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
                 finally:
                     plt.close(fig)  # draw 畫到一半壞了也關掉，不然下一個 case 的視窗會一起跳出來
         except Exception:  # noqa: BLE001  作業的 compute／draw 怎麼壞都印出來，接著跑下一個 case
-            traceback.print_exc(file=out)
+            error = traceback.format_exc()
+            print(error, end="", file=out)
             failed = True
+            if os.environ.get(FROM_IPLOT):  # 沒有終端機：traceback 也開文字視窗，不然在 iPLoT 裡看不到
+                shown = header + [""] if i == 0 and not header_shown else []
+                header_shown = True
+                with contextlib.suppress(Exception):  # 連文字視窗都開不了（matplotlib 壞了）：上面已經印了
+                    _show_text(title, "\n".join(shown + [f"{case} 出錯了：", error.rstrip()]), show_fn)
     return 1 if failed else 0
 
 

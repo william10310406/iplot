@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 
@@ -331,13 +332,25 @@ def homeworks(course: Course) -> list[tuple[str, Path]]:
     return [(code, file) for _, code, file in sorted(found)]
 
 
-def _requires(course: Course, kinds: list[ModuleType]) -> dict[str, set[str]]:
-    """代號 → 這份作業要的 pip 名；不是任何一種 TYPES 認得的作業就不算。"""
+def _unreadable(file: Path, exc: OSError) -> str:
+    return f"讀不了 {file.name}（{exc.strerror or exc}）"
+
+
+def _kind_of(file: Path, kinds: list[ModuleType]) -> ModuleType | None:
+    """TYPES 裡第一種說這個檔是 mine 的作業類型；都不是回 None。讀不到檔（OSError）照丟，由叫的人說成一句話。"""
+    return next((k for k in kinds if k.classify(file)[0] == "mine"), None)
+
+
+def _requires(course: Course, kinds: list[ModuleType], say) -> dict[str, set[str]]:
+    """代號 → 這份作業要的 pip 名；不是任何一種 TYPES 認得的作業就不算，讀不到的檔 say 一句、不算。"""
     out: dict[str, set[str]] = {}
     for code, file in homeworks(course):
-        kind = next((k for k in kinds if k.classify(file)[0] == "mine"), None)
-        if kind is not None:
-            out[code] = kind.requires(file)
+        try:
+            kind = _kind_of(file, kinds)
+            if kind is not None:
+                out[code] = kind.requires(file)
+        except OSError as exc:
+            say(f"{_unreadable(file, exc)}，{code} 要的套件沒算進來")
     return out
 
 
@@ -348,7 +361,7 @@ def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool
     apple = _apple_silicon() if apple_silicon is None else apple_silicon
     try:
         course = read_course(folder)
-        needs = _requires(course, [load_type(name, HERE.parent) for name in course.types])
+        needs = _requires(course, [load_type(name, HERE.parent) for name in course.types], app.log)
     except CourseError as exc:
         app.log(f"{folder.name}：{exc}")
         return
@@ -393,6 +406,170 @@ def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool
         later = pending[1]
         said += f"；{later[0].rstrip('：')}{'（' + later[2] + '）' if later[2] else ''}再按一次「{course.name}」"
     app.log(f"{said}；{note}" if note else said)
+
+
+# ── 作業那一格：留版本 → 檢查（只提醒）→ 裝套件 → 選 case → 用課的 .venv 另開程序；面板程序從不執行作業檔 ──
+
+def _versions(file: Path) -> list[Path]:
+    """file 在 .版本/ 裡的 .py 版本，舊到新。只認 <代號>_<YYYY-MM-DD_HHMMSS>[_n].py（照 core/history.py）；別的檔不算。"""
+    own = re.compile(rf"{re.escape(file.stem)}_(\d{{4}}-\d{{2}}-\d{{2}}_\d{{6}})(?:_(\d+))?")
+    found = []
+    for p in (file.parent / VERSIONS).glob("*.py"):
+        m = own.fullmatch(p.stem)
+        if m:
+            found.append(((m.group(1), int(m.group(2) or 0)), p))
+    return [p for _, p in sorted(found)]
+
+
+def snapshot_homework(file: Path, keep: int = KEEP_PY, now=datetime.now) -> Path | None:
+    """作業檔跟 .版本/ 裡最新的 .py 不一樣就存一份（D135），回那個檔；一樣就不存、回 None。
+    超過 keep 份刪最舊的，只刪自己這種命名的 .py：學生包 zip 與 .版本/ 裡別的檔都不碰。"""
+    file = Path(file)
+    data, old = file.read_bytes(), _versions(file)
+    if old and old[-1].read_bytes() == data:
+        return None
+    folder = file.parent / VERSIONS
+    folder.mkdir(exist_ok=True)
+    stamp = now().strftime("%Y-%m-%d_%H%M%S")
+    new, n = folder / f"{file.stem}_{stamp}.py", 0
+    while new.exists():
+        n += 1
+        new = folder / f"{file.stem}_{stamp}_{n}.py"
+    new.write_bytes(data)
+    for extra in _versions(file)[:-keep]:
+        extra.unlink()
+    return new
+
+
+def _homework_in(course: Course, folder: Path) -> tuple[str, Path] | None:
+    """作業資料夾裡名字剛好是 <代號>.py 的那一個檔（跟 homeworks 同一個認法）。"""
+    for file in sorted(Path(folder).glob("*.py")):
+        n = code_number(course, file.stem)
+        if n is not None and file.stem == code_of(course, n):
+            return file.stem, file
+    return None
+
+
+def problem_lines(problems) -> list[str]:
+    """--check 的問題，跟 coursework 的 cli 同一個樣子：擋的 ✗、只警告的 ⚠（D141）。"""
+    return [f"{'✗' if getattr(p, 'block', True) else '⚠'} {p.rule}" + (f" 第 {p.line} 行：{p.text}" if p.line else f"：{p.text}")
+            for p in problems]
+
+
+def case_prompt(code: str, cases: list[tuple[str, str]]) -> str:
+    """選 case 的對話框。面板的對話框一開就捲到最底（Task 0 探針），所以最後一行說要打什麼。"""
+    lines = [f"{code} 要跑哪一個？"]
+    lines += [f"{n}) {name}  {label}".rstrip() for n, (name, label) in enumerate(cases, 1)]
+    lines.append("0) 全部")
+    which = "1 跑這一個 case" if len(cases) == 1 else f"1–{len(cases)} 跑一個 case"
+    lines.append(f"打 {which}，打 0 全部跑：")
+    return "\n".join(lines)
+
+
+def homework_button(app, folder: Path, popen=subprocess.Popen, now=datetime.now,
+                    apple_silicon: bool | None = None) -> None:
+    """作業那一格（D128）：留一份作業檔的版本 → --check 有問題就列出來、照跑（D131）→ 課的 .venv 不在或缺
+    REQUIRES 就問一次、裝 → app.ask 選 case（0 全部；沒有 case 就不問）→ 用課的 .venv 另開程序跑，不等它。
+    只用 ast 讀作業檔，從不執行它；讀不到檔說一句話。"""
+    folder = Path(folder)
+    course_folder = course_root(folder)
+    if course_folder is None:
+        app.log(f"{folder.name}：上面找不到 {MARK}，不知道是哪一門課")
+        return
+    try:
+        course = read_course(course_folder)
+        kinds = [load_type(name, HERE.parent) for name in course.types]
+    except CourseError as exc:
+        app.log(f"{course_folder.name}：{exc}")
+        return
+    found = _homework_in(course, folder)
+    if found is None:
+        app.log(f"{folder.name}：這個資料夾裡沒有作業檔（{code_of(course, 1)}.py 這種名字的）")
+        return
+    code, file = found
+    try:
+        _press(app, course, kinds, code, file, popen, now, _apple_silicon() if apple_silicon is None else apple_silicon)
+    except OSError as exc:
+        app.log(f"{code}：{_unreadable(file, exc)}，沒跑")
+
+
+def _press(app, course: Course, kinds, code: str, file: Path, popen, now, apple: bool) -> None:
+    kind = _kind_of(file, kinds)
+    snapshot_homework(file, now=now)
+    if kind is None:  # 不是 v2 的作業（語法錯、不是 UTF-8、規範 v0、不是作業）：列問題、說一句、不跑
+        if kinds:
+            for line in problem_lines(kinds[0].check(file)):
+                app.log(line)
+        hint = next((h for h in (getattr(k, "hint", lambda f: None)(file) for k in kinds) if h), None)
+        app.log(f"沒跑：{file.name} 不是規範 v2 的作業檔" + (f"。{hint}" if hint else ""))
+        return
+    lines = problem_lines(kind.check(file))
+    for line in lines:
+        app.log(line)
+    if lines:
+        app.log("以上在 iPLoT 裡只提醒、照跑；✗ 的在「檢查與打包」時會擋" if any(line.startswith("✗") for line in lines)
+                else "以上只提醒，照跑；打包也不擋")
+    if not _ready(app, course, code, sorted(kind.requires(file), key=str.lower), popen, apple):
+        return
+    python = venv_python(course.folder)
+    cases = kind.cases(file)
+    if cases is None:
+        app.log("R7：CASES 讀不出來（鍵要是字串常數、值是 dict(…) 或 {…}），不知道有哪幾個 case，沒跑")
+        return
+    case = None
+    if cases:
+        answer = app.ask(case_prompt(code, cases), "1")
+        if answer is None:
+            app.log("沒跑")
+            return
+        answer = answer.strip()
+        if not (answer.isascii() and answer.isdecimal() and int(answer) <= len(cases)):
+            app.log(f"要打 0 到 {len(cases)} 之間的數字，沒跑")
+            return
+        case = cases[int(answer) - 1][0] if int(answer) else None
+    argv, env = kind.argv(file, python, case)
+    popen(argv, cwd=str(file.parent), env={**os.environ, **env})
+    app.log(f"{code}：{case or '全部'} 的視窗開了（在 Dock 上找 Python）")
+
+
+def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool) -> bool:
+    """課的 .venv 在、這份作業的 REQUIRES 都裝了就 True；不然問一次、建、裝，裝好了才 True。
+    ONLY_ON 的套件在不對的機器上：不裝、不跑。.venv 不在而 REQUIRES 是空的：也問一次、建空的 .venv。"""
+    off = {_normal(p) for p in course.only_on} if not apple else set()
+    blocked = [p for p in need if _normal(p) in off]
+    if blocked:
+        app.log(f"這台機器裝不了 {'、'.join(blocked)}（只有 Apple Silicon 的 Mac 裝得了），{code} 在這裡看不了，沒跑")
+        return False
+    venv = course.folder / ".venv"
+    python = venv_python(course.folder)
+    lack = list(need) if python is None else (missing(python, need, popen) if need else [])
+    if python is not None and not lack:
+        return True
+    where = f"{course.folder.name}/.venv"
+    if os.environ.get(NO_INSTALL):
+        what = f"還缺 {'、'.join(lack)}" if lack else f"{where} 還沒建"
+        app.log(f"{NO_INSTALL}：不建 .venv、不裝套件（{what}），沒跑")
+        return False
+    if python is None:
+        ask = f"這門課的 .venv 還沒建：要建在 {where}" + (f"，並裝 {'、'.join(lack)} 嗎？" if lack
+                                                          else f" 嗎？{code} 沒有要裝的套件")
+    else:
+        ask = f"{code} 用到還沒裝的套件：{'、'.join(lack)}。現在裝進 {where} 嗎？"
+    if not app.confirm(ask + ("（網路慢的話要很久，裝的時候別的按鈕要等它裝完）" if lack else "")):
+        app.log("沒裝，沒跑")
+        return False
+    try:
+        python = ensure_venv(venv, say=app.log, popen=popen)
+    except RuntimeError as exc:
+        app.log(f"{exc}，沒跑")
+        return False
+    if lack:
+        ok, failed = install(python, lack, say=app.log, popen=popen)
+        app.log(summary_of_install(ok, failed))
+        if failed:
+            app.log(f"{code} 要的套件沒裝齊，沒跑")
+            return False
+    return True
 
 
 # ── 墊片：面板上每一格的 iplot.py ──

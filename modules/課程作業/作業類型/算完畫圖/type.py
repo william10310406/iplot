@@ -112,8 +112,19 @@ def check(file: Path) -> list:
     return _shell().check(Path(file))
 
 
-def argv(file: Path, python: Path, case: str | None):
-    raise NotImplementedError("Task 12：在 iPLoT 裡另開程序跑")
+V0_HINT = "這是規範 v0 的檔：把 hk_page 換成 coursework、尾段換成 v2 的三行（docs/09 第 6 節）"
+
+
+def hint(file: Path) -> str | None:
+    """classify 不是 mine 時給人看的一句（只有規範 v0 的檔有）；讀不懂就 None。不執行。"""
+    tree = _tree(file)
+    return V0_HINT if tree is not None and "hk_page" in _top_imports(tree) else None
+
+
+def argv(file: Path, python: Path, case: str | None) -> tuple[list[str], dict[str, str]]:
+    """在 iPLoT 裡另開程序跑：課的 Python 跑作業檔，--case <名> 或 --all；殼靠 PYTHONPATH 找（不複製進作業資料夾）。"""
+    run = [str(python), str(file), *(["--case", case] if case is not None else ["--all"])]
+    return run, {"PYTHONPATH": str(Path(__file__).resolve().parent), "CW_FROM_IPLOT": "1"}
 
 
 def new(folder: Path, code: str) -> Path:
