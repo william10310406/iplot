@@ -3,6 +3,7 @@ import coursework; coursework.ensure(REQUIRES, __file__)  # 缺的在這一行�
 import numpy as np
 from matplotlib.animation import FuncAnimation
 
+# ── 從這裡開始是作業 ──
 NAME = "HK6 淺水波：Shallow Water Problems"
 DOCS = [
     ("pyro2: shallow water basics", "https://python-hydro.github.io/pyro2/swe_basics.html"),

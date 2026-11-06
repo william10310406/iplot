@@ -202,4 +202,5 @@ def readme_values(code: str) -> dict[str, str]:
     cw, file = shell(), f"{code}.py"
     return {"code": code, "file": file, "version_check": cw.VERSION, "make_venv": cw.MAKE_VENV,
             "run": cw.RUN.format(file=file), "win_version_check": cw.WIN_VERSION,
+            "remake_venv": cw.REMAKE_VENV, "win_remake_venv": cw.WIN_REMAKE_VENV,
             "win_make_venv": cw.WIN_MAKE_VENV, "win_run": cw.WIN_RUN.format(file=file)}

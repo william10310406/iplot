@@ -31,8 +31,12 @@ MAKE_VENV = "python3 -m venv .venv"
 RUN = "python3 {file}"
 WIN_VERSION = "py --version"
 WIN_MAKE_VENV = "py -m venv .venv"
+REMAKE_VENV = "python3 -m venv --clear .venv"
+WIN_REMAKE_VENV = "py -m venv --clear .venv"
 WIN_RUN = "py {file}"
 TOO_OLD = "這份作業要 Python 3.10 以上，現在是 {have}。照 README 第 1 步裝 python.org 的 Python，再用 python3 跑一次。"
+OLD_VENV = (f"這個資料夾的 .venv 是用舊的 Python 建的。先照 README 第 3 步確認版本，再打 {REMAKE_VENV} 重建"
+            f"（Windows 是 {WIN_REMAKE_VENV}），然後重跑。")  # D143
 MARK = "課程.py"  # 老師的課程資料夾（跟框架的 course.MARK 同一個名字）
 NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # pip 名只接這些字元，不經 shell
 PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
@@ -173,6 +177,21 @@ def _venv_python(folder: Path) -> Path | None:
     return python if python.is_file() else None
 
 
+def venv_version(python: Path) -> tuple[int, ...] | None:
+    """python 所在的 .venv 是用哪一版 Python 建的：讀 .venv/pyvenv.cfg 的 version（venv）或 version_info（uv）。
+    不叫那個 Python。讀不到、讀不懂回 None。"""
+    try:
+        lines = (Path(python).parents[1] / "pyvenv.cfg").read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, IndexError):
+        return None
+    for line in lines:
+        key, _, value = line.partition("=")
+        if key.strip() in ("version", "version_info"):
+            found = re.match(r"\s*(\d+)\.(\d+)", value)
+            return (int(found.group(1)), int(found.group(2))) if found else None
+    return None
+
+
 def find_venv(file: Path) -> Path | None:
     """先看作業檔旁邊的 .venv（學生包），再往上找有 課程.py 的資料夾的 .venv（老師的課）。"""
     folder = Path(file).resolve().parent
@@ -210,6 +229,10 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
     if sys.prefix == sys.base_prefix:
         python = find_venv(Path(file))
         if python is not None:
+            built = venv_version(python)
+            if built is not None and built < MIN_PYTHON:  # D143：舊 Python 建的 .venv 不切進去，不然學生看到的是別的錯
+                print(OLD_VENV)
+                sys.exit(1)
             sys.exit(popen([str(python), str(Path(file).resolve()), *argv[1:]],
                            cwd=str(Path(file).resolve().parent)).wait())
         need = missing(requires)

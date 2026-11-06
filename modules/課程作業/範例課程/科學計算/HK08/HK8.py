@@ -3,6 +3,7 @@ import coursework; coursework.ensure(REQUIRES, __file__)  # 缺的在這一行�
 import random
 from collections import Counter, defaultdict
 
+# ── 從這裡開始是作業 ──
 NAME = "HK8 n-gram 語言模型：n-gram language model"
 DOCS = [
     ("N-gram language model (ScienceDirect)",

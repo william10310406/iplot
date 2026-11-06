@@ -2,6 +2,7 @@ REQUIRES = ["numpy", "matplotlib"]              # 用了別的套件就加在這
 import coursework; coursework.ensure(REQUIRES, __file__)  # 缺的在這一行裝好，裝完才往下 import
 import numpy as np
 
+# ── 從這裡開始是作業 ──
 NAME = "HK2 二維電場與能量"
 DOCS = [("Doc1（台大開放式課程 099S129/39）", "https://ocw.aca.ntu.edu.tw/courses/099S129/39")]
 NOTE = """<title>

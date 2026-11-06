@@ -182,6 +182,15 @@ def test_template_has_a_start_marker_that_mirrors_the_end_marker():
     assert "# ── 以下不用改 ──" in lines
 
 
+@pytest.mark.parametrize("name", ["HK2", "HK6", "HK8"])
+def test_examples_have_the_same_start_marker_as_the_template(name):
+    lines = EXAMPLES[name].read_text(encoding="utf-8").splitlines()
+    i = lines.index("# ── 從這裡開始是作業 ──")
+    assert lines[i - 1] == "" and lines[i + 1].startswith("NAME = ")  # 空行、標記線、NAME：跟範本一樣
+    assert lines.count("# ── 從這裡開始是作業 ──") == 1 and "# ── 以下不用改 ──" in lines
+    assert i > 2 and lines[0].startswith("REQUIRES = ") and lines[1].startswith("import coursework")  # R1、R2 的位置不變
+
+
 def text_only_template(tmp_path):
     """範本：draw 整個換成 draw = None、compute 回 {"text": …}。放成 HK1.py（連 HK1Space）。"""
     import re

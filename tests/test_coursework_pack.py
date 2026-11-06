@@ -252,7 +252,7 @@ def test_readme_is_filled_from_the_shell_constants(course_mod, course, cw):
     pack(course_mod, course, "HK1")
     text = readme_of(sent(course))
     assert re.search(r"\{[a-z_]+\}", text) is None
-    commands = [line[4:] for line in text.splitlines() if line.startswith("    ")]
+    commands = [line[4:] for line in text.splitlines() if re.match(r" {4}\S", line)]  # 剛好四格；出問題那段縮得更深
     run, win_run = cw.RUN.format(file="HK1.py"), cw.WIN_RUN.format(file="HK1.py")
     assert commands == [cw.VERSION, cw.MAKE_VENV, run, cw.WIN_VERSION, cw.WIN_MAKE_VENV, win_run]
     assert (cw.VERSION, cw.WIN_VERSION) == ("python3 --version", "py --version")
@@ -311,23 +311,27 @@ def test_readme_says_where_the_homework_part_starts_and_ends(course_mod, course)
     assert "# ── 從這裡開始是作業 ──" in template and "# ── 以下不用改 ──" in template  # README 說的兩行真的在範本裡
 
 
-def test_readme_has_a_trouble_section_with_exactly_two_items(course_mod, course, cw):
+def test_readme_has_a_trouble_section_with_exactly_three_items(course_mod, course, cw):
     pack(course_mod, course, "HK1")
     parts = sections(readme_of(sent(course)))
     trouble = parts["出問題的時候"]
     items = [line for line in trouble.splitlines() if line.startswith("- ")]
-    assert len(items) == 2
+    assert len(items) == 3
     assert "這份作業要 Python 3.10 以上" in items[0] and "第 3 步" in items[0]
     assert "這份作業要 Python 3.10 以上" in cw.TOO_OLD  # 殼真的會說這一句
     assert "裝套件失敗" in items[1] and "網路" in items[1] and "第 5 步" in items[1]
     assert list(parts) == ["macOS", "Windows（未經實機驗證）", "出問題的時候", "交作業"]
-    assert "macOS" not in trouble and "Windows" not in trouble  # 兩邊共用，步號相同
+    assert "macOS" not in trouble  # 兩邊共用，步號相同
+    assert "「.venv 是用舊的 Python 建的」" in items[2] and "第 3 步通過" in items[2] and "第 5 步" in items[2]
+    assert ".venv 是用舊的 Python 建的" in cw.OLD_VENV  # 殼真的會說這一句
+    deep = [line for line in trouble.splitlines() if re.match(r" {6}\S", line)]
+    assert [line.strip() for line in deep] == [cw.REMAKE_VENV, cw.WIN_REMAKE_VENV]  # macOS 一行、Windows 一行
 
 
 def test_readme_template_has_every_placeholder_and_no_you(course_mod):
     text = README.read_text(encoding="utf-8")
     for key in ("{code}", "{file}", "{make_venv}", "{run}", "{win_make_venv}", "{win_run}",
-                "{version_check}", "{win_version_check}"):
+                "{version_check}", "{win_version_check}", "{remake_venv}", "{win_remake_venv}"):
         assert key in text, key
     assert "您" not in text and "共用" not in text  # 學生包沒有 課程.py，學生端不會共用 .venv（D130）
 

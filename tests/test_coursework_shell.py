@@ -94,6 +94,85 @@ def test_outside_venv_reruns_with_the_venv_next_to_the_file(cw, tmp_path, outsid
     assert popen.calls == [([str(python), str(file.resolve()), "--case", "case-2"], {"cwd": str(file.resolve().parent)})]
 
 
+def cfg(python, **keys):
+    """像 python -m venv 寫的 pyvenv.cfg（在 .venv/ 底下，python 在 .venv/bin/python）。"""
+    lines = ["home = /某處/bin", "include-system-site-packages = false", *(f"{k} = {v}" for k, v in keys.items())]
+    (python.parents[1] / "pyvenv.cfg").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_old_venv_next_to_the_file_is_not_switched_into(cw, tmp_path, outside_venv, capsys):
+    """D143：.venv 是 3.10 以前的 Python 建的 → 不切進去、不重跑，印白話、結束碼 1。"""
+    file = homework(tmp_path / "HK1")
+    cfg(fake_venv(tmp_path / "HK1"), version="3.9.6")
+    popen = FakePopen()
+    with pytest.raises(SystemExit) as done:
+        cw.ensure(["numpy"], str(file), popen=popen, argv=[str(file)])
+    assert done.value.code == 1 and popen.calls == []
+    out = capsys.readouterr()
+    assert out.err == "" and out.out == cw.OLD_VENV + "\n"
+    assert out.out.startswith("這個資料夾的 .venv 是用舊的 Python 建的。先照 README 第 3 步確認版本，再打 ")
+    assert "python3 -m venv --clear .venv" in out.out and "py -m venv --clear .venv" in out.out
+    assert out.out.endswith("然後重跑。\n") and "Traceback" not in out.out
+
+
+def test_old_venv_sentence_uses_the_shell_constants(cw):
+    assert cw.OLD_VENV == ("這個資料夾的 .venv 是用舊的 Python 建的。先照 README 第 3 步確認版本，"
+                           "再打 python3 -m venv --clear .venv 重建（Windows 是 py -m venv --clear .venv），然後重跑。")
+    assert (cw.REMAKE_VENV, cw.WIN_REMAKE_VENV) == ("python3 -m venv --clear .venv", "py -m venv --clear .venv")
+
+
+@pytest.mark.parametrize("keys", [{"version": "3.9.6"}, {"version_info": "3.9.6.final.0"}, {"version": "3.9"}])
+def test_old_venv_is_read_from_pyvenv_cfg_in_either_spelling(cw, tmp_path, outside_venv, keys):
+    file = homework(tmp_path / "HK1")
+    cfg(fake_venv(tmp_path / "HK1"), **keys)
+    with pytest.raises(SystemExit) as done:
+        cw.ensure([], str(file), popen=FakePopen(), argv=[str(file)])
+    assert done.value.code == 1
+
+
+@pytest.mark.parametrize("keys", [{"version": "3.10.0"}, {"version": "3.14.7"}, {"version_info": "3.12.1.final.0"}])
+def test_venv_made_by_3_10_or_newer_is_switched_into_as_before(cw, tmp_path, outside_venv, keys):
+    file = homework(tmp_path / "HK1")
+    python = fake_venv(tmp_path / "HK1")
+    cfg(python, **keys)
+    popen = FakePopen()
+    with pytest.raises(SystemExit) as done:
+        cw.ensure([], str(file), popen=popen, argv=[str(file), "--all"])
+    assert done.value.code == 0 and popen.calls[0][0] == [str(python), str(file.resolve()), "--all"]
+
+
+@pytest.mark.parametrize("text", ["", "version = abc\n", "home = /x\n", "\x00\x01"])
+def test_venv_whose_version_cannot_be_read_is_switched_into(cw, tmp_path, outside_venv, text):
+    file = homework(tmp_path / "HK1")
+    python = fake_venv(tmp_path / "HK1")
+    (python.parents[1] / "pyvenv.cfg").write_text(text, encoding="utf-8")
+    popen = FakePopen()
+    with pytest.raises(SystemExit):
+        cw.ensure([], str(file), popen=popen, argv=[str(file)])
+    assert len(popen.calls) == 1  # 讀不出來就照舊：不為了猜不準的事擋學生
+
+
+def test_old_course_venv_is_not_switched_into_either(cw, tmp_path, outside_venv, capsys):
+    course = make_course(tmp_path, "課")
+    cfg(fake_venv(course), version="3.9.6")
+    file = homework(course / "HK01")
+    popen = FakePopen()
+    with pytest.raises(SystemExit) as done:
+        cw.ensure([], str(file), popen=popen, argv=[str(file)])
+    assert done.value.code == 1 and popen.calls == [] and capsys.readouterr().out == cw.OLD_VENV + "\n"
+
+
+def test_old_venv_next_to_the_file_wins_over_a_new_course_venv(cw, tmp_path, outside_venv, capsys):
+    course = make_course(tmp_path, "課")
+    cfg(fake_venv(course), version="3.14.0")
+    file = homework(course / "HK01")
+    cfg(fake_venv(course / "HK01"), version="3.9.6")  # 旁邊那個優先，它舊就是舊
+    popen = FakePopen()
+    with pytest.raises(SystemExit) as done:
+        cw.ensure([], str(file), popen=popen, argv=[str(file)])
+    assert done.value.code == 1 and popen.calls == []
+
+
 def test_outside_venv_passes_the_rerun_exit_code_on(cw, tmp_path, outside_venv):
     file = homework(tmp_path / "HK1")
     fake_venv(tmp_path / "HK1")
