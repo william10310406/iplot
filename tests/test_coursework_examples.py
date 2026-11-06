@@ -1,6 +1,7 @@
 """範本與範例課程「科學計算」（HK2、HK6、HK8 照規範 v2）：--check 全綠；compute／draw／stats 真的跑得動
 （Agg、不裝套件、不連網）；單獨 python3 HKn.py 跑得完。範例是從 modules/科學計算/examples/ 複製再改的，原檔不動。"""
 
+import gc
 import os
 import shutil
 import subprocess
@@ -23,6 +24,8 @@ def _env(monkeypatch):
     monkeypatch.setenv("CW_NO_INSTALL", "1")
     monkeypatch.setenv("MPLBACKEND", "Agg")
     monkeypatch.delenv("CW_FROM_IPLOT", raising=False)
+    yield
+    gc.collect()  # 沒 show 的動畫在這裡回收（上面的 filterwarnings 還在）；不然警告會落到後面別的測試檔
 
 
 @pytest.fixture
@@ -164,3 +167,50 @@ def test_runs_standalone(name, tmp_path):
     assert done.returncode == 0, done.stderr[-2000:]
     assert "Traceback" not in done.stdout + done.stderr
     assert done.stdout.splitlines()[0]  # NAME
+
+
+# ── 範本的 draw 可以整個換成 draw = None（純文字作業）──
+
+def test_template_docstrings_say_draw_and_stats_may_be_none():
+    text = TEMPLATE.read_text(encoding="utf-8")
+    assert "整個函式換成一行 draw = None" in text and "整個函式換成一行 stats = None" in text
+
+
+def test_template_has_a_start_marker_that_mirrors_the_end_marker():
+    lines = TEMPLATE.read_text(encoding="utf-8").splitlines()
+    assert lines[5] == "" and lines[6] == "# ── 從這裡開始是作業 ──" and lines[7].startswith("NAME = ")
+    assert "# ── 以下不用改 ──" in lines
+
+
+def text_only_template(tmp_path):
+    """範本：draw 整個換成 draw = None、compute 回 {"text": …}。放成 HK1.py（連 HK1Space）。"""
+    import re
+
+    src = TEMPLATE.read_text(encoding="utf-8")
+    src, n = re.subn(r"def draw\(fig, run\):.*?(?=\ndef stats)", "draw = None\n", src, flags=re.S)
+    assert n == 1
+    src, n = re.subn(r"    return \{\"t\": t,.*\}\n", '    return {"text": f"半徑 {p[\'r\']}、{len(t)} 點"}\n', src)
+    assert n == 1
+    src, n = re.subn(r"def stats\(run\):.*?(?=\n# ──)", "stats = None\n", src, flags=re.S)
+    assert n == 1
+    work = tmp_path / "text"
+    work.mkdir()
+    (work / "HK1Space").mkdir()
+    (work / "HK1.py").write_text(src, encoding="utf-8", newline="\n")
+    return work
+
+
+def test_template_with_draw_none_passes_check(cw, tmp_path):
+    work = text_only_template(tmp_path)
+    assert cw.check(work / "HK1.py") == []
+
+
+def test_template_with_draw_none_runs_standalone(tmp_path):
+    work = text_only_template(tmp_path)
+    env = {**os.environ, "PYTHONPATH": str(TYPE_DIR), "MPLBACKEND": "Agg", "CW_NO_INSTALL": "1",
+           "PYTHONDONTWRITEBYTECODE": "1", "MPLCONFIGDIR": str(tmp_path / "mpl")}
+    env.pop("CW_FROM_IPLOT", None)
+    done = subprocess.run([sys.executable, "HK1.py", "--all"], cwd=work, env=env, capture_output=True, text=True,
+                          encoding="utf-8", timeout=120)
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert "半徑 1.0、200 點" in done.stdout and "Traceback" not in done.stdout + done.stderr
