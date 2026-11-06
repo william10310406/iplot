@@ -28,7 +28,7 @@ CASES = {
 
 
 def _case1():
-    """老闆的 HK6_RUN_CASE1：一維淺水方程、潰壩，Lax-Friedrichs。每一步的 h、u 都留在 run 裡。"""
+    """舊格式的 HK6_RUN_CASE1：一維淺水方程、潰壩，Lax-Friedrichs。每一步的 h、u 都留在 run 裡。"""
     # --- Simulation Parameters ---
     N = 200            # Number of spatial grid points
     L = 10.0           # Length of the domain
@@ -91,7 +91,7 @@ def _case1():
 
 
 def _case2():
-    """老闆的 HK6_RUN_CASE2：二維淺水方程、高斯水滴，Arakawa C 網格。
+    """舊格式的 HK6_RUN_CASE2：二維淺水方程、高斯水滴，Arakawa C 網格。
     原本的 global eta, u, v 收進 run：eta 每一格都留，u、v 留最後的。"""
     # =============================================================================
     # 1. PHYSICAL & NUMERICAL PARAMETERS
@@ -173,7 +173,7 @@ def _case2():
 
 
 def compute(case):
-    """算。兩個 case 是兩個不同的模擬（1D、2D），各照老闆的 HK6_RUN_CASE1、HK6_RUN_CASE2。"""
+    """算。兩個 case 是兩個不同的模擬（1D、2D），各照舊格式的 HK6_RUN_CASE1、HK6_RUN_CASE2。"""
     return {"case-1": _case1, "case-2": _case2}[case]()
 
 

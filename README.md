@@ -36,7 +36,7 @@ iPLoT 本身（`core/`、`ui/`、`lib/`、`modules/`、`logs/`、`.history/`、`
 | Dock 上的捷徑 | 互通 | 你自己拖到 Dock 的 `modules/互通/捷徑/` | 丟掉資料夾之後，Dock 上那個圖示會變成問號或打不開；把它拖出 Dock，放開就會消失 |
 | Spotlight 的搜尋結果 | 互通 | `modules/互通/捷徑/` 裡的 `.app`，Spotlight 會收錄 | 資料夾丟進垃圾桶、清空垃圾桶之後，搜尋結果通常會自己消失（這一點還沒有實測）；還搜得到的話，先等幾分鐘、重新開機一次；仍然在，就把 Spotlight 的索引重建（做法依 macOS 版本不同，這裡沒有實測） |
 | 批次批改的輸出 | 科學計算（`hk_tk.py --batch`） | 你給的 zip 旁邊：`<zip 名>_收件/`（收進來的作業）與 `科學計算-venv/`（批次用的套件） | 把這兩個資料夾丟進垃圾桶。在面板裡按「收作業」收的，在 `modules/科學計算/` 裡，跟著 iPLoT 的資料夾走 |
-| 課程模型與 pip 快取 | 科學計算 | `~/.cache/huggingface/hub`（HK9 的模型）；`~/Library/Caches/pip`（pip 的下載快取，不只 iPLoT 在用） | 不需要的話丟進垃圾桶；pip 的快取也可以用 `python3 -m pip cache purge` 清掉 |
+| 課程模型與 pip 快取 | 科學計算（模型與 pip 快取）、課程作業（只有 pip 快取） | `~/.cache/huggingface/hub`（HK9 的模型）；`~/Library/Caches/pip`（pip 的下載快取，不只 iPLoT 在用） | 不需要的話丟進垃圾桶；pip 的快取也可以用 `python3 -m pip cache purge` 清掉 |
 | 垃圾桶裡的東西 | 作業系統（「移到垃圾桶」） | `~/.Trash` | 這是設計（模組只搬進垃圾桶，不真的刪），想清掉就清空垃圾桶 |
 
 另外兩件事：
@@ -360,6 +360,14 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
    ```
 
 4. 回到 iPLoT，重新雙擊那個模組。
+
+## 課程作業
+
+工作坊模組「課程作業」讓出作業的老師從範本寫一份作業、在面板裡選一個 case 看結果、按一顆鈕打包成學生包；學生拿到 zip，照裡面的 README 在自己的電腦上跑。面板上多一格「課程作業」，下一層是「新增一門課」「加入範例課程」與每一門課，每門課底下是「新增作業」「檢查與打包」和每份作業。
+套件裝進課自己的 `.venv`，不裝進電腦本身的 Python；按作業那一格時，iPLoT 不在自己的程序裡執行作業檔，是 `.venv` 另開一個程序跑它。
+`--check` 在面板裡只提醒，「檢查與打包」時才擋；每次打包出去的 zip 存在作業資料夾的 `.版本/`，不會自動刪。
+這一版還沒有收作業、匯入作業與批次包，舊格式的作業（`import hk_page`）不收（那是「科學計算」的事），Windows 未經實機驗證。
+怎麼用見 [modules/課程作業/README.md](modules/課程作業/README.md)；作業檔的寫法與 28 條檢查規則見 [docs/09_作業規範.md](docs/09_作業規範.md)。
 
 ## 回報問題與討論
 
