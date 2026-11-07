@@ -288,7 +288,8 @@ def test_new_homework_builds_folder_file_space_and_stub(course_mod, tmp_path):
     folder = course / "HK01"
     assert sorted(p.name for p in folder.iterdir()) == ["HK1.py", "HK1Space", "iplot.py"]
     assert (folder / "HK1Space").is_dir() and not list((folder / "HK1Space").iterdir())
-    assert (folder / "HK1.py").read_bytes() == (TYPE_DIR / "範本.py").read_bytes()
+    # 框架一律寫 LF（type.new 的 newline="\n"）；Windows 的 git checkout 可能把範本換成 CRLF，比的是內容
+    assert (folder / "HK1.py").read_bytes() == (TYPE_DIR / "範本.py").read_bytes().replace(b"\r\n", b"\n")
     meta = stub_of(folder)
     assert (meta.title, meta.has_run, meta.error) == ("HK1", True, None)
     assert "course.homework_button(app, HERE)" in (folder / "iplot.py").read_text(encoding="utf-8")

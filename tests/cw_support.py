@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CW = ROOT / "modules" / "課程作業"  # 模組資料夾
 FRAMEWORK = CW / "框架" / "course.py"
 TYPE_DIR = CW / "作業類型" / "算完畫圖"
+VENV_PY = Path("Scripts/python.exe") if sys.platform == "win32" else Path("bin/python")  # .venv 底下的 Python（跟 course.python_in 同一個規則）
 
 
 def load(path: Path, name: str):
