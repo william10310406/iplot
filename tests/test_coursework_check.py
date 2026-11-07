@@ -1,6 +1,7 @@
 """殼的 --check（docs/09 第 3 節 R1–R28；設計第 5 節）：每條規則一個只違反它的檔，只報那一條、行號對。
 基準是 docs/09 第 1 節那個檔（範本到 Task 9 才有）；它本身要全過。不執行作業檔。"""
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -197,13 +198,18 @@ def test_r27_syntax_error_says_the_line(cw, tmp_path):
     assert found(cw, write(tmp_path, src)) == [("R27", line)]
 
 
-@pytest.mark.parametrize("snippet", [
-    "def pick(x):\n    match x:\n        case 1:\n            return 1\n    return 0",   # 3.10
-    "def guard():\n    try:\n        pass\n    except* ValueError:\n        pass",        # 3.11
+@pytest.mark.parametrize(("snippet", "since"), [
+    ("def pick(x):\n    match x:\n        case 1:\n            return 1\n    return 0", (3, 10)),
+    ("def guard():\n    try:\n        pass\n    except* ValueError:\n        pass", (3, 11)),
 ])
-def test_r28_newer_syntax_is_flagged_alone(cw, tmp_path, snippet):
+def test_r28_newer_syntax_is_flagged_alone(cw, tmp_path, snippet, since):
     src, line = inserted(snippet, 1)
-    assert found(cw, write(tmp_path, src)) == [("R28", line)]
+    if sys.version_info >= since:
+        assert found(cw, write(tmp_path, src)) == [("R28", line)]
+    else:  # 跑 --check 的 Python 比這個語法舊：它本來就讀不懂，報成語法錯（R27），行號是這個 Python 自己說的那一行
+        with pytest.raises(SyntaxError) as error:
+            compile(src, "HK1.py", "exec")
+        assert found(cw, write(tmp_path, src)) == [("R27", error.value.lineno)]
 
 
 def test_r28_parenthesized_with_is_fine(cw, tmp_path):
@@ -287,7 +293,9 @@ def test_shell_runs_check_as_a_script(tmp_path):
     shutil.copy(SHELL, tmp_path / "coursework.py")
     write(tmp_path, good())
     done = subprocess.run([sys.executable, "coursework.py", "--check", "HK1.py"], cwd=tmp_path,
-                          capture_output=True, text=True, encoding="utf-8", env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1"})
+                          capture_output=True, text=True, encoding="utf-8",
+                          env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1",  # Windows 的 Python 沒有 SYSTEMROOT 起不來
+                               **{k: os.environ[k] for k in ("SYSTEMROOT",) if k in os.environ}})
     assert (done.returncode, done.stdout.strip()) == (0, "通過"), done.stderr
     assert "python3 coursework.py --check HK1.py" in SPEC.read_text(encoding="utf-8")
 

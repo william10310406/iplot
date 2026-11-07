@@ -1,16 +1,27 @@
 """作業那一格（A7、A8、A18 的 .py 那一半）：選 case、用課的 .venv 另開程序、--check 只警告、留作業檔的版本；
-type.argv。Popen 一律是假的，不真的開程序；.venv 是 tmp 裡假的 bin/python。"""
+type.argv。Popen 一律是假的，不真的開程序；.venv 是 tmp 裡假的 bin/python（Windows 是 Scripts/python.exe）。"""
 
 import json
 import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from cw_support import CW, FRAMEWORK, TYPE_DIR, CwApp, FakePopen, load, make_course, make_homework
+from cw_support import (
+    CW,
+    FRAMEWORK,
+    TYPE_DIR,
+    VENV_PY,
+    CwApp,
+    FakePopen,
+    load,
+    make_course,
+    make_homework,
+)
 
 from core.runner import run_module
 from core.scan import find_children, module_info
@@ -36,7 +47,7 @@ def kind():
 
 
 def fake_venv(course):
-    python = course / ".venv" / "bin" / "python"
+    python = course / ".venv" / VENV_PY
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text("", encoding="utf-8")
     return python
@@ -492,7 +503,7 @@ def test_versions_folder_is_not_a_panel_child(course_mod, mod, tmp_path):
 # ── type.argv ──
 
 def test_type_argv(kind, tmp_path):
-    file, python = tmp_path / "HK1.py", tmp_path / ".venv" / "bin" / "python"
+    file, python = tmp_path / "HK1.py", tmp_path / ".venv" / VENV_PY
     env = {"PYTHONPATH": str(TYPE_DIR), "CW_FROM_IPLOT": "1", "PYTHONIOENCODING": "utf-8"}
     assert kind.argv(file, python, "case-2") == ([str(python), str(file), "--case", "case-2"], env)
     assert kind.argv(file, python, None) == ([str(python), str(file), "--all"], env)
@@ -629,23 +640,42 @@ def test_review_case_a_venv_without_matplotlib_still_shows_hk8_in_the_message_ar
     assert logs[1] == "HK8 n-gram 語言模型：n-gram language model" and len(logs) > 4
 
 
-# 真的開子程序（用跑測試的這個 Python 當課的 .venv）；文字視窗那一次不真的開，只記下來
+# 真的開子程序（用一個真的 venv 當課的 .venv）；文字視窗那一次不真的開，只記下來
+
+@pytest.fixture(scope="session")
+def real_venv(tmp_path_factory):
+    """一個真的 venv（python -m venv，跟框架建課的 .venv 一樣），回它的 Python。
+    跑測試的 Python 不一定在 venv 裡（CI 不在）：直接拿它當課的 .venv，框架問「裝了什麼」時它會說自己不在 venv 裡，
+    課就被當成 .venv 壞了（D146），作業根本沒跑。套件（numpy、matplotlib）用 .pth 指到跑測試的這個 Python 的 site-packages。"""
+    venv = tmp_path_factory.mktemp("real") / ".venv"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
+    python = venv / VENV_PY
+    site = subprocess.run([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    outer = {p for p in (sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], *sys.path)
+             if p and p.endswith("site-packages")}
+    Path(site, "_outer.pth").write_text("".join(f"{p}\n" for p in sorted(outer)), encoding="utf-8")
+    return python
+
 
 @pytest.fixture
-def real(hw, monkeypatch):
+def real(hw, real_venv, monkeypatch):
     monkeypatch.setenv("MPLBACKEND", "Agg")
     course, file, python = hw
-    shown = []
+    shown, ran = [], []  # ran：真的跑作業的那幾個程序（看得到結束碼）
 
     def popen(argv, **kw):
         if "--show-text" in argv:
             shown.append(argv)
             return FakePopen()(argv, **kw)
         if argv[:1] == [str(python)]:
-            argv = [sys.executable, *argv[1:]]
-        return subprocess.Popen(argv, **kw)
+            argv = [str(real_venv), *argv[1:]]
+        proc = subprocess.Popen(argv, **kw)
+        if argv[1:2] == [str(file)]:
+            ran.append(proc)
+        return proc
 
-    return file, popen, shown
+    return file, popen, shown, ran
 
 
 def put_after_marker(file, code):
@@ -655,9 +685,10 @@ def put_after_marker(file, code):
 
 
 def test_real_top_level_error_shows_zero_division_and_the_line(course_mod, real):
-    file, popen, shown = real
+    file, popen, shown, ran = real
     line = put_after_marker(file, "1 / 0")
     press(course_mod, file, "1", popen=popen)
+    assert len(ran) == 1 and ran[0].returncode != 0
     [argv] = shown
     text = argv[4]
     assert text.startswith("HK1 在開始跑之前就出錯了，下面是 Python 的錯誤訊息：\n")
@@ -665,17 +696,19 @@ def test_real_top_level_error_shows_zero_division_and_the_line(course_mod, real)
 
 
 def test_real_clean_run_opens_no_error_window(course_mod, real):
-    file, popen, shown = real
-    press(course_mod, file, "1", popen=popen)
+    file, popen, shown, ran = real
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert len(ran) == 1 and ran[0].returncode == 0, app.logs  # 真的跑完了，不是沒跑所以沒視窗
     assert shown == []
 
 
 def test_real_case_error_is_shown_by_the_shell_not_again(course_mod, real):
-    file, popen, shown = real
+    file, popen, shown, ran = real
     text = file.read_text(encoding="utf-8")
     file.write_text(text.replace("def compute(case):", "def compute(case):\n    raise ValueError(\"算壞了\")", 1),
                     encoding="utf-8")
-    press(course_mod, file, "1", popen=popen)
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert len(ran) == 1 and ran[0].returncode not in (None, 0), app.logs  # 真的跑了、算壞了
     assert shown == []  # 殼自己開了錯誤視窗（Agg 下 show 不開東西），框架不再開
 
 
@@ -684,7 +717,7 @@ def test_real_case_error_is_shown_by_the_shell_not_again(course_mod, real):
 def broken_course(tmp_path):
     course = make_course(tmp_path)
     file = template_homework(course)
-    python = course / ".venv" / "bin" / "python"
+    python = course / ".venv" / VENV_PY
     python.parent.mkdir(parents=True)
     python.symlink_to(tmp_path / "已經不在的" / "python3.13")
     return course, file, python
@@ -762,7 +795,7 @@ def test_a_course_python_that_cannot_start_is_named(course_mod, hw):
         return fake(argv, **kw)
 
     app, _ = press(course_mod, file, "1", popen=popen)
-    assert app.logs[-1] == "HK1：測試課/.venv/bin/python 有問題（No such file or directory），沒跑"
+    assert app.logs[-1] == f"HK1：測試課/.venv/{VENV_PY.as_posix()} 有問題（No such file or directory），沒跑"
 
 
 def test_course_button_names_the_path_of_an_os_error_instead_of_a_traceback(course_mod, hw, monkeypatch):
@@ -777,4 +810,4 @@ def test_course_button_names_the_path_of_an_os_error_instead_of_a_traceback(cour
 
     app = CwApp(course)
     course_mod.course_button(app, course, popen=popen)
-    assert app.logs[-1] == "測試課：測試課/.venv/bin/python 有問題（Permission denied），沒裝"
+    assert app.logs[-1] == f"測試課：測試課/.venv/{VENV_PY.as_posix()} 有問題（Permission denied），沒裝"

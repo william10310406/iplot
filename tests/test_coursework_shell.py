@@ -11,10 +11,9 @@ import sys
 from pathlib import Path
 
 import pytest
-from cw_support import TYPE_DIR, FakePopen, load, make_course
+from cw_support import TYPE_DIR, VENV_PY, FakePopen, load, make_course
 
 SHELL = TYPE_DIR / "coursework.py"
-VENV_PY = Path("Scripts/python.exe") if sys.platform == "win32" else Path("bin/python")
 
 
 @pytest.fixture(autouse=True)

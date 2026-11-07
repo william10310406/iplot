@@ -3,6 +3,7 @@ README；.版本/ 留一份同樣 bytes 的 zip、不自動刪（D135）。只�
 
 import getpass
 import re
+import sys
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -422,6 +423,7 @@ def test_sent_being_a_file_names_sent_not_the_homework(course_mod, course):
     assert "HK1.py" not in app.logs[-1] and app.revealed == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 的 chmod(0) 只設唯讀、不擋讀，做不出讀不了的檔")
 def test_an_unreadable_space_file_is_named(course_mod, course):
     secret = course / "HK01" / "HK1Space" / "secret.txt"
     secret.write_text("x", encoding="utf-8")

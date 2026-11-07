@@ -4,7 +4,16 @@
 import json
 
 import pytest
-from cw_support import FRAMEWORK, HOMEWORK_SRC, CwApp, FakePopen, load, make_course, make_homework
+from cw_support import (
+    FRAMEWORK,
+    HOMEWORK_SRC,
+    VENV_PY,
+    CwApp,
+    FakePopen,
+    load,
+    make_course,
+    make_homework,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -33,8 +42,8 @@ def src(*requires):
 
 
 def venv_of(course):
-    """假裝課的 .venv 已經建好：放一個 bin/python。"""
-    python = course / ".venv" / "bin" / "python"
+    """假裝課的 .venv 已經建好：放一個 bin/python（Windows 是 Scripts/python.exe）。"""
+    python = course / ".venv" / VENV_PY
     python.parent.mkdir(parents=True)
     python.write_text("", encoding="utf-8")
     return python
@@ -51,7 +60,7 @@ def pips(popen):
 # ── 零件 ──
 
 def test_python_in_and_venv_python(course_mod, tmp_path):
-    assert course_mod.python_in(tmp_path / ".venv").parts[-2:] == ("bin", "python")
+    assert course_mod.python_in(tmp_path / ".venv").parts[-2:] == VENV_PY.parts
     assert course_mod.venv_python(None) is None
     assert course_mod.venv_python(tmp_path) is None  # 還沒建
     python = venv_of(tmp_path)
@@ -335,7 +344,7 @@ def test_button_never_runs_the_homework_file(course_mod, tmp_path, installing):
 
 def broken_venv_of(course):
     """像建 .venv 的 Python 被移掉：bin/python 是斷掉的連結。"""
-    python = course / ".venv" / "bin" / "python"
+    python = course / ".venv" / VENV_PY
     python.parent.mkdir(parents=True)
     python.symlink_to(course / "已經不在的" / "python3.13")
     return python
