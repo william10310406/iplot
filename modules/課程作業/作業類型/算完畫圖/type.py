@@ -13,6 +13,7 @@ from pathlib import Path
 NAME = "算完畫圖"
 ACCEPTS = (".py",)  # 收作業時哪些副檔名算作業檔
 SHELL = "coursework"  # 殼：跟作業檔放在一起，不是 pip 套件
+SHELL_REQUIRES = ("matplotlib",)  # 殼在 iPLoT 裡開視窗要的：課的 .venv 一律裝，不管 REQUIRES 有沒有寫（D145）
 
 
 def _tree(file: Path) -> ast.Module | None:
@@ -134,6 +135,12 @@ ERROR_TAIL = 40  # 開始跑之前就出錯時，給老師看 stderr 的最後�
 def shown_mark() -> str:
     """殼自己開了錯誤視窗時印到 stderr 的那一行（框架看到就不再開）。"""
     return shell().SHOWN_MARK
+
+
+def handed_over() -> tuple[str, str]:
+    """殼開不了視窗時，交給框架放進訊息區的那一段前後的兩行（D145）。"""
+    cw = shell()
+    return cw.HANDED_OVER, cw.HANDED_OVER_END
 
 
 def error_window(file: Path, python: Path, returncode: int, tail: list[str]) -> list[str]:

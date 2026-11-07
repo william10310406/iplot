@@ -182,7 +182,7 @@ def test_button_with_venv_asks_only_for_what_is_missing(course_mod, tmp_path, in
     course = make_course(tmp_path)
     make_homework(course, 1, src("numpy", "scipy"))
     venv_of(course)
-    app, popen = CwApp(tmp_path), have("numpy")
+    app, popen = CwApp(tmp_path), have("numpy", "matplotlib")
     course_mod.course_button(app, course, popen=popen, apple_silicon=False)
     assert "scipy" in app.confirms[0] and "numpy" not in app.confirms[0]
     assert pips(popen) == ["scipy"]
@@ -192,7 +192,7 @@ def test_button_with_everything_installed_says_so(course_mod, tmp_path, installi
     course = make_course(tmp_path)
     make_homework(course, 1, src("numpy"))
     venv_of(course)
-    app, popen = CwApp(tmp_path), have("numpy", "pip")
+    app, popen = CwApp(tmp_path), have("numpy", "matplotlib", "pip")
     course_mod.course_button(app, course, popen=popen, apple_silicon=False)
     assert app.confirms == [] and pips(popen) == []
     assert "都在" in app.logs[-1]
@@ -252,12 +252,12 @@ def test_button_only_on_installs_it_on_that_machine(course_mod, tmp_path, instal
     assert "看不了" not in app.confirms[0] + app.logs[-1]
 
 
-def test_button_only_on_union_mode_when_nothing_else_is_left(course_mod, tmp_path, installing):
+def test_button_only_on_union_mode_skips_it_but_still_installs_matplotlib(course_mod, tmp_path, installing):
     course = make_course(tmp_path, ONLY_ON={"mlx-lm": "apple-silicon"})
     make_homework(course, 9, src("mlx-lm"))
     app, popen = CwApp(tmp_path), FakePopen()
     course_mod.course_button(app, course, popen=popen, apple_silicon=False)
-    assert popen.calls == [] and app.confirms == []
+    assert pips(popen) == ["matplotlib"] and "mlx-lm" not in app.confirms[0].split("。")[0]  # 殼要的照裝（D145）
     assert "mlx-lm" in app.logs[-1] and "HK9" in app.logs[-1] and "看不了" in app.logs[-1]
 
 
@@ -280,12 +280,21 @@ def test_button_no_install_builds_nothing_and_installs_nothing(course_mod, tmp_p
     assert len(app.logs) == 1 and "CW_NO_INSTALL" in app.logs[0]
 
 
-def test_button_with_nothing_to_install(course_mod, tmp_path, installing):
+def test_button_without_homeworks_still_installs_matplotlib(course_mod, tmp_path, installing):
+    """D145：課的 .venv 一律有 matplotlib（殼在 iPLoT 裡用它開視窗）：還沒有作業也問、也裝。"""
     course = make_course(tmp_path)
     app, popen = CwApp(tmp_path), FakePopen()
     course_mod.course_button(app, course, popen=popen, apple_silicon=False)
-    assert popen.calls == [] and app.confirms == [] and not (course / ".venv").exists()
-    assert "還沒有需要裝的套件" in app.logs[-1]
+    assert len(app.confirms) == 1 and "matplotlib" in app.confirms[0] and pips(popen) == ["matplotlib"]
+
+
+def test_button_text_only_homeworks_install_matplotlib(course_mod, tmp_path, installing):
+    course = make_course(tmp_path)
+    make_homework(course, 1, src())
+    venv_of(course)
+    app, popen = CwApp(tmp_path), have("numpy")
+    course_mod.course_button(app, course, popen=popen, apple_silicon=False)
+    assert pips(popen) == ["matplotlib"] and "已裝 matplotlib" in app.logs[-1]
 
 
 def test_button_reports_a_broken_course_file(course_mod, tmp_path, installing):
@@ -302,7 +311,7 @@ def test_button_failed_install_is_in_the_last_line(course_mod, tmp_path, install
     app = CwApp(tmp_path)
     popen = FakePopen(fail=lambda a: a[-1] == "scipy", lines=["ERROR: 沒有網路"])
     course_mod.course_button(app, course, popen=popen, apple_silicon=False)
-    assert "已裝 numpy" in app.logs[-1] and "裝不了 scipy（ERROR: 沒有網路）" in app.logs[-1]
+    assert "已裝 matplotlib、numpy" in app.logs[-1] and "裝不了 scipy（ERROR: 沒有網路）" in app.logs[-1]
 
 
 def test_button_venv_build_failure_is_one_sentence(course_mod, tmp_path, installing):

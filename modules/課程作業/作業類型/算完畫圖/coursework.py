@@ -326,6 +326,20 @@ def _show_text(title: str, text: str, show_fn=None) -> None:
         plt.close(fig)
 
 
+HANDED_OVER = "[coursework] 視窗開不了，下面這段請 iPLoT 放進訊息區"  # D145：跟 SHOWN_MARK 一樣印到 stderr
+HANDED_OVER_END = "[coursework] 放進訊息區的到這裡"
+
+
+def _show_or_hand_over(title: str, text: str, show_fn=None) -> None:
+    """開文字視窗；開不了（matplotlib 沒裝、壞了）就把同一段印到 stderr，夾在 HANDED_OVER 與 HANDED_OVER_END
+    之間，iPLoT 的框架讀到就放進面板的訊息區（D145）。"""
+    try:
+        _show_text(title, text, show_fn)
+    except Exception as exc:  # noqa: BLE001  視窗怎麼開不了都一樣：交給 iPLoT
+        lines = [HANDED_OVER, f"{title}：視窗開不了（{exc}），內容放在這裡：", *text.splitlines(), HANDED_OVER_END]
+        print("\n".join(lines), file=sys.stderr, flush=True)
+
+
 def _header(hw: dict) -> list[str]:
     """NAME、NOTE（有才有）、DOCS（每個一行「顯示名：網址」）。"""
     lines = [hw["name"]]
@@ -341,7 +355,8 @@ SHOWN_MARK = "[coursework] 錯誤已經開了視窗"  # iPLoT 另開時印到 st
 def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=None) -> int:
     """作業檔最後一行：先印 NAME、NOTE、DOCS；選 case（--case <名>、--all 不問）；每個 case 先 compute，
     印 text 與 stats，有 draw 就開一個 matplotlib 視窗（關掉才下一個）。iPLoT 另開的（CW_FROM_IPLOT）
-    文字也開一個視窗，第一個的最前面放 NAME、NOTE、DOCS。一個 case 出錯印 traceback、接著跑下一個。
+    文字也開一個視窗，第一個的最前面放 NAME、NOTE、DOCS；視窗開不了就交給 iPLoT 的訊息區（D145）。
+    一個 case 出錯印 traceback、接著跑下一個。
     結束碼：都好 0、有 case 出錯 1、選不了 2。"""
     out = out or sys.stdout
     with contextlib.suppress(AttributeError, ValueError):
@@ -367,7 +382,7 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
                 shown = (header + [""] + lines) if i == 0 else lines
                 if shown:
                     header_shown = header_shown or i == 0
-                    _show_text(title, "\n".join(shown), show_fn)
+                    _show_or_hand_over(title, "\n".join(shown), show_fn)
             if hw.get("draw"):
                 import matplotlib
                 import matplotlib.pyplot as plt  # 只有要畫圖時才 import（頂層只 import 標準庫）
@@ -389,11 +404,10 @@ def main(hw: dict, argv: list[str] | None = None, ask=input, out=None, show_fn=N
             if os.environ.get(FROM_IPLOT):  # 沒有終端機：traceback 也開文字視窗，不然在 iPLoT 裡看不到
                 shown = header + [""] if i == 0 and not header_shown else []
                 header_shown = True
-                with contextlib.suppress(Exception):  # 連文字視窗都開不了（matplotlib 壞了）：上面已經印了
-                    _show_text(title, "\n".join(shown + [f"{case} 出錯了：", error.rstrip()]), show_fn)
-                    if not marked:  # 告訴另開這個程序的框架：錯誤已經給人看了，不用再開一個（D142）
-                        print(SHOWN_MARK, file=sys.stderr, flush=True)
-                        marked = True
+                _show_or_hand_over(title, "\n".join(shown + [f"{case} 出錯了：", error.rstrip()]), show_fn)
+                if not marked:  # 告訴另開這個程序的框架：錯誤已經給人看了（視窗或訊息區），不用再開一個（D142）
+                    print(SHOWN_MARK, file=sys.stderr, flush=True)
+                    marked = True
     return 1 if failed else 0
 
 
@@ -796,7 +810,7 @@ def cli(argv: list[str], version=sys.version_info) -> int:
         print(TOO_OLD.format(have=".".join(str(v) for v in version[:3])))
         return 1
     if len(argv) == 3 and argv[0] == "--show-text":
-        _show_text(argv[1], argv[2])
+        _show_or_hand_over(argv[1], argv[2])
         return 0
     if len(argv) != 2 or argv[0] != "--check":
         print("用法：python coursework.py --check <作業檔>", file=sys.stderr)

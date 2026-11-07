@@ -134,8 +134,8 @@ def test_new_course_template_is_in_the_framework(course_mod):
 def test_new_course_stubs_run_the_framework(course_mod, mod, tmp_path):
     course_mod.new_course(ask(tmp_path, "測試課"), mod)
     app = CwApp(tmp_path)
-    run_stub(mod / "測試課", mod, app)  # 課那一格：新課還沒有作業
-    assert "還沒有需要裝的套件" in app.logs[-1]
+    run_stub(mod / "測試課", mod, app)  # 課那一格：新課還沒有作業，課的 .venv 也要 matplotlib（D145）
+    assert "CW_NO_INSTALL" in app.logs[-1] and "matplotlib" in app.logs[-1]
     app = ask(tmp_path)
     run_stub(mod / "測試課" / "新增作業", mod, app)  # 新增作業：問代號，預設 HK1
     assert app.asks == [("作業代號：", "HK1")]

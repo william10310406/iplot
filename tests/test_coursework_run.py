@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from cw_support import CW, FRAMEWORK, TYPE_DIR, CwApp, FakePopen, load, make_course, make_homework
@@ -315,8 +316,34 @@ def test_no_venv_and_nothing_to_install_still_asks_to_build_it(course_mod, tmp_p
     file.write_text(file.read_text(encoding="utf-8").replace('REQUIRES = ["numpy", "matplotlib"]', "REQUIRES = []", 1),
                     encoding="utf-8")
     app, popen = press(course_mod, file, "1", confirms=[False])
-    assert len(app.confirms) == 1 and "還沒建" in app.confirms[0] and "沒有要裝的套件" in app.confirms[0]
+    assert len(app.confirms) == 1 and "還沒建" in app.confirms[0]
+    assert "並裝 matplotlib 嗎？" in app.confirms[0] and "開視窗用的" in app.confirms[0]  # D145：殼開視窗要它
     assert popen.calls == [] and "沒跑" in app.logs[-1]
+
+
+def text_only(file):
+    """把照範本的作業改成 REQUIRES = []（純文字作業：只用標準庫）。"""
+    file.write_text(file.read_text(encoding="utf-8").replace('REQUIRES = ["numpy", "matplotlib"]', "REQUIRES = []", 1),
+                    encoding="utf-8")
+    return file
+
+
+def test_text_only_homework_still_gets_matplotlib_into_the_course_venv(course_mod, hw, monkeypatch):
+    """D145：課的 .venv 一律裝 matplotlib（殼在 iPLoT 裡用它開文字視窗），不管 REQUIRES 有沒有寫。"""
+    monkeypatch.delenv("CW_NO_INSTALL")
+    _, file, python = hw
+    text_only(file)
+    app, popen = press(course_mod, file, "1", popen=popen_with(["numpy"]))
+    assert len(app.confirms) == 1 and "matplotlib" in app.confirms[0] and "開視窗用的" in app.confirms[0]
+    assert [argv[-1] for argv, _ in popen.calls if "pip" in argv] == ["matplotlib"]
+    assert len(runs(popen, file)) == 1
+
+
+def test_text_only_homework_with_matplotlib_there_asks_nothing(course_mod, hw, monkeypatch):
+    monkeypatch.delenv("CW_NO_INSTALL")
+    _, file, _ = hw
+    app, popen = press(course_mod, text_only(file), "1")
+    assert app.confirms == [] and len(runs(popen, file)) == 1
 
 
 def test_no_install_with_something_missing_says_so_and_runs_nothing(course_mod, hw):
@@ -527,6 +554,79 @@ def test_the_watch_runs_in_the_background_by_default(course_mod, hw, monkeypatch
     popen = popen_with(fail=lambda argv: argv[1:2] == [str(file)], stderr=["boom\n"])
     course_mod.homework_button(app, file.parent, popen=popen)
     assert started == [True] and windows(popen) == []  # 沒有等子程序：面板馬上回來
+
+
+# ── D145：殼開不了視窗時交過來的段落，框架放進面板的訊息區 ──
+
+def block(kind, *lines):
+    shell = kind.shell()
+    return [shell.HANDED_OVER + "\n", *(line + "\n" for line in lines), shell.HANDED_OVER_END + "\n"]
+
+
+def test_text_the_shell_hands_over_goes_to_the_message_area(course_mod, hw, kind):
+    _, file, _ = hw
+    popen = popen_with(stderr=["雜訊\n", *block(kind, "HK1 — case-1：視窗開不了（x），內容放在這裡：", "HK1 範例", "結果是 3")])
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert app.logs[-3:] == ["HK1 — case-1：視窗開不了（x），內容放在這裡：", "HK1 範例", "結果是 3"]
+    assert windows(popen) == []
+
+
+def test_a_handed_over_error_is_logged_and_no_error_window_opens(course_mod, hw, kind):
+    _, file, _ = hw
+    mark = kind.shell().SHOWN_MARK
+    popen = popen_with(fail=lambda argv: argv[1:2] == [str(file)],
+                       stderr=[*block(kind, "標題：視窗開不了（x），內容放在這裡：", "case-1 出錯了：", "ValueError: 壞"), mark + "\n"])
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert app.logs[-1] == "ValueError: 壞" and windows(popen) == []
+
+
+def test_when_the_error_window_cannot_open_either_its_text_goes_to_the_message_area(course_mod, hw, kind):
+    _, file, _ = hw
+    fake = popen_with(fail=lambda argv: argv[1:2] == [str(file)], stderr=["ZeroDivisionError: division by zero\n"])
+
+    def popen(argv, **kw):
+        if "--show-text" in argv:  # 錯誤視窗的那個程序也開不了視窗：它把同一段交過來
+            fake.calls.append((list(argv), kw))
+            return FakePopen(stderr=block(kind, "HK1：視窗開不了（x），內容放在這裡：", *argv[4].splitlines()))(argv, **kw)
+        return fake(argv, **kw)
+
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert app.logs[-1] == "ZeroDivisionError: division by zero" and len(windows(fake)) == 1
+    assert "HK1 在開始跑之前就出錯了，下面是 Python 的錯誤訊息：" in app.logs
+
+
+def test_when_the_error_window_cannot_even_start_the_error_goes_to_the_message_area(course_mod, hw):
+    _, file, _ = hw
+    fake = popen_with(fail=lambda argv: argv[1:2] == [str(file)], stderr=["NameError: x\n"])
+
+    def popen(argv, **kw):
+        if "--show-text" in argv:
+            raise FileNotFoundError(2, "No such file or directory", argv[0])
+        return fake(argv, **kw)
+
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert app.logs[-2:] == ["HK1：錯誤視窗開不了，Python 的錯誤訊息：", "NameError: x"]
+
+
+def test_review_case_a_venv_without_matplotlib_still_shows_hk8_in_the_message_area(course_mod, kind, tmp_path):
+    """最終審查 2.1 的情境，用真的子程序：一個沒裝任何東西的 venv 跑範例 HK8（純文字）。以前印完就
+    ModuleNotFoundError、結束碼 1、什麼都看不到；現在結束碼 0，結果在訊息區。"""
+    venv = tmp_path / "v"
+    subprocess.run([str(Path(sys._base_executable).resolve()), "-m", "venv", "--without-pip", str(venv)], check=True)
+    python = course_mod.python_in(venv)
+    src = CW / "範例課程" / "科學計算" / "HK08"
+    shutil.copytree(src, tmp_path / "HK08")
+    file = tmp_path / "HK08" / "HK8.py"
+    argv, env = kind.argv(file, python, "case-1")
+    env = {**{k: v for k, v in os.environ.items() if k not in ("MPLBACKEND", "VIRTUAL_ENV")}, **env}
+    proc = subprocess.Popen(argv, cwd=str(file.parent), env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    logs = []
+    course_mod._watch(proc, kind, file, python, subprocess.Popen, logs.append)
+    proc.stdout.close()
+    assert proc.returncode == 0
+    assert logs[0] == "HK8 n-gram 語言模型：n-gram language model — case-1：視窗開不了（No module named 'matplotlib'），內容放在這裡："
+    assert logs[1] == "HK8 n-gram 語言模型：n-gram language model" and len(logs) > 4
 
 
 # 真的開子程序（用跑測試的這個 Python 當課的 .venv）；文字視窗那一次不真的開，只記下來

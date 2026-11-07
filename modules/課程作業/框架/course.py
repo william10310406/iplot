@@ -344,6 +344,15 @@ def _kind_of(file: Path, kinds: list[ModuleType]) -> ModuleType | None:
     return next((k for k in kinds if k.classify(file)[0] == "mine"), None)
 
 
+def _with_shell(need, kinds) -> list[str]:
+    """need 再加上作業類型的殼自己要的（SHELL_REQUIRES，例如開視窗的 matplotlib，D145），不重複、照字母排。"""
+    out = {_normal(p): p for p in need}
+    for kind in kinds:
+        for pkg in getattr(kind, "SHELL_REQUIRES", ()):
+            out.setdefault(_normal(pkg), pkg)
+    return sorted(out.values(), key=str.lower)
+
+
 def _requires(course: Course, kinds: list[ModuleType], say) -> dict[str, set[str]]:
     """代號 → 這份作業要的 pip 名；不是任何一種 TYPES 認得的作業就不算，讀不到的檔 say 一句、不算。"""
     out: dict[str, set[str]] = {}
@@ -364,14 +373,15 @@ def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool
     apple = _apple_silicon() if apple_silicon is None else apple_silicon
     try:
         course = read_course(folder)
-        needs = _requires(course, [load_type(name, HERE.parent) for name in course.types], app.log)
+        kinds = [load_type(name, HERE.parent) for name in course.types]
+        needs = _requires(course, kinds, app.log)
     except CourseError as exc:
         app.log(f"{folder.name}：{exc}")
         return
     if course.packages:
         batches = [(f"{why}：", list(pkgs), size) for pkgs, why, size in course.packages]
     else:
-        batches = [("", sorted(set().union(*needs.values()), key=str.lower), "")]
+        batches = [("", _with_shell(set().union(*needs.values()), kinds), "")]
     off = {_normal(p) for p in course.only_on} if not apple else set()
     skipped = [p for _, pkgs, _ in batches for p in pkgs if _normal(p) in off]
     batches = [(label, [p for p in pkgs if _normal(p) not in off], size) for label, pkgs, size in batches]
@@ -517,7 +527,9 @@ def _press(app, course: Course, kinds, code: str, file: Path, popen, now, apple:
     if lines:
         app.log("以上在 iPLoT 裡只提醒、照跑；✗ 的在「檢查與打包」時會擋" if any(line.startswith("✗") for line in lines)
                 else "以上只提醒，照跑；打包也不擋")
-    if not _ready(app, course, code, sorted(kind.requires(file), key=str.lower), popen, apple):
+    own = kind.requires(file)
+    shell_only = [p for p in _with_shell((), [kind]) if _normal(p) not in {_normal(r) for r in own}]
+    if not _ready(app, course, code, _with_shell(own, [kind]), popen, apple, shell_only):
         return
     python = venv_python(course.folder)
     cases = kind.cases(file)
@@ -539,28 +551,64 @@ def _press(app, course: Course, kinds, code: str, file: Path, popen, now, apple:
     proc = popen(argv, cwd=str(file.parent), env={**os.environ, **env},
                  stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     app.log(f"{code}：{case or '全部'} 的視窗開了（在 Dock 上找 Python）")
-    background(lambda: _watch(proc, kind, file, python, popen))
+    background(lambda: _watch(proc, kind, file, python, popen, app.log))
 
 
-def _watch(proc, kind, file: Path, python: Path, popen) -> None:
-    """讀完子程序的 stderr、等它結束：結束碼不是 0、而且殼沒說它已經開了錯誤視窗（作業在 main 開始之前就出錯），
-    就用作業類型給的指令另開一個文字視窗放 stderr 的最後幾行（D142）。在背景跑，面板不等；這裡不碰 app。"""
-    mark, shown = kind.shown_mark(), False
-    tail: collections.deque[str] = collections.deque(maxlen=kind.ERROR_TAIL)
-    for line in proc.stderr or ():
-        if line.rstrip("\r\n") == mark:
+def _read(stream, kind, log, tail=None) -> tuple[bool, bool]:
+    """讀完一個子程序的 stderr：殼開不了視窗交過來的段落（handed_over 的兩行之間）一行一行 log（D145）；
+    其他的行放進 tail。回（看到 shown_mark 了沒, 交過段落了沒）。"""
+    mark = kind.shown_mark()
+    start, end = getattr(kind, "handed_over", lambda: (None, None))()
+    shown = handed = False
+    block = None
+    for raw in stream or ():
+        line = raw.rstrip("\r\n")
+        if line == mark:
             shown = True
-        else:
-            tail.append(line)
+        elif start is not None and line == start:
+            block = []
+        elif block is not None and line == end:
+            for said in block:
+                log(said)
+            block, handed = None, True
+        elif block is not None:
+            block.append(line)
+        elif tail is not None:
+            tail.append(raw)
+    return shown, handed
+
+
+def _watch(proc, kind, file: Path, python: Path, popen, log) -> None:
+    """讀完子程序的 stderr、等它結束：殼開不了視窗交過來的段落放進訊息區（D145）；結束碼不是 0、而且殼沒說它已經
+    給人看過錯誤（作業在 main 開始之前就出錯），就用作業類型給的指令另開一個文字視窗放 stderr 的最後幾行（D142），
+    那個視窗也開不了就放進訊息區。在背景跑，面板不等；log 是 app.log，面板關了也不往外丟。"""
+    def say(line: str) -> None:
+        with contextlib.suppress(Exception):
+            log(line)
+
+    tail: collections.deque[str] = collections.deque(maxlen=kind.ERROR_TAIL)
+    shown, _ = _read(proc.stderr, kind, say, tail)
     returncode = proc.wait()
-    if returncode != 0 and not shown:
-        with contextlib.suppress(OSError):  # 連課的 Python 都叫不起來：沒有別的地方能說了
-            popen(kind.error_window(file, python, returncode, list(tail)), cwd=str(file.parent))
+    if returncode == 0 or shown:
+        return
+    lines = [line.rstrip("\r\n") for line in tail] or [f"（Python 沒有留下錯誤訊息，結束碼 {returncode}）"]
+    try:
+        window = popen(kind.error_window(file, python, returncode, list(tail)), cwd=str(file.parent),
+                       stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        _, handed = _read(window.stderr, kind, say)
+        if window.wait() == 0 or handed:
+            return
+    except OSError:  # 連課的 Python 都叫不起來
+        pass
+    say(f"{file.stem}：錯誤視窗開不了，Python 的錯誤訊息：")
+    for line in lines:
+        say(line)
 
 
-def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool) -> bool:
-    """課的 .venv 在、這份作業的 REQUIRES 都裝了就 True；不然問一次、建、裝，裝好了才 True。
-    ONLY_ON 的套件在不對的機器上：不裝、不跑。.venv 不在而 REQUIRES 是空的：也問一次、建空的 .venv。"""
+def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool, shell_only=()) -> bool:
+    """課的 .venv 在、need（這份作業的 REQUIRES 加上殼要的）都裝了就 True；不然問一次、建、裝，裝好了才 True。
+    ONLY_ON 的套件在不對的機器上：不裝、不跑。.venv 不在而 need 是空的：也問一次、建空的 .venv。
+    shell_only 是 need 裡只有殼要的（REQUIRES 沒寫），問的句子說它是做什麼的（D145）。"""
     off = {_normal(p) for p in course.only_on} if not apple else set()
     blocked = [p for p in need if _normal(p) in off]
     if blocked:
@@ -581,6 +629,9 @@ def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool) 
                                                           else f" 嗎？{code} 沒有要裝的套件")
     else:
         ask = f"{code} 用到還沒裝的套件：{'、'.join(lack)}。現在裝進 {where} 嗎？"
+    why = [p for p in lack if _normal(p) in {_normal(x) for x in shell_only}]
+    if why:
+        ask += f"（{'、'.join(why)} 是在 iPLoT 裡開視窗用的）"
     if not app.confirm(ask + ("（網路慢的話要很久，裝的時候別的按鈕要等它裝完）" if lack else "")):
         app.log("沒裝，沒跑")
         return False

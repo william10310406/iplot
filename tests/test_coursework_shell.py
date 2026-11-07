@@ -614,3 +614,58 @@ def test_main_sets_installed_chinese_fonts_before_drawing(cw, agg):
     cw.main(hw, argv=["--case", "case-1"], ask=no_ask, out=io.StringIO(), show_fn=drawn(agg))
     [fonts] = seen
     assert fonts[-1] == "DejaVu Sans" and set(fonts[:-1]) <= set(cw.TEXT_FONTS)
+
+
+# ── D145：iPLoT 另開的程序開不了視窗（matplotlib 沒裝、壞了）→ 同一段文字夾在兩行記號之間印到 stderr，給框架放進訊息區 ──
+
+def no_window(*args, **kwargs):
+    raise ModuleNotFoundError("No module named 'matplotlib'")
+
+
+def handed(cw, err):
+    """stderr 裡殼交給 iPLoT 的每一段（記號之間的行）。"""
+    blocks, block = [], None
+    for line in err.splitlines():
+        if line == cw.HANDED_OVER:
+            block = []
+        elif line == cw.HANDED_OVER_END and block is not None:
+            blocks.append(block)
+            block = None
+        elif block is not None:
+            block.append(line)
+    return blocks
+
+
+def test_main_from_iplot_hands_the_text_over_when_no_window_opens(cw, monkeypatch, capsys):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    monkeypatch.setattr(cw, "_show_text", no_window)
+    out = io.StringIO()
+    assert cw.main(make_hw([], draw=False, text="結果是 3"), argv=["--all"], ask=no_ask, out=out) == 0
+    first, second = handed(cw, capsys.readouterr().err)
+    assert first[0] == "HK1 範例 — case-1：視窗開不了（No module named 'matplotlib'），內容放在這裡："
+    assert first[1:4] == ["HK1 範例", "筆記寫這裡。", "第二行。"] and "結果是 3" in first and "點數：3" in first
+    assert second[0].startswith("HK1 範例 — case-2：視窗開不了") and "結果是 3" in second and "筆記寫這裡。" not in second
+    assert "結果是 3" in out.getvalue()  # stdout 照樣印
+
+
+def test_main_from_iplot_hands_a_failed_case_over_and_says_it_was_shown(cw, monkeypatch, capsys):
+    monkeypatch.setenv("CW_FROM_IPLOT", "1")
+    monkeypatch.setattr(cw, "_show_text", no_window)
+    assert cw.main(make_hw([], draw=False, fail={"case-1"}), argv=["--case", "case-1"], ask=no_ask, out=io.StringIO()) == 1
+    err = capsys.readouterr().err
+    [block] = handed(cw, err)
+    assert "case-1 出錯了：" in block and "ValueError: case-1 算壞了" in block
+    assert err.splitlines().count(cw.SHOWN_MARK) == 1  # 給人看了：框架不再開錯誤視窗
+
+
+def test_main_outside_iplot_never_hands_anything_over(cw, monkeypatch, capsys):
+    monkeypatch.setattr(cw, "_show_text", no_window)
+    cw.main(make_hw([], draw=False, text="t"), argv=["--all"], ask=no_ask, out=io.StringIO())
+    assert cw.HANDED_OVER not in capsys.readouterr().err
+
+
+def test_cli_show_text_hands_the_text_over_when_no_window_opens(cw, monkeypatch, capsys):
+    monkeypatch.setattr(cw, "_show_text", no_window)
+    assert cw.cli(["--show-text", "HK1", "第一行\n第二行"]) == 0
+    assert handed(cw, capsys.readouterr().err) == [["HK1：視窗開不了（No module named 'matplotlib'），內容放在這裡：",
+                                                     "第一行", "第二行"]]
