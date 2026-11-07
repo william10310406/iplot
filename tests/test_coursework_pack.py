@@ -411,3 +411,29 @@ def test_the_course_stub_calls_check_and_pack(course_mod, tmp_path):
     result = run_module(module_info(folder / "檢查與打包", root, "child"), app)
     assert result.error is None, result.error
     assert sent(folder).is_file() and app.revealed == [sent(folder)]
+
+
+# ── D147：OSError 的句子指到真正出錯的路徑，不一律說作業檔 ──
+
+def test_sent_being_a_file_names_sent_not_the_homework(course_mod, course):
+    (course / "發出去的").write_text("", encoding="utf-8")
+    app = pack(course_mod, course, "HK1")
+    assert app.logs[-1].startswith("HK1：測試課/發出去的 有問題（") and app.logs[-1].endswith("），沒有打包")
+    assert "HK1.py" not in app.logs[-1] and app.revealed == []
+
+
+def test_an_unreadable_space_file_is_named(course_mod, course):
+    secret = course / "HK01" / "HK1Space" / "secret.txt"
+    secret.write_text("x", encoding="utf-8")
+    secret.chmod(0)
+    try:
+        app = pack(course_mod, course, "HK1")
+    finally:
+        secret.chmod(0o644)
+    assert app.logs[-1] == "HK1：測試課/HK01/HK1Space/secret.txt 有問題（Permission denied），沒有打包"
+
+
+def test_versions_being_a_file_is_named_when_packing(course_mod, course):
+    (course / "HK01" / ".版本").write_text("", encoding="utf-8")
+    app = pack(course_mod, course, "HK1")
+    assert app.logs[-1].startswith("HK1：測試課/HK01/.版本 有問題（") and "有問題（" in app.logs[-1] and "HK1.py" not in app.logs[-1]

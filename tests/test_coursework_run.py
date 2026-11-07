@@ -740,3 +740,41 @@ def test_venv_python_that_runs_but_fails_counts_as_broken(course_mod, hw, monkey
     popen = popen_with(fail=lambda argv: argv[1:2] == ["-c"])
     app, _ = press(course_mod, file, "1", popen=popen, confirms=[False])
     assert len(app.confirms) == 1 and "壞了" in app.confirms[0]
+
+
+# ── D147：OSError 的句子指到真正出錯的路徑 ──
+
+def test_versions_being_a_file_is_named_not_the_homework(course_mod, hw):
+    _, file, _ = hw
+    (file.parent / ".版本").write_text("", encoding="utf-8")
+    app, popen = press(course_mod, file, "1")
+    assert app.logs[-1].startswith("HK1：測試課/HK01/.版本 有問題（") and app.logs[-1].endswith("），沒跑")
+    assert "HK1.py" not in app.logs[-1] and runs(popen, file) == []
+
+
+def test_a_course_python_that_cannot_start_is_named(course_mod, hw):
+    course, file, python = hw
+    fake = popen_with()
+
+    def popen(argv, **kw):
+        if argv[1:2] == [str(file)]:  # 問得到裝了什麼，真的跑的時候卻叫不起來
+            raise FileNotFoundError(2, "No such file or directory", str(python))
+        return fake(argv, **kw)
+
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert app.logs[-1] == "HK1：測試課/.venv/bin/python 有問題（No such file or directory），沒跑"
+
+
+def test_course_button_names_the_path_of_an_os_error_instead_of_a_traceback(course_mod, hw, monkeypatch):
+    monkeypatch.delenv("CW_NO_INSTALL")
+    course, file, python = hw
+    fake = popen_with(["numpy"])
+
+    def popen(argv, **kw):
+        if "pip" in argv:
+            raise PermissionError(13, "Permission denied", str(python))
+        return fake(argv, **kw)
+
+    app = CwApp(course)
+    course_mod.course_button(app, course, popen=popen)
+    assert app.logs[-1] == "測試課：測試課/.venv/bin/python 有問題（Permission denied），沒裝"

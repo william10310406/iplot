@@ -363,6 +363,20 @@ def _unreadable(file: Path, exc: OSError) -> str:
     return f"讀不了 {file.name}（{exc.strerror or exc}）"
 
 
+def _os_problem(exc: OSError, file: Path | None, course_folder: Path) -> str:
+    """OSError 說成一句，指到真正出錯的路徑（exc.filename，從課的資料夾名字寫起）；沒有路徑、或就是作業檔，
+    才說「讀不了 <作業檔>」（D147）。"""
+    where = Path(os.path.abspath(exc.filename)) if exc.filename else None
+    if where is None or (file is not None and where == Path(os.path.abspath(file))):
+        return _unreadable(file, exc) if file is not None else f"出了問題（{exc.strerror or exc}）"
+    base = Path(os.path.abspath(course_folder)).parent
+    try:
+        shown = where.relative_to(base).as_posix()
+    except ValueError:
+        shown = str(where)
+    return f"{shown} 有問題（{exc.strerror or exc}）"
+
+
 def _kind_of(file: Path, kinds: list[ModuleType]) -> ModuleType | None:
     """TYPES 裡第一種說這個檔是 mine 的作業類型；都不是回 None。讀不到檔（OSError）照丟，由叫的人說成一句話。"""
     return next((k for k in kinds if k.classify(file)[0] == "mine"), None)
@@ -392,8 +406,16 @@ def _requires(course: Course, kinds: list[ModuleType], say) -> dict[str, set[str
 
 def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool | None = None) -> None:
     """課那一格：把這門課要的套件裝進課的 .venv。PACKAGES 有就一批一批問（一次只問一批），沒有就裝每份作業
-    REQUIRES 的聯集；ONLY_ON 的套件在不對的機器上不裝，句子說哪幾份作業在這裡看不了。先問、確定了才建 .venv。"""
+    REQUIRES 的聯集；ONLY_ON 的套件在不對的機器上不裝，句子說哪幾份作業在這裡看不了。先問、確定了才建 .venv。
+    中途的 OSError 說一句、指到出錯的路徑（D147），不出 traceback。"""
     folder = Path(folder)
+    try:
+        _course_button(app, folder, popen, apple_silicon)
+    except OSError as exc:
+        app.log(f"{folder.name}：{_os_problem(exc, None, folder)}，沒裝")
+
+
+def _course_button(app, folder: Path, popen, apple_silicon: bool | None) -> None:
     apple = _apple_silicon() if apple_silicon is None else apple_silicon
     try:
         course = read_course(folder)
@@ -534,7 +556,7 @@ def homework_button(app, folder: Path, popen=subprocess.Popen, now=datetime.now,
         _press(app, course, kinds, code, file, popen, now, _apple_silicon() if apple_silicon is None else apple_silicon,
                background)
     except OSError as exc:
-        app.log(f"{code}：{_unreadable(file, exc)}，沒跑")
+        app.log(f"{code}：{_os_problem(exc, file, course_folder)}，沒跑")
 
 
 def _press(app, course: Course, kinds, code: str, file: Path, popen, now, apple: bool, background) -> None:
@@ -762,7 +784,7 @@ def check_and_pack(app, course_folder: Path, now=datetime.now) -> None:
         _write_zip(target, code, kind.pack(file.parent, code), readme, when)
         kept = keep_pack(target, file.parent, when)
     except OSError as exc:
-        app.log(f"{code}：{_unreadable(file, exc)}，沒有打包")
+        app.log(f"{code}：{_os_problem(exc, file, course_folder)}，沒有打包")
         return
     skipped = getattr(kind, "left_out", lambda folder, code: [])(file.parent, code)
     if skipped:
