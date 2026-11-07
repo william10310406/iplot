@@ -410,3 +410,19 @@ def test_button_with_a_broken_venv_cancel_touches_nothing(course_mod, tmp_path, 
     app.answers = [False]
     course_mod.course_button(app, course, popen=popen, apple_silicon=False)
     assert argvs(popen) == [] and python.is_symlink() and app.logs[-1] == "沒裝"
+
+
+def test_a_real_venv_without_pyvenv_cfg_is_broken_not_the_computers_python(course_mod, tmp_path):
+    """最終審查之後的審查：.venv 少了 pyvenv.cfg，它的 Python 以為自己是電腦本身的 Python；列出來的是電腦本身的套件，
+    pip 也會裝進電腦本身的 Python。現在算壞了（D146 修訂）。真的 venv、真的子程序，不裝東西。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    venv = tmp_path / ".venv"
+    subprocess.run([str(Path(sys._base_executable).resolve()), "-m", "venv", "--without-pip", str(venv)], check=True)
+    python = course_mod.python_in(venv)
+    assert isinstance(course_mod.installed(python), set)  # 好的 venv 照常
+    (venv / "pyvenv.cfg").unlink()
+    with pytest.raises(course_mod.BrokenVenv):
+        course_mod.installed(python)

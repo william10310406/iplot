@@ -33,8 +33,10 @@ HERE = Path(__file__).resolve().parent  # 框架/；它的上一層是模組資�
 FRAMEWORK = Path("框架") / "course.py"  # 往上找框架時認的檔
 TYPES_DIR = "作業類型"  # 框架所在的資料夾底下：每種作業一個資料夾，裡面是 type.py
 PIP_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-# 子程序裡列出這個 Python 裝了哪些套件（不 import 它們）
-LIST_INSTALLED = ("import importlib.metadata, json; "
+# 子程序裡列出這個 Python 裝了哪些套件（不 import 它們）；它認為自己不在 venv 裡（.venv 少了 pyvenv.cfg）就結束碼 3，
+# 不然列出來的是電腦本身的 Python 的套件，pip 也會裝進那裡（D146 修訂）
+LIST_INSTALLED = ("import importlib.metadata, json, sys; "
+                  "sys.exit(3) if sys.prefix == sys.base_prefix else "
                   "print(json.dumps([d.metadata['Name'] for d in importlib.metadata.distributions()]))")
 FOLDER_SLOT = re.compile(r"\{n(?::0([1-4])d)?\}")  # {n} 或 {n:01d}…{n:04d}；不用 str.format 驗使用者給的字串
 
