@@ -2,7 +2,11 @@
 自動補 REQUIRES；main（Task 5）。CW_NO_INSTALL=1、Popen 一律假的、不連網。"""
 
 import ast
+import contextlib
 import io
+import os
+import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -91,7 +95,48 @@ def test_outside_venv_reruns_with_the_venv_next_to_the_file(cw, tmp_path, outsid
     with pytest.raises(SystemExit) as done:
         cw.ensure([], str(file), popen=popen, argv=[str(file), "--case", "case-2"])  # 先重跑，不先查缺什麼
     assert done.value.code == 0
-    assert popen.calls == [([str(python), str(file.resolve()), "--case", "case-2"], {"cwd": str(file.resolve().parent)})]
+    [(argv, kwargs)] = popen.calls
+    assert argv == [str(python), str(file.resolve()), "--case", "case-2"]
+    assert kwargs["cwd"] == str(file.resolve().parent)
+    assert kwargs["env"] == {**os.environ, cw.REEXEC: "1"}  # D144：重跑的那一個知道自己是重跑的
+
+
+def test_rerun_that_is_still_outside_a_venv_stops_with_one_sentence(cw, tmp_path, outside_venv, monkeypatch, capsys):
+    """D144：重跑過一次還是不在 venv 裡（.venv 少了 pyvenv.cfg 這種）→ 不再重跑，印一句、結束碼 1。"""
+    file = homework(tmp_path / "HK1")
+    fake_venv(tmp_path / "HK1")
+    monkeypatch.setenv(cw.REEXEC, "1")
+    popen = FakePopen()
+    with pytest.raises(SystemExit) as done:
+        cw.ensure(["numpy"], str(file), popen=popen, argv=[str(file)])
+    assert done.value.code == 1 and popen.calls == []
+    out = capsys.readouterr()
+    assert out.err == "" and out.out == cw.BROKEN_VENV + "\n"
+    assert out.out.startswith("這個資料夾的 .venv 壞了")
+    assert cw.REMAKE_VENV in out.out and cw.WIN_REMAKE_VENV in out.out and "Traceback" not in out.out
+
+
+def test_a_venv_without_pyvenv_cfg_reruns_at_most_once(tmp_path):
+    """真的子程序：.venv/bin/python 是指到基底 Python 的連結、沒有 pyvenv.cfg（重跑的那個 Python 不認得自己在 venv 裡）。
+    以前會一直重跑下去；現在第二次就停、結束碼 1。整個程序組在 finally 裡殺掉，萬一又無限重跑也不留下來。"""
+    if sys.platform == "win32":
+        pytest.skip("連結與程序組只在 macOS／Linux 這樣做")
+    base = Path(sys._base_executable).resolve()
+    file = homework(tmp_path / "HK1", 'REQUIRES = []\nimport coursework; coursework.ensure(REQUIRES, __file__)\nprint("跑了")\n')
+    python = tmp_path / "HK1" / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(base)
+    env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "PYTHONHOME", "CW_REEXEC")}
+    env["PYTHONPATH"] = str(TYPE_DIR)
+    proc = subprocess.Popen([str(base), str(file)], cwd=str(file.parent), env=env, start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+    try:
+        out, err = proc.communicate(timeout=30)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+    assert proc.returncode == 1, (out, err)
+    assert out.count("這個資料夾的 .venv 壞了") == 1 and "跑了" not in out and "Traceback" not in err
 
 
 def cfg(python, **keys):

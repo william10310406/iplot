@@ -24,6 +24,7 @@ from pathlib import Path
 
 NO_INSTALL = "CW_NO_INSTALL"  # 設了就不跑 pip，缺了只報（測試用）
 FROM_IPLOT = "CW_FROM_IPLOT"  # iPLoT 另開的子程序都帶著：不自動補 REQUIRES、不問 case、文字開視窗
+REEXEC = "CW_REEXEC"  # ensure 用 .venv 重跑時帶著：重跑的那一個還是不在 venv 裡就不再重跑（D144）
 MIN_PYTHON = (3, 10)
 # README 與錯誤句子都從這幾個常數來（學生包的 README 打包時代換進去，測試核對）
 VERSION = "python3 --version"
@@ -37,6 +38,8 @@ WIN_RUN = "py {file}"
 TOO_OLD = "這份作業要 Python 3.10 以上，現在是 {have}。照 README 第 1 步裝 python.org 的 Python，再用 python3 跑一次。"
 OLD_VENV = (f"這個資料夾的 .venv 是用舊的 Python 建的。先照 README 第 3 步確認版本，再打 {REMAKE_VENV} 重建"
             f"（Windows 是 {WIN_REMAKE_VENV}），然後重跑。")  # D143
+BROKEN_VENV = (f"這個資料夾的 .venv 壞了（裡面的 Python 認不出自己在 .venv 裡）。打 {REMAKE_VENV} 重建"
+               f"（Windows 是 {WIN_REMAKE_VENV}），然後重跑。")  # D144
 MARK = "課程.py"  # 老師的課程資料夾（跟框架的 course.MARK 同一個名字）
 NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # pip 名只接這些字元，不經 shell
 PIP_NAMES = {"cv2": "opencv-python", "PIL": "Pillow", "sklearn": "scikit-learn", "kan": "pykan", "mlx_lm": "mlx-lm",
@@ -219,7 +222,7 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
     """作業檔第二行：缺的套件在這一行裝好，裝完才往下 import。
     1. Python 不到 3.10：說一句話、結束碼 1。
     2. 不在 venv 裡（系統的 Python）：找得到 .venv（作業旁邊，或上面的課程資料夾）就用它重跑同一個檔、
-       帶原本的參數、結束碼照它的（先重跑，不先查缺什麼）；找不到就只看缺不缺，缺了印 README 的兩行、結束碼 1，絕不叫 pip。
+       帶原本的參數、結束碼照它的（先重跑，不先查缺什麼；最多重跑一次）；找不到就只看缺不缺，缺了印 README 的兩行、結束碼 1，絕不叫 pip。
     3. 在 venv 裡：學生自己跑自己的檔時，先把 import 了、REQUIRES 沒寫的補進 REQUIRES 那一行；缺的裝進這個 venv。"""
     if tuple(version[:2]) < MIN_PYTHON:
         print(TOO_OLD.format(have=".".join(str(v) for v in version[:3])))
@@ -228,13 +231,16 @@ def ensure(requires: list[str], file: str, popen=subprocess.Popen, argv: list[st
     argv = list(sys.argv if argv is None else argv)
     if sys.prefix == sys.base_prefix:
         python = find_venv(Path(file))
+        if python is not None and os.environ.get(REEXEC):  # D144：已經用 .venv 重跑過，還是不在 venv 裡
+            print(BROKEN_VENV)
+            sys.exit(1)
         if python is not None:
             built = venv_version(python)
             if built is not None and built < MIN_PYTHON:  # D143：舊 Python 建的 .venv 不切進去，不然學生看到的是別的錯
                 print(OLD_VENV)
                 sys.exit(1)
             sys.exit(popen([str(python), str(Path(file).resolve()), *argv[1:]],
-                           cwd=str(Path(file).resolve().parent)).wait())
+                           cwd=str(Path(file).resolve().parent), env={**os.environ, REEXEC: "1"}).wait())
         need = missing(requires)
         if need:  # D138：跟版本那句一樣說完就結束，學生看到的不是 traceback
             print(_no_venv(need, Path(file)))
