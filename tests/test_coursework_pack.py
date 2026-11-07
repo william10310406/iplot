@@ -437,3 +437,16 @@ def test_versions_being_a_file_is_named_when_packing(course_mod, course):
     (course / "HK01" / ".版本").write_text("", encoding="utf-8")
     app = pack(course_mod, course, "HK1")
     assert app.logs[-1].startswith("HK1：測試課/HK01/.版本 有問題（") and "有問題（" in app.logs[-1] and "HK1.py" not in app.logs[-1]
+
+
+# ── D148：D135 的「復原」照程式說——訊息區只說存在 .版本/ 的哪個檔，怎麼復原寫在 README ──
+
+def test_d135_restore_line_says_what_the_message_and_the_readme_really_say(course_mod, course):
+    text = (CW.parents[1] / "docs" / "03_設計決定.md").read_text(encoding="utf-8")
+    d135 = text[text.index("**D135 "):text.index("**D136 ")]
+    [line] = [x for x in d135.splitlines() if x.startswith("- 復原：")]
+    assert "訊息區與 README 說" not in line and "訊息區" in line and "`modules/課程作業/README.md`" in line
+    message = pack(course_mod, course, "HK1").logs[-1]
+    assert "HK01/.版本/HK1_" in message and "Finder" not in message  # 訊息區說存在哪，不說怎麼復原
+    readme = (CW / "README.md").read_text(encoding="utf-8")
+    assert "按 ⌘⇧." in readme and "要退回某一版，把要的那一份複製回作業資料夾" in readme

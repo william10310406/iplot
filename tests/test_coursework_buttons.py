@@ -419,3 +419,16 @@ def test_type_new_refuses_to_overwrite(kind, tmp_path):
     with pytest.raises(FileExistsError):
         kind.new(tmp_path, "HK1")
     assert (tmp_path / "HK1.py").read_text(encoding="utf-8") == "# 已經有\n"
+
+
+# ── D148：文件照程式說——NAME 只在建課時用（課那一格的字是墊片裡寫死的 TITLE）──
+
+def test_template_says_name_is_used_only_when_the_course_is_made(course_mod, mod, tmp_path):
+    template = (CW / "框架" / "範本" / "課程.py").read_text(encoding="utf-8")
+    assert "NAME 只在建課時用" in template.splitlines()[0] and "其他設定改完存檔，面板重掃就生效" in template.splitlines()[0]
+    course_mod.new_course(ask(tmp_path, "測試課"), mod)
+    settings = mod / "測試課" / "課程.py"
+    settings.write_text(settings.read_text(encoding="utf-8").replace('NAME = "測試課"', 'NAME = "改過的名字"', 1),
+                        encoding="utf-8")
+    run_stub(mod / "測試課", mod, CwApp(tmp_path))
+    assert stub_of(mod / "測試課").title == "測試課"  # 範本說的：改 NAME 不會改課那一格的字
