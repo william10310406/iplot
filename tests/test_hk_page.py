@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from test_homework import COURSE, FakePopen, HwApp, loader
 
-SPEC = Path(__file__).resolve().parents[1] / "docs" / "09_作業規範.md"
+SPEC = Path(__file__).resolve().parent / "fixtures" / "hk_page_v0_spec.md"
 
 
 @pytest.fixture(autouse=True)

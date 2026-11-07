@@ -13,3 +13,4 @@ pyproject.toml export-ignore
 .gitignore export-ignore
 .gitattributes export-ignore
 modules/科學計算/ export-ignore
+modules/課程作業/ export-ignore
