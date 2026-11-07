@@ -504,7 +504,8 @@ def test_core_zip_top_level_is_printed(publish, repo, capsys):
 
 
 EXPORT_IGNORE = ["tests/", "docs/plans/", "docs/original/", "docs/00_*", "docs/01_*", "docs/04_*", "tools/", ".github/",
-                 "requirements-dev.txt", "pyproject.toml", ".gitignore", ".gitattributes", "modules/科學計算/", "modules/課程作業/"]
+                 "requirements-dev.txt", "pyproject.toml", ".gitignore", ".gitattributes", "modules/科學計算/", "modules/課程作業/",
+                 ".claude/", "docs/日誌/"]
 
 
 def test_gitattributes_lists_exactly_the_design_paths():
@@ -518,7 +519,7 @@ def test_real_gitattributes_keeps_the_ignored_paths_out_of_the_core_zip(publish,
     files = ["tests/a.py", "tools/p.py", "docs/plans/x.md", "docs/original/o.py", "docs/00_現況分析.md", "docs/01_從零啟動.md",
              "docs/02_重構設計.md", "docs/03_設計決定.md", "docs/04_M1驗收.md", "docs/05_使用紀錄.md",
              ".github/workflows/ci.yml", "requirements-dev.txt", "pyproject.toml", "modules/科學計算/iplot.py",
-             "modules/課程作業/iplot.py"]
+             "modules/課程作業/iplot.py", ".claude/commands/日誌.md", "docs/日誌/README.md"]
     for name in files:
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
         (repo / name).write_text("x\n", encoding="utf-8")
