@@ -10,6 +10,7 @@ from core.errors import describe
 from core.scan import is_module, module_info
 from core.text import REPORT_MODULE, T
 from core.types import ErrorInfo, Group, ModuleInfo, Scope
+from ui import errlog
 
 COLORS = {"here": "blue", "parent": "red", "extra": "green"}
 
@@ -39,6 +40,7 @@ class Panel:
         self.root.title(self.title + (T["safe_mode"] if safe else ""))
         self.root.geometry("420x600")
         self.core: Core | None = None
+        self.recent, self.offer = errlog.Recent(), errlog.Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
         self.crumbs = tk.Frame(self.root)
         self.crumbs.pack(fill="x", padx=8, pady=4)
         self.messages = tk.Text(self.root, height=10, wrap="word", state="disabled")
@@ -119,18 +121,51 @@ class Panel:
 
     def log(self, text: str) -> None:
         """訊息區末尾加一行。"""
+        self.recent.add(text)
         self._write(text + "\n")
 
     def report(self, error: ErrorInfo) -> None:
         """訊息區顯示完整 traceback，最後才是白話那一句和「打開檔案」：捲到底看到的是人話，不是 traceback。
-        modules/回報與討論 是模組時多一顆「回報這個問題」，按了交給它的 on_error（D110）。"""
+        modules/回報與討論 是模組時多一顆「回報這個問題」，按了交給它的 on_error（D110）；也自動問一次要不要回報
+        （這一輪事件做完才問，D150）。這一筆與最近的訊息寫進 logs/last-error.json。"""
+        self.recent.add(describe(error))
+        errlog.write(self.core.home, error, self.recent.lines())
         buttons = []
         if error.file is not None:
             buttons.append(tk.Button(self.messages, text=T["open_file"], command=lambda: self.core.action(
                 "edit", error.file, self.core.config.editor, error.line)))
         if is_module(self.core.home / "modules" / REPORT_MODULE):
             buttons.append(tk.Button(self.messages, text=T["report_issue"], command=lambda: self._report(error)))
+            if self.offer.due(error):
+                self.root.after_idle(self._offer, error)
         self._write(error.traceback_text + describe(error) + "\n", *buttons)
+
+    def _offer(self, error: ErrorInfo) -> None:
+        """「出錯了，要回報嗎？」：答回報就跟按那一列的鈕一樣；勾了「這次執行期間不要再問」就記下（只在記憶體）。"""
+        answer = self.ask_offer(T["offer_report"].format(sentence=describe(error)))
+        self.offer.muted = self.offer.muted or answer["mute"]
+        if answer["report"]:
+            self._report(error)
+
+    def ask_offer(self, prompt: str) -> dict:
+        """「回報／不用」加一個「這次執行期間不要再問」的勾選框（messagebox 放不了勾選框）；關掉視窗算不用。"""
+        top, mute, answer = tk.Toplevel(self.root), tk.BooleanVar(master=self.root), {"report": False}
+        top.title(self.title)
+        top.transient(self.root)
+        tk.Label(top, text=prompt, justify="left", wraplength=360).pack(padx=12, pady=(12, 6), anchor="w")
+        tk.Checkbutton(top, text=T["offer_mute"], variable=mute).pack(padx=12, anchor="w")
+        row = tk.Frame(top)
+        row.pack(padx=12, pady=12, anchor="e")
+
+        def close(report: bool) -> None:
+            answer["report"] = report
+            top.destroy()
+
+        tk.Button(row, text=T["offer_no"], command=lambda: close(False)).pack(side="left")
+        tk.Button(row, text=T["offer_yes"], command=lambda: close(True)).pack(side="left", padx=(6, 0))
+        top.grab_set()
+        self.root.wait_window(top)
+        return {**answer, "mute": mute.get()}
 
     def _report(self, error: ErrorInfo) -> None:
         folder = self.core.home / "modules" / REPORT_MODULE

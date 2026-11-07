@@ -32,6 +32,7 @@ def close(root):
 @pytest.fixture
 def panel():
     p = Panel("9.9", safe=False)
+    p.offer.muted = True  # 自動問「要回報嗎？」會開一個等人按的視窗：測它的在 test_one_click_report.py
     yield p
     close(p.root)
 

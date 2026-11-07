@@ -19,6 +19,7 @@ from core.errors import describe
 from core.scan import is_module, module_info
 from core.text import REPORT_MODULE, T
 from core.types import ErrorInfo, ModuleInfo, Scope
+from ui import errlog
 
 MAX_ICON = 1024 * 1024  # 圖示檔的上限：1 MB（D65）
 MIME = {".png": "image/png", ".svg": "image/svg+xml"}
@@ -169,6 +170,7 @@ class WebPanel:
         self._waiting: dict[int, tuple[threading.Event, list]] = {}  # 等回答的對話框
         self._closed = False
         self._warned: set[Path] = set()
+        self.recent, self.offer = errlog.Recent(), errlog.Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
 
     def attach(self, core: Core) -> None:
         """接上 Core；之後頁面的動作都交給它。"""
@@ -262,15 +264,31 @@ class WebPanel:
 
     def log(self, text: str) -> None:
         """訊息區末尾加一行。"""
+        self.recent.add(text)
         self._js("log", text)
 
     def report(self, error: ErrorInfo) -> None:
         """訊息區顯示錯誤：白話一句，「打開檔案」與「詳細」由頁面排。頁面壞到顯示不了也不往外丟。
-        reportable 是 modules/回報與討論 在不在：在才有「回報這個問題」。"""
+        reportable 是 modules/回報與討論 在不在：在才有「回報這個問題」，也才自動問要不要回報（排在這件工作之後，D150）。
+        這一筆與最近的訊息寫進 logs/last-error.json，給那個模組的「回報問題」附上。"""
         self.errors.append(error)
+        self.recent.add(describe(error))
+        errlog.write(self.home, error, self.recent.lines())
         reportable = is_module(self.home / "modules" / REPORT_MODULE)
         with contextlib.suppress(self.webview.JavascriptException):
             self._js("report", {**error_json(error), "id": len(self.errors) - 1, "reportable": reportable})
+        if reportable and self.offer.due(error):
+            self.submit(lambda: self._offer(error))
+
+    def _offer(self, error: ErrorInfo) -> None:
+        """「出錯了，要回報嗎？」：答回報就交給「回報與討論」的 on_error，跟按那一列的鈕一樣；勾了「這次執行期間不要
+        再問」就記下（只在記憶體）。關掉視窗、重新載入都算不用。"""
+        answer = self._dialog("offer", T["offer_report"].format(sentence=describe(error)))
+        answer = answer if isinstance(answer, dict) else {}
+        self.offer.muted = self.offer.muted or answer.get("mute") is True
+        info = self.bundled(REPORT_MODULE)
+        if answer.get("report") is True and info is not None:
+            self.press(self.core, info, "on_error", (error,), quiet=True)
 
     def _dialog(self, kind: str, *args: Any) -> Any:
         """推一個對話框給頁面，等頁面用 answer(編號, 值) 回來；視窗關掉、頁面重新載入都算取消（None）。"""

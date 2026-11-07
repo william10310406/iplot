@@ -1476,7 +1476,8 @@ def test_page_tells_send_whether_it_copied():
     page = PAGE.read_text(encoding="utf-8")
     body = handler(page, "open")
     assert body.count('const copied = document.execCommand("copy");') == 1
-    assert page.count(".send(") == 1 and '.send($("title").value, $("body").value, copied).then((r) => {' in body
+    assert page.count(".send(") == 1
+    assert '.send($("title").value, $("body").value, copied, $("doing").value).then((r) => {' in body
     then = body.split(".then((r) => {", 1)[1].split("}).catch(", 1)[0]
     assert '$("hint").textContent = r.hint;' in then and "uncopied = r.uncopied;" in then
     again = handler(page, "again")
@@ -1495,14 +1496,14 @@ def test_page_copies_only_the_redacted_full_text(load, tmp_path, web):
     # 寫進 #full 的只有一處、一字不差是 measure 回來的 r.full；#full 的每一次使用都列出來，也只經過 $("full") 拿它
     assert re.findall(r'\$\("full"\)\.value[^;\n]*', page) == ['$("full").value = r.full']
     uses = re.findall(r'\$\("full"\)(\.[^;\n]*);', script)
-    focus = [".focus({ preventScroll: true })", ".select()"]  # 「在瀏覽器打開」與「再複製一次」各一次
-    assert sorted(uses) == sorted([".value = r.full", '.classList.add("shown")', ".tabIndex = 0", *focus, *focus])
+    focus = [".focus({ preventScroll: true })", ".select()"]  # 「在瀏覽器打開」「再複製一次」「複製整份報告」各一次
+    assert sorted(uses) == sorted([".value = r.full", '.classList.add("shown")', ".tabIndex = 0", *focus * 3])
     assert len(uses) == script.count('$("full")') == script.count('"full"') and "'full'" not in script
     assert script.count("getElementById") == 1 and "querySelector" not in script
     for bad in ('$("full").value +=', "setRangeText", "navigator.clipboard", "clipboardData", 'addEventListener("copy"'):
         assert bad not in page, bad
     copies = [m.start() for m in re.finditer(r'execCommand\("copy"\)', page)]
-    assert len(copies) == 2  # 「在瀏覽器打開」與「再複製一次」
+    assert len(copies) == 3  # 「在瀏覽器打開」「再複製一次」「複製整份報告」（D150）
     for at in copies:
         before = page[:at]
         assert before[:before.rindex(".select()")].endswith('$("full")')

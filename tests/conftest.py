@@ -216,6 +216,15 @@ def until(condition, timeout=3.0):
         time.sleep(0.005)
 
 
+@pytest.fixture(autouse=True)
+def _restore_excepthooks(monkeypatch):
+    """main.main() 會裝全域的例外處理（ui/errlog.install）：每個測試之後換回原本的。"""
+    import threading
+
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    monkeypatch.setattr(threading, "excepthook", threading.excepthook)
+
+
 @pytest.fixture
 def panel(home):
     """接好 Core、跑過 run() 的 WebPanel：假的 webview，不開視窗；啟動時的重掃已經做完。"""
@@ -223,6 +232,7 @@ def panel(home):
     from ui.web import WebPanel
 
     p = WebPanel(home, "0.4.0", False, webview=FakeWebview())
+    p.offer.muted = True  # 自動問「要回報嗎？」會等頁面回答：測它的測試（test_offer.py）自己打開
     p.attach(Core(home, DEFAULT_CONFIG, p))
     p.run()
     p.wait()

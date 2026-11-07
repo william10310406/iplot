@@ -150,6 +150,8 @@ img.icon { object-fit: cover; background: none; }
 .dialog input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
 .dialog .hint { min-height: 18px; margin-top: 6px; font-size: 12px; color: var(--danger); }
 .dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.dialog .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.dialog .check input { width: auto; }
 .btn { padding: 6px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
   font-size: 13px; }
 .btn:hover { background: var(--hover); }

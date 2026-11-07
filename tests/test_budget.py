@@ -14,8 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core"
 SKIP = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
         tokenize.ENCODING, tokenize.ENDMARKER}
-# ui/web.py：2026-10-05 由 200 調到 220（M3 的 page 5 行，日後關閉前確認 8 行）
-UI_BUDGETS = {"ui/web.py": 220, "ui/tk.py": 180, "ui/install.py": 80,
+# ui/web.py：2026-10-05 由 200 調到 220（M3 的 page 5 行，日後關閉前確認 8 行）；2026-11-07 由 220 調到 230
+# （M9 自動問「要回報嗎？」，D150）。ui/errlog.py 是 M9 新加的，兩個面板與 main.py 共用
+UI_BUDGETS = {"ui/web.py": 230, "ui/tk.py": 180, "ui/install.py": 80, "ui/errlog.py": 80,
               "ui/index.html": 120, "ui/app.js": 400, "ui/style.css": 300}
 BLOCKS = (("/*", "*/"), ("<!--", "-->"))
 

@@ -54,6 +54,7 @@ def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str, not
     """網頁面板：視窗關掉才回傳。note 有值就寫進訊息區。
     lib/ 裡沒有 pywebview、或它找不到能用的視窗套件（裝壞了）時丟 ImportError。"""
     from core.core import Core
+    from ui import errlog
     from ui.web import WebPanel
 
     panel = WebPanel(home, version, False)
@@ -65,12 +66,14 @@ def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str, not
         panel.submit(lambda: panel.report(err))
     guard = NoTk()
     sys.meta_path.insert(0, guard)
+    errlog.sink = lambda exc: panel.submit(lambda: core.report_internal(type(exc), exc, exc.__traceback__))
     try:
         panel.run()
     except panel.webview.WebViewException as exc:
         raise ImportError(str(exc)) from exc
     finally:
-        sys.meta_path.remove(guard)  # 面板關了、或根本沒開起來：後備的 tkinter 面板在同一個程序裡，要 import 得到
+        sys.meta_path.remove(guard)
+        errlog.sink = None  # 面板關了：別的執行緒的例外只進終端機與 logs/iplot.log  # 面板關了、或根本沒開起來：後備的 tkinter 面板在同一個程序裡，要 import 得到
 
 
 def tk_or_exit(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: str | None = None) -> None:
@@ -136,8 +139,10 @@ def main() -> None:
         sys.exit(T["need_python"].format(found=found))
     from core import __version__
     from core.core import load_config
+    from ui import errlog
 
     home = Path(__file__).resolve().parent
+    errlog.install(home)  # 沒接住的例外也寫進 logs/iplot.log（D150）
     sys.path.insert(1, str(home / "lib"))  # iPLoT 自己裝的套件：排在程式自己的資料夾後面、系統的套件前面
     rebooted = os.environ.pop("IPLOT_BOOT", None) == "1"  # 這次啟動是不是剛裝完 lib/ 重啟的那一次
     config, err = load_config(home / "config.py")

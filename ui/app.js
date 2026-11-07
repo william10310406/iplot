@@ -1,5 +1,5 @@
 // iPLoT 的面板。Python 那一頭是 ui/web.py：
-//   Python → 頁面：iplot.init／show／log／report／ask／confirm／busy（這個檔的最下面）
+//   Python → 頁面：iplot.init／show／log／report／ask／confirm／offer／busy（這個檔的最下面）
 //   頁面 → Python：api().press(id) 這類呼叫，名字就是 ui/web.py 裡 Bridge 的方法
 // 畫面上的字全部在 core/text.py，啟動時由 iplot.init 整份送進來放在 T；這個檔只用 key，不寫任何文字。
 "use strict";
@@ -183,6 +183,12 @@ function dialog(kind, title, initial = "", check = () => "") {
     heading.textContent = title;
     input.hidden = kind !== "ask";
     input.value = initial;
+    // offer（出錯了，要回報嗎？）：鈕換成「回報／不用」，多一個「這次執行期間不要再問」；答案是 {report, mute}
+    const offer = kind === "offer", mute = $("dlgMute");
+    $("dlgMuteRow").hidden = !offer;
+    mute.checked = false;
+    $("dlgOk").textContent = offer ? T.offer_yes : T.ok;
+    $("dlgCancel").textContent = offer ? T.offer_no : T.cancel;
     hint.textContent = "";
     scrim.hidden = false;
     for (const part of behind) part.inert = true;
@@ -196,18 +202,20 @@ function dialog(kind, title, initial = "", check = () => "") {
     };
     const ok = () => {
       const problem = kind === "ask" ? check(input.value) : "";
-      if (problem) { hint.textContent = problem; input.focus(); } else done(kind === "ask" ? input.value : true);
+      if (problem) { hint.textContent = problem; input.focus(); }
+      else done(offer ? { report: true, mute: mute.checked } : kind === "ask" ? input.value : true);
     };
+    const cancel = () => done(offer ? { report: false, mute: mute.checked } : null);
     // 中文輸入法選字、取消選字時按的 Enter 與 Esc 是給輸入法的，不算（isComposing；Safari 的核心在那一下是 keyCode 229）
     const key = (e) => {
       if (e.isComposing || e.keyCode === 229 || (e.key !== "Escape" && e.key !== "Enter")) return;
       e.preventDefault();
       e.stopPropagation();  // 不讓這一下再傳到後面的格子上
-      if (e.key === "Escape") done(null); else ok();
+      if (e.key === "Escape") cancel(); else ok();
     };
     // 雙擊的第二下不算：第一下已經答完這一題，下一題的對話框可能正好開在同一個位置
     $("dlgOk").onclick = (e) => { if (e.detail < 2) ok(); };
-    $("dlgCancel").onclick = (e) => { if (e.detail < 2) done(null); };
+    $("dlgCancel").onclick = (e) => { if (e.detail < 2) cancel(); };
     document.addEventListener("keydown", key, true);
   }));
   return lastDialog;
@@ -282,7 +290,7 @@ window.addEventListener("blur", closeMenu);
 // 視窗取得焦點就重掃：在檔案總管新增、刪掉、改了模組，點回來就看得到（D11）
 window.addEventListener("pywebviewready", () => window.addEventListener("focus", () => api().rescan()));
 
-// ── Python 呼叫進來的七個入口（ui/web.py 的 WebPanel） ──
+// ── Python 呼叫進來的八個入口（ui/web.py 的 WebPanel） ──
 
 // 啟動時第一個收到：畫面文字、版本、是不是安全模式
 iplot.init = (data) => {
@@ -290,6 +298,7 @@ iplot.init = (data) => {
   document.title = T.title.replace("{version}", data.version) + (data.safe ? T.safe_mode : "");
   $("dlgOk").textContent = T.ok;
   $("dlgCancel").textContent = T.cancel;
+  $("dlgMuteText").textContent = T.offer_mute;
   render();
 };
 
@@ -325,3 +334,6 @@ iplot.ask = (id, prompt, initial) => { dialog("ask", prompt, initial).then((valu
 
 // 問「確定／取消」；送回 true 或 null
 iplot.confirm = (id, prompt) => { dialog("confirm", prompt).then((value) => api().answer(id, value)); };
+
+// 出錯了，要回報嗎（D150）；送回 {report, mute}
+iplot.offer = (id, prompt) => { dialog("offer", prompt).then((value) => api().answer(id, value)); };

@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.6.1")
+    assert core.__version__.startswith("0.6.2")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
