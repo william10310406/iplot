@@ -329,3 +329,83 @@ def test_button_never_runs_the_homework_file(course_mod, tmp_path, installing):
     app = CwApp(tmp_path)
     course_mod.course_button(app, course, popen=FakePopen(), apple_silicon=False)
     assert not (file.parent / "寫了.txt").exists() and not (tmp_path / "寫了.txt").exists()
+
+
+# ── D146：課的 .venv 壞了（建它的 Python 被移除或升版）：問要不要重建，確定了用 --clear 重建 ──
+
+def broken_venv_of(course):
+    """像建 .venv 的 Python 被移掉：bin/python 是斷掉的連結。"""
+    python = course / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(course / "已經不在的" / "python3.13")
+    return python
+
+
+class BrokenPopen(FakePopen):
+    """斷掉的連結叫不起來（FileNotFoundError，跟真的一樣）；建 venv 那一次把它換成一個檔（重建好了）。"""
+
+    def __init__(self, python, **kw):
+        super().__init__(**kw)
+        self.python = python
+
+    def __call__(self, argv, **kwargs):
+        if argv[0] == str(self.python) and not self.python.exists():
+            raise FileNotFoundError(2, "No such file or directory", str(self.python))
+        if argv[1:3] == ["-m", "venv"]:
+            self.python.unlink()
+            self.python.write_text("", encoding="utf-8")
+        return super().__call__(argv, **kwargs)
+
+
+def test_venv_python_counts_a_broken_link_as_built(course_mod, tmp_path):
+    python = broken_venv_of(tmp_path)
+    assert course_mod.venv_python(tmp_path) == python  # 不是「還沒建」：建過、壞了
+
+
+def test_installed_says_the_venv_is_broken_when_its_python_cannot_run(course_mod, tmp_path):
+    python = broken_venv_of(tmp_path)
+    with pytest.raises(course_mod.BrokenVenv):
+        course_mod.installed(python, popen=BrokenPopen(python))
+    with pytest.raises(course_mod.BrokenVenv):  # 叫得起來、但一跑就失敗（例如 dyld 找不到 Python 的程式庫）
+        course_mod.installed(tmp_path / "python", popen=FakePopen(fail=lambda a: True))
+
+
+def test_ensure_venv_clear_rebuilds_with_dash_dash_clear(course_mod, tmp_path, installing):
+    broken_venv_of(tmp_path)
+    popen = FakePopen()
+    course_mod.ensure_venv(tmp_path / ".venv", print, popen=popen, python="/x/python3", clear=True)
+    assert argvs(popen) == [["/x/python3", "-m", "venv", "--clear", str(tmp_path / ".venv")]]
+
+
+def test_ensure_venv_clear_really_fixes_a_broken_link(course_mod, tmp_path, installing):
+    """真的跑 python -m venv --clear：斷掉的連結換成能跑的 Python（不帶 --clear 蓋上去修不好，最終審查 2.2）。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    python = broken_venv_of(tmp_path)
+    base = str(Path(sys._base_executable).resolve())
+    assert course_mod.ensure_venv(tmp_path / ".venv", print, popen=subprocess.Popen, python=base, clear=True) == python
+    assert subprocess.run([str(python), "-c", "import sys; assert sys.prefix != sys.base_prefix"]).returncode == 0
+
+
+def test_button_with_a_broken_venv_asks_to_rebuild_and_rebuilds_with_clear(course_mod, tmp_path, installing):
+    course = make_course(tmp_path)
+    make_homework(course, 1, src("numpy"))
+    python = broken_venv_of(course)
+    app, popen = CwApp(tmp_path), BrokenPopen(python)
+    course_mod.course_button(app, course, popen=popen, apple_silicon=False)
+    [ask] = app.confirms
+    assert "壞了" in ask and "清掉重建" in ask and "numpy" in ask and "matplotlib" in ask
+    assert [a[1:4] for a in argvs(popen) if a[1:3] == ["-m", "venv"]] == [["-m", "venv", "--clear"]]
+    assert pips(popen) == ["matplotlib", "numpy"] and "已裝 matplotlib、numpy" in app.logs[-1]
+
+
+def test_button_with_a_broken_venv_cancel_touches_nothing(course_mod, tmp_path, installing):
+    course = make_course(tmp_path)
+    make_homework(course, 1, src("numpy"))
+    python = broken_venv_of(course)
+    app, popen = CwApp(tmp_path), BrokenPopen(python)
+    app.answers = [False]
+    course_mod.course_button(app, course, popen=popen, apple_silicon=False)
+    assert argvs(popen) == [] and python.is_symlink() and app.logs[-1] == "沒裝"

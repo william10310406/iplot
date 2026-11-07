@@ -43,6 +43,10 @@ class CourseError(ValueError):
     """課程.py 讀不了或寫得不對：訊息是一句中文，有行號時含「第 n 行」。"""
 
 
+class BrokenVenv(RuntimeError):
+    """課的 .venv 建過、但它的 Python 叫不起來或一跑就失敗（建它的 Python 被移掉或升版，D146）。"""
+
+
 @dataclass(frozen=True)
 class Course:
     folder: Path
@@ -228,36 +232,43 @@ def python_in(venv_dir: Path) -> Path:
 
 
 def venv_python(course: Path | None) -> Path | None:
-    """課 .venv 的 Python；還沒建（或 course 是 None）回 None。"""
+    """課 .venv 的 Python；還沒建（或 course 是 None）回 None。斷掉的連結也算建過（壞了，D146），回它。"""
     if course is None:
         return None
     python = python_in(Path(course) / ".venv")
-    return python if python.is_file() else None
+    return python if python.is_file() or python.is_symlink() else None
 
 
 def _normal(dist: str) -> str:
     return re.sub(r"[-_.]+", "-", dist).lower()
 
 
-def ensure_venv(venv_dir: Path, say, popen=subprocess.Popen, python: str = sys.executable) -> Path:
-    """venv_dir 的 Python；還沒有就用 python -m venv 建（不帶 --system-site-packages）。"""
+def ensure_venv(venv_dir: Path, say, popen=subprocess.Popen, python: str = sys.executable, clear: bool = False) -> Path:
+    """venv_dir 的 Python；還沒有就用 python -m venv 建（不帶 --system-site-packages）。
+    clear：壞掉的 .venv 用 --clear 清空重建，不蓋在壞的上面（D146）。"""
     venv_dir = Path(venv_dir)
     exe = python_in(venv_dir)
-    if exe.is_file():
+    if exe.is_file() and not clear:
         return exe
     if os.environ.get(NO_INSTALL):
         raise RuntimeError(f"{NO_INSTALL}：不建 .venv")
-    say(f"在建 {venv_dir.parent.name}/{venv_dir.name} …")
-    code = popen([str(python), "-m", "venv", str(venv_dir)]).wait()
+    say(f"在{'重建' if clear else '建'} {venv_dir.parent.name}/{venv_dir.name} …")
+    code = popen([str(python), "-m", "venv", *(["--clear"] if clear else []), str(venv_dir)]).wait()
     if code != 0:
         raise RuntimeError(f"建不了 {venv_dir}：代碼 {code}")
     return exe
 
 
 def installed(python: Path, popen=subprocess.Popen) -> set[str]:
-    """python 那個環境裝了哪些套件（名字正規化成小寫、- 連接）；問不到回空集合。"""
-    proc = popen([str(python), "-c", LIST_INSTALLED], stdout=subprocess.PIPE, text=True)
-    out, _ = proc.communicate()
+    """python 那個環境裝了哪些套件（名字正規化成小寫、- 連接）；回答讀不懂回空集合。
+    python 叫不起來（OSError）或結束碼不是 0 → BrokenVenv（D146）。"""
+    try:
+        proc = popen([str(python), "-c", LIST_INSTALLED], stdout=subprocess.PIPE, text=True)
+        out, _ = proc.communicate()
+    except OSError as exc:
+        raise BrokenVenv(str(exc)) from exc
+    if proc.returncode:
+        raise BrokenVenv(f"結束碼 {proc.returncode}")
     try:
         return {_normal(n) for n in json.loads(out)}
     except (ValueError, TypeError):
@@ -311,6 +322,19 @@ def summary_of_install(ok, failed) -> str:
     if failed:
         parts.append("裝不了 " + "、".join(f"{p}（{why}）" for p, why in failed))
     return "；".join(parts)
+
+
+BROKEN_SAYS = "壞了（建它的 Python 已經不在、或換了版本）"  # D146
+
+
+def _pending(python: Path | None, need, popen) -> tuple[list[str], bool]:
+    """（need 裡課的 .venv 還沒有的, .venv 壞了沒）：還沒建或壞了就是全部。"""
+    if python is None:
+        return list(need), False
+    try:
+        return (missing(python, need, popen) if need else []), False
+    except BrokenVenv:
+        return list(need), True
 
 
 # ── 課那一格 ──
@@ -392,7 +416,8 @@ def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool
         if users:
             note += f"，用到它的作業 {'、'.join(users)} 在這裡看不了"
     python = venv_python(folder)
-    pending = [(label, pkgs if python is None else missing(python, pkgs, popen), size)
+    broken = python is not None and _pending(python, ["pip"], popen)[1]
+    pending = [(label, pkgs if python is None or broken else missing(python, pkgs, popen), size)
                for label, pkgs, size in batches if pkgs]
     pending = [item for item in pending if item[1]]
     if not pending:
@@ -404,12 +429,13 @@ def course_button(app, folder: Path, popen=subprocess.Popen, apple_silicon: bool
         app.log(f"{NO_INSTALL}：不建 .venv、不裝套件（還缺 {'、'.join(need)}）")
         return
     ask = f"要裝{course.name}的課程套件嗎？{label}{'、'.join(need)}。{size + '，' if size else ''}裝進 {folder.name}/.venv" \
-          + ("（還沒建，會先建）" if python is None else "") + "；網路慢的話要很久，裝的時候別的按鈕要等它裝完"
+          + ("（還沒建，會先建）" if python is None else f"（{BROKEN_SAYS}，會先清掉重建）" if broken else "") \
+          + "；網路慢的話要很久，裝的時候別的按鈕要等它裝完"
     if not app.confirm(f"{ask}。{note}" if note else ask):
         app.log("沒裝")
         return
     try:
-        python = ensure_venv(folder / ".venv", say=app.log, popen=popen)
+        python = ensure_venv(folder / ".venv", say=app.log, popen=popen, clear=broken)
     except RuntimeError as exc:
         app.log(str(exc))
         return
@@ -608,6 +634,7 @@ def _watch(proc, kind, file: Path, python: Path, popen, log) -> None:
 def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool, shell_only=()) -> bool:
     """課的 .venv 在、need（這份作業的 REQUIRES 加上殼要的）都裝了就 True；不然問一次、建、裝，裝好了才 True。
     ONLY_ON 的套件在不對的機器上：不裝、不跑。.venv 不在而 need 是空的：也問一次、建空的 .venv。
+    .venv 壞了（BrokenVenv）：問一次要不要清掉重建，確定了用 --clear 重建、重裝 need（D146）。
     shell_only 是 need 裡只有殼要的（REQUIRES 沒寫），問的句子說它是做什麼的（D145）。"""
     off = {_normal(p) for p in course.only_on} if not apple else set()
     blocked = [p for p in need if _normal(p) in off]
@@ -616,15 +643,17 @@ def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool, 
         return False
     venv = course.folder / ".venv"
     python = venv_python(course.folder)
-    lack = list(need) if python is None else (missing(python, need, popen) if need else [])
-    if python is not None and not lack:
+    lack, broken = _pending(python, need, popen)
+    if python is not None and not broken and not lack:
         return True
     where = f"{course.folder.name}/.venv"
     if os.environ.get(NO_INSTALL):
-        what = f"還缺 {'、'.join(lack)}" if lack else f"{where} 還沒建"
+        what = f"{where} {BROKEN_SAYS}" if broken else f"還缺 {'、'.join(lack)}" if lack else f"{where} 還沒建"
         app.log(f"{NO_INSTALL}：不建 .venv、不裝套件（{what}），沒跑")
         return False
-    if python is None:
+    if broken:
+        ask = f"{where} {BROKEN_SAYS}：要清掉重建" + (f"，並裝 {'、'.join(lack)} 嗎？" if lack else " 嗎？")
+    elif python is None:
         ask = f"這門課的 .venv 還沒建：要建在 {where}" + (f"，並裝 {'、'.join(lack)} 嗎？" if lack
                                                           else f" 嗎？{code} 沒有要裝的套件")
     else:
@@ -633,10 +662,10 @@ def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool, 
     if why:
         ask += f"（{'、'.join(why)} 是在 iPLoT 裡開視窗用的）"
     if not app.confirm(ask + ("（網路慢的話要很久，裝的時候別的按鈕要等它裝完）" if lack else "")):
-        app.log("沒裝，沒跑")
+        app.log("沒重建，沒跑" if broken else "沒裝，沒跑")
         return False
     try:
-        python = ensure_venv(venv, say=app.log, popen=popen)
+        python = ensure_venv(venv, say=app.log, popen=popen, clear=broken)
     except RuntimeError as exc:
         app.log(f"{exc}，沒跑")
         return False

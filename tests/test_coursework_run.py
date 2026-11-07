@@ -677,3 +677,66 @@ def test_real_case_error_is_shown_by_the_shell_not_again(course_mod, real):
                     encoding="utf-8")
     press(course_mod, file, "1", popen=popen)
     assert shown == []  # 殼自己開了錯誤視窗（Agg 下 show 不開東西），框架不再開
+
+
+# ── D146：課的 .venv 壞了：作業那一格問要不要重建，不說成「讀不了 HK1.py」 ──
+
+def broken_course(tmp_path):
+    course = make_course(tmp_path)
+    file = template_homework(course)
+    python = course / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(tmp_path / "已經不在的" / "python3.13")
+    return course, file, python
+
+
+def broken_popen(python, installed=HAVE):
+    fake = popen_with(installed)
+
+    def popen(argv, **kw):
+        if argv[0] == str(python) and not python.exists():
+            raise FileNotFoundError(2, "No such file or directory", str(python))
+        if argv[1:3] == ["-m", "venv"]:
+            python.unlink()
+            python.write_text("", encoding="utf-8")
+        return fake(argv, **kw)
+
+    return popen, fake
+
+
+def test_broken_venv_asks_to_rebuild_then_installs_and_runs(course_mod, tmp_path, monkeypatch):
+    monkeypatch.delenv("CW_NO_INSTALL")
+    _, file, python = broken_course(tmp_path)
+    popen, fake = broken_popen(python, installed=[])
+    app, _ = press(course_mod, file, "1", popen=popen)
+    [ask] = app.confirms
+    assert ask.startswith("測試課/.venv 壞了（建它的 Python 已經不在、或換了版本）：要清掉重建，並裝 matplotlib、numpy 嗎？")
+    assert [argv[1:4] for argv, _ in fake.calls if argv[1:3] == ["-m", "venv"]] == [["-m", "venv", "--clear"]]
+    assert [argv[-1] for argv, _ in fake.calls if "pip" in argv] == ["matplotlib", "numpy"]
+    assert len(runs(fake, file)) == 1
+    assert not any("讀不了" in line or "Traceback" in line for line in app.logs)
+
+
+def test_broken_venv_cancel_rebuilds_nothing_and_runs_nothing(course_mod, tmp_path, monkeypatch):
+    monkeypatch.delenv("CW_NO_INSTALL")
+    _, file, python = broken_course(tmp_path)
+    popen, fake = broken_popen(python)
+    app, _ = press(course_mod, file, "1", popen=popen, confirms=[False])
+    assert len(app.confirms) == 1 and runs(fake, file) == [] and python.is_symlink()
+    assert app.logs[-1] == "沒重建，沒跑"
+
+
+def test_broken_venv_under_no_install_says_so(course_mod, tmp_path):
+    _, file, python = broken_course(tmp_path)
+    popen, fake = broken_popen(python)
+    app, _ = press(course_mod, file, "1", popen=popen)
+    assert app.confirms == [] and runs(fake, file) == []
+    assert "CW_NO_INSTALL" in app.logs[-1] and "壞了" in app.logs[-1] and "讀不了" not in app.logs[-1]
+
+
+def test_venv_python_that_runs_but_fails_counts_as_broken(course_mod, hw, monkeypatch):
+    monkeypatch.delenv("CW_NO_INSTALL")
+    _, file, _ = hw
+    popen = popen_with(fail=lambda argv: argv[1:2] == ["-c"])
+    app, _ = press(course_mod, file, "1", popen=popen, confirms=[False])
+    assert len(app.confirms) == 1 and "壞了" in app.confirms[0]
