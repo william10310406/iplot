@@ -12,7 +12,7 @@
    - Linux：這一版沒有網頁面板，開的是 tkinter 面板。發行版的 Python 加上 `python3-tk` 套件（Debian／Ubuntu：`sudo apt install python3-tk`）。
 2. 到 [https://william10310406.github.io/iplot-workshop/](https://william10310406.github.io/iplot-workshop/) 下載 `iPLoT-vX.Y.Z.zip`（那一頁也列了工作坊裡的模組），解壓縮，資料夾放哪裡都可以（例如 `~/iPLoT`）。
 3. 啟動：
-   - macOS：雙擊 `iPLoT.command`。從網路下載的檔沒有 Apple 的簽章，macOS 會擋下來，要過一關（逐步的說明在 [docs/08_操作說明-0.6.1.md](docs/08_操作說明-0.6.1.md) 的第 6 步）：
+   - macOS：雙擊 `iPLoT.command`。從網路下載的檔沒有 Apple 的簽章，macOS 會擋下來，要過一關（逐步的說明在 [docs/08_操作說明-0.6.2.md](docs/08_操作說明-0.6.2.md) 的第 6 步）：
      - macOS 15 以後：跳出對話框時按「完成」；打開蘋果選單 → 系統設定 → 隱私權與安全性，捲到「安全性」那一段，按「iPLoT.command」旁邊的「強制打開」，再按一次「強制打開」，輸入密碼或用 Touch ID。之後再雙擊就會打開。
      - macOS 14 以前：不要直接雙擊；在 `iPLoT.command` 上按右鍵（或 Control＋按），選「打開」，對話框裡再按「打開」。
      - 不想走上面的步驟：在終端機執行 `xattr -dr com.apple.quarantine ~/iPLoT`（把路徑換成自己放 iPLoT 的資料夾），之後直接雙擊。
@@ -161,7 +161,7 @@ UPDATE_URL = "https://william10310406.github.io/iplot-workshop/update.json"
 WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"
 ```
 
-從 0.5.x 換上來的，照 CHANGELOG 0.6.1 那一段做（按「更新」跳出來的說明就是它；`docs/08_操作說明-0.6.1.md` 第 1.2 節）。從 0.5.0、0.5.1 換上來、沒做過 0.5.2 那兩件事的（`WORKSHOP_URL` 還指著 `iplot-workshop/index.json`，或 `modules/工作坊` 還沒照 0.5.2 的說明換過），照那一段最後幾句做：用 0.6.0 的包裡 `iPLoT-v0.6.0/modules` 的「回報與討論」「互通」「工作坊」換掉自己 `modules/` 裡的，把 `WORKSHOP_URL` 換成上面那一行，執行「重新啟動」，再在面板雙擊一次「互通」把捷徑重新做好（做法見 docs/08 第 1.2 節第 6 步）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
+從 0.5.x 換上來的，照 CHANGELOG 0.6.2 那一段做（按「更新」跳出來的說明就是它；`docs/08_操作說明-0.6.2.md` 第 1.2 節）。從 0.5.0、0.5.1 換上來、沒做過 0.5.2 那兩件事的（`WORKSHOP_URL` 還指著 `iplot-workshop/index.json`，或 `modules/工作坊` 還沒照 0.5.2 的說明換過），照那一段最後幾句做：用 0.6.0 的包裡 `iPLoT-v0.6.0/modules` 的「回報與討論」「互通」「工作坊」換掉自己 `modules/` 裡的，把 `WORKSHOP_URL` 換成上面那一行，執行「重新啟動」，再在面板雙擊一次「互通」把捷徑重新做好（做法見 docs/08 第 1.2 節第 6 步）。`WORKSHOP_URL` 還寫著 `iplot-workshop/index.json` 的話，看到的是凍結的舊清單：還裝得起來，只是不會有新模組。
 
 不想連網：把網址換成 `None`（不加引號），存檔，執行「重新啟動」；按下去只會說一句怎麼設定。要用別人放檔案的地方：換成那個人給的網址（字串，要加引號）。兩個可以只設一個。填的不是字串也不是 `None` 時，跟其他設定一樣：整份 `config.py` 用預設值啟動，並說哪一項不對。從 0.4.0 用手換上來、`config.py` 裡還沒有這兩行的話，照上面那三行自己加上去；不加等於沒設定（`None`）。
 
@@ -297,7 +297,7 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 
 ### 上傳自己的模組
 
-要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」和「以 MIT 授權公開」兩格、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.6.1.md](docs/08_操作說明-0.6.1.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
+要有 GitHub 帳號，只用瀏覽器，不用 git。在 Finder 對著模組資料夾按右鍵「壓縮」，打開 `https://github.com/william10310406/iplot-modules/issues/new/choose`，選「上傳模組」，把 zip 拖進去、勾「我知道…」和「以 MIT 授權公開」兩格、送出；傳上去的東西誰都看得到、誰都能下載執行，沒有人審查。細節與被退的原因見 [docs/08_操作說明-0.6.2.md](docs/08_操作說明-0.6.2.md) 第 9 節與 [iplot-modules 的 README](https://github.com/william10310406/iplot-modules#readme)。
 
 ## 在面板外打開模組
 
@@ -340,7 +340,7 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 - **「匯入作業包」**（在「科學計算」的下一層）：選老師的 `t2026fscSpace` 資料夾，每個 `HKn.txt` 長成一格。
 - **「收作業」**（同一層）：選 TronClass 下載的檔（一人一個 `.zip` 或 `.txt`，或全班一包的 zip），可以多選；檔名裡看得出 HKn 就收進那一份，看不出來會問一次。
 - **批次模式（不開面板）**：在 `modules/科學計算/` 裡執行 `python3 hk_tk.py --batch ~/Downloads/HK5.zip --kit ~/Downloads/t2026fscSpace`，收進 zip 旁邊的 `HK5_收件/`（套件裝進 zip 旁邊的 `科學計算-venv/`），開一個全班名單的視窗，雙擊一個就開；Windows 未經實機驗證。
-- 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.6.1.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
+- 怎麼收、怎麼看（HK9 要 Apple Silicon 的 Mac），見 [docs/08](docs/08_操作說明-0.6.2.md) 的「科學計算」一節；照新格式寫作業，見 [docs/09_作業規範.md](docs/09_作業規範.md)。
 
 ### 科學計算課的環境（.venv）
 
@@ -371,7 +371,7 @@ python3 tools/publish.py --version 0.6.0 --ref HEAD --base-url "file://$(pwd)/�
 
 ## 回報問題與討論
 
-錯誤訊息旁邊的「回報這個問題」（隨附的模組「回報與討論」）會先遮掉路徑與使用者名稱、給你看、讓你改，再用瀏覽器開到 `https://github.com/william10310406/iplot/discussions` 的新增頁，標題、內文都填好；雙擊面板上「回報與討論」這一格，可以回報沒有錯誤訊息的問題、提建議、問問題、看論壇。要有 GitHub 帳號，送出是你在瀏覽器裡按：iPLoT 不登入、不連網，只把內容填進網址交給瀏覽器。論壇是公開的，學生的名字請自己再看一次（錯誤訊息裡直接寫著的名字遮不到）。iPLoT 打不開的時候，直接到那個網址發；怎麼按、遮了什麼、沒遮什麼，見 [docs/08](docs/08_操作說明-0.6.1.md) 第 10 節。
+錯誤訊息旁邊的「回報這個問題」（隨附的模組「回報與討論」）會先遮掉路徑與使用者名稱、給你看、讓你改，再用瀏覽器開到 `https://github.com/william10310406/iplot/discussions` 的新增頁，標題、內文都填好；雙擊面板上「回報與討論」這一格，可以回報沒有錯誤訊息的問題、提建議、問問題、看論壇。要有 GitHub 帳號，送出是你在瀏覽器裡按：iPLoT 不登入、不連網，只把內容填進網址交給瀏覽器。論壇是公開的，學生的名字請自己再看一次（錯誤訊息裡直接寫著的名字遮不到）。iPLoT 打不開的時候，直接到那個網址發；怎麼按、遮了什麼、沒遮什麼，見 [docs/08](docs/08_操作說明-0.6.2.md) 第 10 節。
 
 ## 授權
 

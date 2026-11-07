@@ -88,6 +88,31 @@ def test_0_6_1_notes_carry_both_paths():
     assert notes.index("「互通」按「覆蓋」或「更新」") < notes.index("再回來按「更新」")
 
 
-def test_docs_08_repeats_the_0_6_1_notes():
-    doc = (ROOT / "docs" / "08_操作說明-0.6.1.md").read_text(encoding="utf-8")
-    assert _notes("0.6.1") in doc
+def test_0_6_2_notes_carry_both_paths():
+    """0.6.2 的「要更新嗎？」：0.6.0、0.6.1 的人直接按「確定」；還在 0.5.x 的人看到的也只有這一段，
+    所以「先到工作坊換互通、再按更新」的退路照樣帶著（版本號換成 0.6.2）。"""
+    notes = _notes("0.6.2")
+    assert notes
+    assert "\n" not in notes
+    assert "`" not in notes
+    for part in (
+        "出錯了，要回報嗎？",
+        "這次執行期間不要再問",
+        "學生作業出錯不會問",
+        "已經是 0.6.0 或 0.6.1 的人：按「確定」",
+        "還在 0.5.x 的人請先按「取消」",
+        "互通 0.1.0 支援 iPLoT 0.5",
+        ".backup/download-0.6.2.zip",
+        "iPLoT-v0.6.2/modules",
+        'WORKSHOP_URL = "https://william10310406.github.io/iplot-modules/index.json"',
+        "雙擊一次「互通」",
+        "按送出前，請先看一下 GitHub 內文裡有沒有人名或學號，有的話不要送出，直接告訴我。",
+    ):
+        assert part in notes, part
+    assert "0.6.1.zip" not in notes and "iPLoT-v0.6.1" not in notes
+    assert notes.index("「互通」按「覆蓋」或「更新」") < notes.index("再回來按「更新」")
+
+
+def test_docs_08_repeats_the_0_6_2_notes():
+    doc = (ROOT / "docs" / "08_操作說明-0.6.2.md").read_text(encoding="utf-8")
+    assert _notes("0.6.2") in doc
