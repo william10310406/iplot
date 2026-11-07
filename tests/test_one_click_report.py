@@ -4,13 +4,15 @@
 # ruff: noqa: F811  load、opened、web 是從 test_report 匯進來的 fixture，測試的參數同名是 pytest 的用法
 
 import getpass
+import importlib.util
 import json
+import shutil
 import sys
 import threading
 from pathlib import Path
 
 import pytest
-from conftest import FakeView, FakeWebview, make_module, until
+from conftest import FakeApp, FakeView, FakeWebview, make_module, until
 from test_report import (  # noqa: F401
     MODULE,
     load,
@@ -517,3 +519,138 @@ def test_core_logic_is_untouched_by_m9():
     from test_budget import core_logic
     assert sum(core_logic().values()) == 501
 
+
+
+# ── 學生作業的錯誤不自動問（D150 修訂）──
+
+HK_TK = MODULE.parent / "科學計算" / "hk_tk.py"
+
+
+def course_tree(home, student_src="import hk_page\nscore = 1 / 0\n"):
+    """照「科學計算」收作業放出來的樣子：<課程>/HK5/<學生>/ 裡是學生的 iplot.py 與殼 hk_page.py（新格式），
+    課程資料夾有 hk_tk.py（用真的那一份）。回 (課程, 學生資料夾)。"""
+    course = home / "modules" / "科學計算"
+    course.mkdir(parents=True)
+    shutil.copy2(HK_TK, course / "hk_tk.py")
+    make_module(course, "HK5", "def run(app):\n    pass\n")
+    student = make_module(course / "HK5", "王小明_B11201234", student_src)
+    (student / "hk_page.py").write_text("def boom():\n    raise RuntimeError('殼壞了')\n", encoding="utf-8")
+    return course, student
+
+
+def run_error(home, folder, level="child"):
+    from core.runner import run_module
+    from core.scan import module_info
+
+    error = run_module(module_info(folder, (home / "modules").resolve(), level), FakeApp(home)).error
+    assert error is not None
+    return error
+
+
+def test_student_homework_error_is_not_offered(home):
+    _, student = course_tree(home)
+    error = run_error(home, student)
+    assert error.kind == "ZeroDivisionError" and error.file == student / "iplot.py"
+    assert errlog.student_homework(error)
+    assert not errlog.Offer(clock=Clock()).due(error)
+
+
+def test_student_syntax_error_is_not_offered(home):
+    _, student = course_tree(home, "import hk_page\ndef compute(case:\n")
+    error = run_error(home, student)
+    assert error.kind == "SyntaxError" and errlog.student_homework(error)
+
+
+def test_student_error_in_a_library_call_is_still_the_students(home):
+    # 學生把 json.loads 用錯：traceback 最後一格在標準庫裡，模組資料夾裡最內層的那一格是學生的檔
+    _, student = course_tree(home, "import hk_page\nimport json\njson.loads('{')\n")
+    error = run_error(home, student)
+    assert error.kind == "JSONDecodeError" and errlog.student_homework(error)
+
+
+def test_error_in_the_shell_next_to_the_student_is_offered(home):
+    # 殼 hk_page.py 是 iPLoT 這邊的程式：它壞了照常問
+    _, student = course_tree(home, "import hk_page\nhk_page.boom()\n")
+    error = run_error(home, student)
+    assert error.file == student / "hk_page.py"
+    assert not errlog.student_homework(error) and errlog.Offer(clock=Clock()).due(error)
+
+
+def test_old_format_student_folder_is_offered(home):
+    # 舊格式的學生資料夾：iplot.py 是 iPLoT 寫的墊片（學生的 HKn.txt 在另開的程序裡跑），墊片壞了是 iPLoT 的事
+    course, student = course_tree(home, "raise RuntimeError('墊片壞了')\n")
+    (student / "hk_page.py").unlink()
+    (student / "t2026fscSpace").mkdir()
+    (student / "t2026fscSpace" / "HK5.txt").write_text("def HK5():\n    LF_subWIN\n", encoding="utf-8")
+    error = run_error(home, student)
+    assert not errlog.student_homework(error) and errlog.Offer(clock=Clock()).due(error)
+
+
+def test_same_shape_outside_a_course_is_offered(home):
+    # 沒有 hk_tk.py 的上上層：不是科學計算的課，只是長得像
+    folder = make_module(make_module(home / "modules", "別的", "def run(app):\n    pass\n"), "子", "x = 1 / 0\n")
+    (folder / "hk_page.py").write_text("", encoding="utf-8")
+    assert not errlog.student_homework(run_error(home, folder))
+
+
+def test_course_and_hk_level_errors_are_offered(home):
+    course, _ = course_tree(home)
+    (course / "HK5" / "iplot.py").write_text("x = 1 / 0\n", encoding="utf-8")  # 老師那一層（HKn 的墊片）
+    assert not errlog.student_homework(run_error(home, course / "HK5"))
+    (course / "iplot.py").write_text("x = 1 / 0\n", encoding="utf-8")
+    assert not errlog.student_homework(run_error(home, course, "here"))
+
+
+def test_core_and_config_errors_are_never_student_homework():
+    assert not errlog.student_homework(other(source="core", module=None))
+    assert not errlog.student_homework(other(file=None))
+
+
+def test_symlinked_student_folder_is_offered(home, tmp_path):
+    _, student = course_tree(home)
+    link = student.parent / "連結"
+    try:
+        link.symlink_to(student, target_is_directory=True)
+    except OSError:
+        pytest.skip("這台不能建符號連結")
+    error = other(file=link / "iplot.py", module="連結")
+    assert not errlog.student_homework(error)
+
+
+def test_student_rule_matches_science_courses_own(home, load):
+    """照「科學計算」自己的判斷（hk_tk._is_student、_is_new_folder、course_root）：同一棵樹上說法一樣。"""
+    course, student = course_tree(home)
+    spec = importlib.util.spec_from_file_location("hk_tk_for_test", HK_TK)
+    hk_tk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hk_tk)
+    assert hk_tk._is_student(student, "HK5") and hk_tk._is_new_folder(student)
+    assert hk_tk.course_root(student) == course.resolve()
+    assert errlog.student_homework(run_error(home, student))
+
+
+def test_student_error_is_not_written_as_the_last_error(home):
+    errlog.write(home, ERR, ["原本那一筆"])
+    _, student = course_tree(home)
+    errlog.write(home, run_error(home, student), ["學生的"])
+    assert json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))["recent"] == ["原本那一筆"]
+
+
+def test_web_student_error_keeps_the_button_but_does_not_ask(live, home):
+    from core.scan import module_info
+
+    panel, window = live
+    install_reporter(home, ON_ERROR)
+    _, student = course_tree(home)
+    info = module_info(student, (home / "modules").resolve(), "child")
+    panel.submit(lambda: panel.press(panel.core, info))
+    panel.wait()
+    row = window.calls("report")[-1][0]
+    assert row["kind"] == "ZeroDivisionError" and row["reportable"]  # 「回報這個問題」照樣在
+    assert not offers(window)
+    bridge = window.kw["js_api"]
+    bridge.report_error(row["id"])  # 按那一列的鈕：照樣交給 on_error
+    panel.wait()
+    assert (home / "got.txt").read_text() == "ZeroDivisionError\n"
+    crash(panel, home)  # iPLoT 這邊的模組出錯：照常問
+    answer_offer(panel, window, {"report": False, "mute": False})
+    assert len(offers(window)) == 1
