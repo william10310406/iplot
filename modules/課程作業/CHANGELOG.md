@@ -2,7 +2,7 @@
 
 「課程作業」這個模組的版本紀錄，格式跟 iPLoT 的 CHANGELOG.md 一樣（[Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)）。
 
-## [0.1.0] - 未發佈
+## [0.1.0] - 2026-11-07
 
 第一版：出作業的老師從範本寫一份作業、在 iPLoT 裡選一個 case 看結果、按「檢查與打包」得到學生包；學生在自己的電腦上照 README 跑。跟科目無關，核心一行都不改。
 
