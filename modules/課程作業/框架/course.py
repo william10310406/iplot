@@ -451,7 +451,7 @@ def _course_button(app, folder: Path, popen, apple_silicon: bool | None) -> None
         app.log(f"{NO_INSTALL}：不建 .venv、不裝套件（還缺 {'、'.join(need)}）")
         return
     ask = f"要裝{course.name}的課程套件嗎？{label}{'、'.join(need)}。{size + '，' if size else ''}裝進 {folder.name}/.venv" \
-          + ("（還沒建，會先建）" if python is None else f"（{BROKEN_SAYS}，會先清掉重建）" if broken else "") \
+          + ("（還沒建，會先建）" if python is None else "（這個 .venv 壞了：建它的 Python 已經不在、或換了版本，會先清掉重建）" if broken else "") \
           + "；網路慢的話要很久，裝的時候別的按鈕要等它裝完"
     if not app.confirm(f"{ask}。{note}" if note else ask):
         app.log("沒裝")

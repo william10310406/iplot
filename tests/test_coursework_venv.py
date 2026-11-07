@@ -397,6 +397,7 @@ def test_button_with_a_broken_venv_asks_to_rebuild_and_rebuilds_with_clear(cours
     course_mod.course_button(app, course, popen=popen, apple_silicon=False)
     [ask] = app.confirms
     assert "壞了" in ask and "清掉重建" in ask and "numpy" in ask and "matplotlib" in ask
+    assert "裝進 測試課/.venv（這個 .venv 壞了：建它的 Python 已經不在、或換了版本，會先清掉重建）" in ask  # 不是括號套括號
     assert [a[1:4] for a in argvs(popen) if a[1:3] == ["-m", "venv"]] == [["-m", "venv", "--clear"]]
     assert pips(popen) == ["matplotlib", "numpy"] and "已裝 matplotlib、numpy" in app.logs[-1]
 
