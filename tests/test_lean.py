@@ -56,14 +56,6 @@ def opened(monkeypatch):
     return calls
 
 
-class PageApp(FakeApp):
-    """網頁面板的替身：頁面「開出來」時，那一頁的 JS 會叫 api.shown()。"""
-
-    def page(self, title, html, api=None):
-        super().page(title, html, api)
-        api.shown()
-
-
 def test_meta_is_chinese_with_an_icon():
     m = read_meta(MODULE / "iplot.py")
     assert m.icon == "📐"
@@ -75,26 +67,24 @@ def test_changelog_top_section_is_0_1_0_with_a_first_paragraph():
     top = text[text.index("## ["):]
     assert top.startswith("## [0.1.0] - 2026-11-10\n\n")
     first = top.split("\n\n")[1]
-    assert "Lean 實數遊戲" in first and "需要網路" in first
+    assert "Lean 實數遊戲" in first and "需要網路" in first and "瀏覽器" in first
 
 
-def test_web_panel_opens_the_page_and_does_not_open_a_browser(lean, online, opened, tmp_path):
-    app = PageApp(tmp_path)
+def test_press_says_what_it_is_then_opens_the_browser_once(lean, online, opened, tmp_path):
+    app = FakeApp(tmp_path)
     lean.run(app)
     assert online == [lean.CHECK_URL]
-    [(title, html, api)] = app.pages
-    assert title == "Lean 實數遊戲" and isinstance(api, lean.Api)
-    assert opened == []
-    assert app.logs[0] == lean.INTRO and "需要網路" in app.logs[0] and "不用安裝" in app.logs[0]
-    assert app.logs[-1] == lean.CLOSED
-
-
-def test_panel_without_pages_falls_back_to_the_browser(lean, online, opened, tmp_path):
-    app = FakeApp(tmp_path)  # tkinter 面板：page 只記一行就回來，那一頁的 JS 從沒跑過
-    lean.run(app)
-    assert len(app.pages) == 1
     assert opened == [GAME]
-    assert app.logs == [lean.INTRO, lean.NO_PAGE, lean.OPENED]
+    assert app.logs == [lean.INTRO, lean.OPENED]
+    intro = app.logs[0]
+    assert "需要網路" in intro and "不用安裝" in intro and "進度存在" in intro and "瀏覽器" in intro
+
+
+def test_never_opens_a_page_of_its_own(lean, online, tmp_path):
+    app = FakeApp(tmp_path)
+    lean.run(app)
+    assert app.pages == []
+    assert not hasattr(lean, "Api") and not hasattr(lean, "page")
 
 
 @pytest.mark.parametrize("trouble", [
@@ -107,7 +97,7 @@ def test_unreachable_server_is_one_sentence_and_opens_nothing(lean, opened, monk
     def boom(url, **k):
         raise trouble
     monkeypatch.setattr(urllib.request, "urlopen", boom)
-    app = PageApp(tmp_path)
+    app = FakeApp(tmp_path)
     lean.run(app)  # 不丟例外
     assert app.pages == [] and opened == []
     assert app.logs[0] == lean.INTRO
@@ -124,28 +114,7 @@ def test_browser_that_cannot_open_gives_the_url_to_copy(lean, monkeypatch):
     assert GAME in lean.open_browser()
 
 
-def test_page_button_opens_the_browser_and_returns_a_sentence(lean, opened):
-    api = lean.Api()
-    assert api.browser() == lean.OPENED and opened == [GAME]
-
-
-def test_api_exposes_only_shown_and_browser_and_takes_no_app(lean):
-    api = lean.Api()
-    public = sorted(n for n in dir(api) if not n.startswith("_"))
-    assert public == ["browser", "shown"]
-    assert all(n.startswith("_") for n in vars(api))
-
-
-def test_page_loads_no_external_resources_and_navigates_only_to_the_game(lean):
-    html = lean.page()
-    assert re.findall(r"https?://[^\s\"'<>]+", html) == [GAME]
-    assert not re.search(r"""(src|href)\s*=\s*["']?https?:""", html, re.I)
-    assert "<link" not in html and "@import" not in html
-    assert f"const GAME = \"{GAME}\";" in html
-
-
-def test_page_without_pywebview_api_is_reported_by_flag_only(lean):
-    api = lean.Api()
-    assert api._shown is False
-    api.shown()
-    assert api._shown is True
+def test_module_has_no_page_and_loads_nothing_external(lean):
+    source = (MODULE / "iplot.py").read_text(encoding="utf-8")
+    assert "app.page" not in source and "<html" not in source
+    assert re.findall(r"https?://[^\s\"'<>]+", source).count(GAME) == 1
