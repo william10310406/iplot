@@ -91,8 +91,11 @@ list.addEventListener("click", (e) => {
   const enable = (on) => { for (const b of act.querySelectorAll("button")) b.disabled = !on; };
   const failed = (text) => { cell.textContent = text; cell.classList.add("bad"); enable(true); };
   enable(false);
+  const before = cell.textContent;  // 要確認、或失敗時換回來
+  cell.textContent = "安裝中…";
+  cell.classList.remove("bad");
   window.pywebview.api.install(main.dataset.name, main.dataset.sure === "1").then((answer) => {
-    if (answer === "需要確認") { enable(true); if (main.dataset.sure !== "1") ask(main, act); return; }
+    if (answer === "需要確認") { cell.textContent = before; enable(true); if (main.dataset.sure !== "1") ask(main, act); return; }
     if (answer.startsWith("無法安裝")) { failed(answer); return; }
     cell.textContent = answer;
     cell.classList.remove("bad");

@@ -1118,3 +1118,12 @@ def test_an_unreadable_listing_does_not_show_the_json_parser_text(mods, tmp_path
     app = FakeApp(mods.parent, workshop_url=wrong.as_uri())
     run(app)
     assert "格式不對" in app.logs[0], "我們自己寫的中文原因保留"
+
+
+def test_the_page_shows_progress_while_installing():
+    """體驗 3-03：頁面是 JS，這裡只釘住順序與字：按下去先換成「安裝中…」才呼叫 Python；要確認時換回原來的字。
+    （沒有可以跑 JS 的環境，所以是字串順序的檢查，不是執行。）"""
+    page = (MODULE / "page.html").read_text(encoding="utf-8")
+    progress, call = page.index('cell.textContent = "安裝中…"'), page.index("window.pywebview.api.install(")
+    assert progress < call, "先顯示進行中，再等 Python"
+    assert 'if (answer === "需要確認") { cell.textContent = before;' in page, "要確認的時候不能留在「安裝中…」"
