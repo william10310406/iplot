@@ -31,7 +31,9 @@ def run(app):
         return app.log(f"更新來源的 update.json 少了 {exc} 這一項，沒有更新")
     except update.NETWORK as exc:  # 要排在 ValueError 前面：憑證驗證失敗兩種都是
         return app.log(f"沒有更新：{update.plain(exc)}。也請確認 config.py 的 UPDATE_URL 沒有寫錯。")
-    except ValueError as exc:  # sha256 對不上、update.json 不是 JSON、欄位不是文字
+    except ValueError as exc:  # sha256 對不上、欄位不是文字（自己寫的中文原因照留）；JSON 解析器的英文原文不給人看
+        if type(exc) is not ValueError:
+            return app.log("沒有更新：update.json 讀不懂（看 config.py 的 UPDATE_URL 是不是指到 update.json）")
         return app.log(f"沒有更新：{exc}（update.json 或下載的檔案有問題）")
     saved = None
     try:  # 動到檔案的這一段：備份、換上去

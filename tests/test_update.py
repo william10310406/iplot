@@ -575,3 +575,16 @@ def test_a_mistyped_url_does_not_show_the_python_text(iplot, home, url):
     [line] = app.logs
     assert "UPDATE_URL" in line and "zip_url" in line
     assert not any(w in line for w in ("nonnumeric", "port", "control characters", "URL can't", "InvalidURL", "found at least"))
+
+
+def test_a_broken_update_json_does_not_show_the_json_parser_text(home, source):
+    """體驗 5-03：update.json 不是 JSON 時，不貼 `Expecting value: line 1 column 1 (char 0)`，說讀不懂並指到 UPDATE_URL。"""
+    for body in (b"not json", b'{"version": "9"', b"\xff\xfe\x00"):
+        (source / "update.json").write_bytes(body)
+        app = FakeApp(home, update_url=(source / "update.json").as_uri())
+        before = tree(home)
+        run(app)
+        [line] = app.logs
+        assert line.startswith("沒有更新：update.json 讀不懂") and "UPDATE_URL" in line, line
+        assert not any(w in line for w in ("Expecting", "line 1", "char ", "codec", "0xff", "Unterminated")), line
+        assert tree(home) == before
