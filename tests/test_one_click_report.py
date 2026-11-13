@@ -204,6 +204,36 @@ def crash(panel, home, name="壞掉"):
     until(lambda: len(panel.webview.windows[0].calls("report")) > before)
 
 
+ASKS = "def run(app):\n    app.log('before')\n    input('年齡')\n    app.log('after')\n"
+
+
+def test_web_cancelling_a_question_is_one_neutral_line_not_an_error(live, home):
+    # 體驗 2-08b：訊息區一行「模組『X』已取消」，沒有錯誤列（沒有「回報這個問題」）、沒有 EOFError、不問要不要回報
+    panel, window = live
+    install_reporter(home, ON_ERROR)
+    make_module(home / "modules", "提問", ASKS)
+    panel.submit(panel.core.rescan)
+    panel.wait()
+    info = next(m for m in panel.core.all_modules() if m.name == "提問")
+    done = threading.Thread(target=lambda: panel.press(panel.core, info))
+    done.start()
+    until(lambda: window.calls("ask"))
+    panel.answer(window.calls("ask")[0][0], None)
+    done.join(5)
+    panel.wait()
+    assert [T["module_cancelled"].format(module="提問")] in window.calls("log")
+    assert not window.calls("report") and not offers(window) and not panel.errors
+    assert not (home / "logs" / "last-error.json").exists()
+    assert all("EOFError" not in str(c) and "InputCancelled" not in str(c) for c in window.calls("log"))
+
+
+def test_web_a_modules_own_eoferror_is_still_an_error(live, home):
+    panel, window = live
+    make_module(home / "modules", "自己丟", "def run(app):\n    raise EOFError('自己丟的')\n")
+    crash(panel, home, "自己丟")
+    assert window.calls("report")[-1][0]["kind"] == "EOFError"
+
+
 def answer_offer(panel, window, value, n=1):
     until(lambda: len(offers(window)) >= n)
     panel.answer(offers(window)[n - 1][0], value)
@@ -337,6 +367,34 @@ def test_tk_offer_once_and_mute(home, monkeypatch):
         p.root.update()
         p.root.destroy()
     assert tkinter
+
+
+def test_tk_cancelling_a_question_is_one_neutral_line_not_an_error(home, monkeypatch):
+    pytest.importorskip("tkinter")
+    from conftest import new_tk
+    probe = new_tk()
+    probe.update()
+    probe.destroy()
+    from ui.tk import Panel
+
+    install_reporter(home, ON_ERROR)
+    p = Panel("0.6.2", safe=True)
+    try:
+        p.attach(Core(home, DEFAULT_CONFIG, p))
+        asked = []
+        monkeypatch.setattr(p, "ask_offer", lambda prompt: asked.append(prompt) or {"report": True, "mute": False})
+        p.report(other(kind="InputCancelled", message=T["input_cancelled"]))
+        p.root.update()
+        text = p.messages.get("1.0", "end")
+        assert T["module_cancelled"].format(module="科學計算") in text
+        assert "EOFError" not in text and "InputCancelled" not in text and T["report_issue"] not in text
+        assert not asked and not (home / "logs" / "last-error.json").exists()
+        p.report(other(kind="EOFError"))  # 模組自己丟的照舊是錯誤
+        p.root.update()
+        assert "EOFError" in p.messages.get("1.0", "end")
+    finally:
+        p.root.update()
+        p.root.destroy()
 
 
 # ── 「回報與討論」0.2.0：報告內容 ──

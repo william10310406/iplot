@@ -128,6 +128,9 @@ class Panel:
         """訊息區顯示完整 traceback，最後才是白話那一句和「打開檔案」：捲到底看到的是人話，不是 traceback。
         modules/回報與討論 是模組時多一顆「回報這個問題」，按了交給它的 on_error（D110）；也自動問一次要不要回報
         （這一輪事件做完才問，D150）。這一筆與最近的訊息寫進 logs/last-error.json。"""
+        if error.kind == "InputCancelled":  # 在提問框按了取消：自己的動作，訊息區只說一行，不是錯誤（體驗 2-08b）
+            self.log(T["module_cancelled"].format(module=error.module))
+            return
         self.recent.add(describe(error))
         errlog.write(self.core.home, error, self.recent.lines())
         buttons = []

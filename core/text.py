@@ -18,6 +18,7 @@ T: dict[str, str] = {
     "missing_handler": "iplot.py 沒有定義 {handler}(app)",
     "module_exit": "模組以 exit({code}) 結束",
     "input_cancelled": "在提問時按了取消",
+    "module_cancelled": "模組『{module}』已取消",
     "not_found": "找不到模組『{name}』",
     "ambiguous": "有兩個以上的模組叫『{name}』：{paths}",
     "file_unreadable": "iplot.py 讀不了：它的編碼不是 UTF-8、含有看不見的特殊字元，或是沒有讀取的權限。用文字編輯器打開，另存成 UTF-8",
