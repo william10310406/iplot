@@ -7,8 +7,8 @@
 ## 安裝
 
 1. 裝 Python 3.10 以上，要含 pip：
-   - macOS：Python 3.10 以上、有 pip 就可以，不必是 python.org 的（Homebrew 的照理也行，但沒有實測過）。[python.org 的安裝檔](https://www.python.org/downloads/)最省事：它內含 tkinter，安全模式和後備面板要用。開發和實測用的是 python.org 的 3.14。
-   - Windows：python.org 的安裝檔，安裝時勾選 tcl/tk（安全模式和後備面板要用）。網頁面板另外需要 Microsoft Edge WebView2 Runtime（Windows 11 內建）。**未經實機驗證。**
+   - macOS：Python 3.10 以上、有 pip 就可以，不必是 python.org 的（Homebrew 的照理也行，但沒有實測過）。[python.org 的安裝檔](https://www.python.org/downloads/)最省事：它內含 tkinter，安全模式和備用面板要用。開發和實測用的是 python.org 的 3.14。
+   - Windows：python.org 的安裝檔，安裝時勾選 tcl/tk（安全模式和備用面板要用）。網頁面板另外需要 Microsoft Edge WebView2 Runtime（Windows 11 內建）。**未經實機驗證。**
    - Linux：這一版沒有網頁面板，開的是 tkinter 面板。發行版的 Python 加上 `python3-tk` 套件（Debian／Ubuntu：`sudo apt install python3-tk`）。
 2. 到 [https://william10310406.github.io/iplot-workshop/](https://william10310406.github.io/iplot-workshop/) 下載 `iPLoT-vX.Y.Z.zip`（那一頁也列了工作坊裡的模組），解壓縮，資料夾放哪裡都可以（例如 `~/iPLoT`）。
 3. 啟動：
@@ -51,7 +51,7 @@ iPLoT 本身（`core/`、`ui/`、`lib/`、`modules/`、`logs/`、`.history/`、`
 - **什麼時候用**：網頁面板開不起來；模組要用 `turtle` 或 tkinter 開自己的視窗（在預設的面板上這類模組不會執行，訊息區會說要用安全模式）；上一層或 `config.py` 多掃的位置裡有東西讓面板出問題。
 - **長什麼樣**：標題是「iPLoT v0.6.2（安全模式）」；只掃 `modules/`，所以只有「這一層」；一欄文字按鈕，沒有圖示和狀態列，單擊就執行；右鍵四項（打開程式碼、在資料夾中顯示、在終端機打開、在這裡新增下一層模組…）；＋ 在每組標題的右邊。
 - **需要 tkinter**（python.org 的 Python 內含；Linux 裝 `python3-tk`）。沒有的話印一句「這個 Python 沒有 tkinter，安全模式與備用面板都開不了；請用 python.org 的版本」就結束。
-- **裝不起來時退到的是後備面板，不是安全模式**：沒有網路、pip 失敗、這個平台沒有網頁面板（Linux）、Windows 缺 WebView2 Runtime（這一項未經實機驗證）——iPLoT 在終端機說明原因，改開後備的 tkinter 面板，同樣的說明也寫在訊息區最前面。後備面板跟安全模式是同一個 tkinter 面板（一欄文字按鈕、單擊就執行、右鍵四項），差別在範圍：它照常掃上一層與 `ROOTS`，標題沒有「（安全模式）」。它一樣需要 tkinter。0.4.0 在這種時候是直接進安全模式，0.5.0 改了。
+- **裝不起來時退到的是備用面板，不是安全模式**：沒有網路、pip 失敗、這個平台沒有網頁面板（Linux）、Windows 缺 WebView2 Runtime（這一項未經實機驗證）——iPLoT 在終端機說明原因，改開後備的 tkinter 面板，同樣的說明也寫在訊息區最前面。備用面板跟安全模式是同一個 tkinter 面板（一欄文字按鈕、單擊就執行、右鍵四項），差別在範圍：它照常掃上一層與 `ROOTS`，標題沒有「（安全模式）」。它一樣需要 tkinter。0.4.0 在這種時候是直接進安全模式，0.5.0 改了。
 - **這兩種 tkinter 面板都沒有頁面**：模組用 `app.page` 開自己的一頁畫面時，只會在訊息區看到一句「這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用」。隨附的「工作坊」就是這種模組（見「更新與工作坊」）。
 
 連安全模式都開不起來（核心改壞了）：從 git（`git checkout -- core/ ui/`）或原本的壓縮檔把 `core/`、`ui/` 拿回來；用「更新」換過版本的話，換掉之前的那一份也在 `.backup/` 裡。
@@ -123,7 +123,7 @@ print("你的年齡是" + x + "歲")
 
 單擊選取，狀態列顯示它的說明；雙擊執行。右鍵有六項：「執行」「進入下一層」（有下一層才出現）「打開程式碼」「在資料夾中顯示」「在終端機打開」「在這裡新增下一層模組…」。視窗一取得焦點就重掃，在檔案總管建好資料夾點回來，新的一格就在。視窗可以拉大，格子自動重排；深色模式跟著系統。模組的 `input()` 和問名字都是面板裡的對話框（Enter 確定、Esc 取消）。
 
-這是預設的網頁面板；安全模式與後備面板的樣子不同，見上面「安全模式」。
+這是預設的網頁面板；安全模式與備用面板的樣子不同，見上面「安全模式」。
 
 ## 改外觀
 
@@ -149,7 +149,7 @@ print("你的年齡是" + x + "歲")
 
 平常不連網。只有按下去的那一次才連，iPLoT 不會自己去看有沒有新版。隨附的 `config.py` 已經填好這兩個來源（見「怎麼設定」），剛拿到的 iPLoT 按下去就有東西。把來源改成 `None` 就不連網：按了只會在訊息區說一句怎麼設定——不連網；除了每個模組執行前照例存進自己 `.history/` 的那一份 `iplot.py` 快照，不寫任何檔案；其他功能不受影響。
 
-這兩個功能只在 macOS 上驗過：自動測試與在真的視窗裡走的大部分用本機的 `file://` 網址；從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，2026-10-06 在 macOS 上用 `tests/acceptance_workshop.py` 走過一次（全部通過；確認框的長相、用瀏覽器看那一頁、沒有網路時的那一句，要人眼看的部分還沒做）。那一次的清單是 `iplot-workshop` 的舊清單；從 `iplot-modules` 的新清單讀、裝，還沒有對真的網址走過（要等種子收完，見「怎麼發佈」最後的驗收）。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與後備面板（所以 Linux 也是）沒有工作坊的清單頁。
+這兩個功能只在 macOS 上驗過：自動測試與在真的視窗裡走的大部分用本機的 `file://` 網址；從 GitHub Pages 上的 `iplot-workshop` 真的下載、更新、安裝，2026-10-06 在 macOS 上用 `tests/acceptance_workshop.py` 走過一次（全部通過；確認框的長相、用瀏覽器看那一頁、沒有網路時的那一句，要人眼看的部分還沒做）。那一次的清單是 `iplot-workshop` 的舊清單；從 `iplot-modules` 的新清單讀、裝，還沒有對真的網址走過（要等種子收完，見「怎麼發佈」最後的驗收）。python.org 的 macOS Python 預設沒有根憑證（要另外執行「Install Certificates.command」），這兩個模組遇到憑證庫是空的時候改用 macOS 自己的 `/etc/ssl/cert.pem`，所以不用另外執行；憑證照樣驗證。Windows 未經實機驗證。安全模式與備用面板（所以 Linux 也是）沒有工作坊的清單頁。
 
 ### 怎麼設定
 
