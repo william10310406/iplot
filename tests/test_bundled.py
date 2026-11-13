@@ -366,3 +366,17 @@ def test_changed_workshop_modules_say_so_in_their_changelog(name):
     text = (MODULES / name / "CHANGELOG.md").read_text(encoding="utf-8")
     top = text[text.index("## ["):]
     assert top.startswith("## [0.5.1] - ") and "加上「互通」的那一小段：可以直接 python3 iplot.py。" in top.split("## [0.5.0]")[0]
+
+
+def test_restart_that_cannot_exec_says_what_to_do_and_is_not_a_module_error(fake_core, monkeypatch):
+    """體驗 5-06：換不了程序（例如 Python 被搬走了），一句人話：沒有重新啟動、關掉 iPLoT 再開一次；
+    不是「OSError，[Errno 2] …」的模組錯誤，面板留著。"""
+    def refuse(exe, argv):
+        raise FileNotFoundError(2, "No such file or directory", exe)
+
+    monkeypatch.setattr(os, "execv", refuse)
+    result = run_bundled("重新啟動", fake_core)
+    assert result.ok and result.error is None
+    line = fake_core.view.logs[-1]
+    assert "沒有重新啟動" in line and "關掉 iPLoT" in line and "再開一次" in line
+    assert "Errno" not in line and "No such file" not in line
