@@ -12,7 +12,7 @@ T: dict[str, str] = {
     "done": "{title} 完成（{seconds:.1f} 秒）",
     "error_at_line": "模組『{module}』第 {line} 行出錯：{kind}，{message}",
     "error_no_line": "模組『{module}』出錯：{kind}，{message}",
-    "core_error": "核心錯誤：{kind}，{message}。詳細內容在 logs/iplot.log",
+    "core_error": "核心錯誤：iPLoT 自己出了問題，剛才的動作沒做成。再做一次看看；還是不行，詳細內容在 logs/iplot.log",
     "config_error": "config.py 壞了，已用預設值啟動：{message}",
     "missing_handler": "iplot.py 沒有定義 {handler}(app)",
     "module_exit": "模組以 exit({code}) 結束",

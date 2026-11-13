@@ -73,3 +73,12 @@ def test_decode_error_points_at_module_file(tmp_path):
 def test_empty_traceback(tmp_path):
     e = from_exception(ValueError("x"), info_for(tmp_path / "iplot.py"), "module")
     assert (e.file, e.line) == (None, None)
+
+
+def test_describe_core_is_plain_and_points_at_the_log():
+    """體驗 2-01：iPLoT 自己出錯，畫面上不出現英文的例外類別與 Python 原文；它們留在詳細與記錄檔。"""
+    e = ErrorInfo("KeyError", "'secret_key_name'", None, None, "Traceback...", "core", None)
+    sentence = describe(e)
+    assert sentence.startswith("核心錯誤：") and "詳細內容在 logs/iplot.log" in sentence
+    assert "KeyError" not in sentence and "secret_key_name" not in sentence
+    assert "再" in sentence, "要說現在可以怎麼做"
