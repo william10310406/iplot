@@ -7,7 +7,7 @@ from types import ModuleType, SimpleNamespace
 from conftest import FakeCore, FakeView, make_module
 
 from core.app import App
-from core.runner import run_module
+from core.runner import InputCancelled, run_module
 from core.scan import module_info
 from core.text import T
 from core.types import DEFAULT_CONFIG
@@ -163,11 +163,11 @@ def test_input_becomes_dialog(home, fake_core):
 
 
 def test_input_cancel_raises_eoferror(home, fake_core):
-    # 真的 input() 在鍵盤關掉（Ctrl-D）時就是 EOFError（D49）
+    # 真的 input() 在鍵盤關掉（Ctrl-D）時就是 EOFError（D49）；面板靠子類別 InputCancelled 分出「按了取消」（體驗 2-08）
     fake_core.view.answer = None
     info = mod(home, 'print("hi")\nx = input("年齡")\nprint(x)\n')
     r = run_module(info, App(fake_core, info))
-    assert (r.ok, r.error.kind, r.error.message) == (False, "EOFError", T["input_cancelled"])
+    assert (r.ok, r.error.kind, r.error.message) == (False, "InputCancelled", T["input_cancelled"])
     assert (r.error.file, r.error.line, r.output) == (info.file, 2, "hi\n")
 
 
@@ -177,7 +177,7 @@ def test_validation_loop_exits_on_cancel(home, fake_core):
     src = 'while True:\n    try:\n        n = int(input("數字"))\n        break\n    except ValueError:\n        pass\n'
     info = mod(home, src)
     r = run_module(info, App(fake_core, info))
-    assert (r.ok, r.error.kind, r.error.line) == (False, "EOFError", 3)
+    assert (r.ok, r.error.kind, r.error.line) == (False, "InputCancelled", 3)
     assert len(fake_core.view.asks) == 1
 
 
@@ -267,3 +267,13 @@ def test_on_files_return_value_and_missing_run_is_none(home):
     app = App(FakeCore(home, DEFAULT_CONFIG, FakeView()), info)
     assert run_module(info, app, "on_files", (["a", "b"],)).value == 2
     assert run_module(info, app).value is None
+
+
+def test_cancel_is_an_eoferror_subclass_and_the_modules_own_eoferror_is_not_a_cancel(home, fake_core):
+    # 模組裡 except EOFError 的寫法照舊接得到取消；模組自己丟的 EOFError 的 kind 還是 EOFError（體驗 2-08）
+    assert issubclass(InputCancelled, EOFError)
+    fake_core.view.answer = None
+    info = mod(home, 'try:\n    input("q")\nexcept EOFError as e:\n    print(type(e).__name__, isinstance(e, EOFError))\n')
+    assert run_module(info, App(fake_core, info)).output == "InputCancelled True\n"
+    own = mod(home, 'raise EOFError("自己丟的")\n')
+    assert run_module(own, App(fake_core, own)).error.kind == "EOFError"

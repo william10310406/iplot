@@ -86,6 +86,13 @@ def test_offer_skips_config_errors_and_the_reporters_own_errors():
     assert offer.due(other(source="core", module=None))
 
 
+def test_offer_skips_a_cancelled_question_but_asks_about_the_modules_own_eoferror():
+    # 體驗 2-08：在提問框按取消是使用者自己的動作；模組自己丟的 EOFError 才是模組的錯
+    offer = errlog.Offer(clock=Clock())
+    assert not offer.due(other(kind="InputCancelled", message=T["input_cancelled"]))
+    assert offer.due(other(kind="EOFError", message=T["input_cancelled"]))
+
+
 # ── 最近的訊息與 logs/last-error.json（errlog.Recent、errlog.write）──
 
 def test_recent_keeps_the_last_lines_and_splits_multiline_text():
@@ -516,9 +523,9 @@ def test_reporter_version_is_0_2_0(load):
 
 def test_core_logic_is_untouched_by_m9():
     """D150：這一版不動核心邏輯（core/ 除了 text.py），只動 ui/、main.py 與模組；核心邏輯的行數不變（501）。
-    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504。"""
+    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505（核心的上限）。"""
     from test_budget import core_logic
-    assert sum(core_logic().values()) == 504
+    assert sum(core_logic().values()) == 505
 
 
 
