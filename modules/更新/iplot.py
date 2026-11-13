@@ -44,10 +44,10 @@ def run(app):
     except ValueError as exc:  # zip 的內容不對
         return app.log(f"沒有更新：{exc}（下載的包有問題）")
     except OSError as exc:  # 權限、磁碟滿、檔案被佔著：apply 會把換上去的放回去，看磁碟上是不是真的都回來了
-        left = update.unfinished(app.home)
+        left, why = update.unfinished(app.home), update.plain(exc).partition("。")[0]  # 原因的中文，不貼 [Errno] 與英文
         if not left:
-            return app.log(f"沒有更新：{exc}。core/、ui/、main.py、requirements/ 都還是原來的")
+            return app.log(f"沒有更新：{why}。core/、ui/、main.py、requirements/ 都還是原來的")
         kept = f"舊版的備份在 .backup/{saved.name}/" if saved else "這一次沒有做成備份"
-        return app.log(f"沒有更新，而且放回原來的版本時出錯了：{exc}。{'、'.join(left)} 要用手整理"
+        return app.log(f"沒有更新，而且放回原來的版本時出錯了：{why}。{'、'.join(left)} 要用手整理"
                        f"（{kept}，做法見 README 的「怎麼回到舊版」）")
     app.log(f"已更新到 {latest}，執行「重新啟動」就會用新版。舊版備份在 .backup/{saved.name}/")

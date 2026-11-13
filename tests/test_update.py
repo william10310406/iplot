@@ -588,3 +588,32 @@ def test_a_broken_update_json_does_not_show_the_json_parser_text(home, source):
         assert line.startswith("沒有更新：update.json 讀不懂") and "UPDATE_URL" in line, line
         assert not any(w in line for w in ("Expecting", "line 1", "char ", "codec", "0xff", "Unterminated")), line
         assert tree(home) == before
+
+
+@pytest.mark.parametrize("code, words", [(errno.ENOSPC, "磁碟滿了"), (errno.EACCES, "沒有權限"), (errno.EROFS, "沒有權限")])
+def test_a_failed_swap_gives_a_plain_reason_not_the_python_text(iplot, update, home, source, monkeypatch, code, words):
+    """體驗 5-04：備份、換檔失敗，原因是中文，不是 `[Errno 28] No space left on device: '…'`。"""
+    def refuse(*args):
+        raise OSError(code, os.strerror(code), str(home / "core.new"))
+
+    monkeypatch.setattr(update, "backup", refuse)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [line] = app.logs
+    assert line.startswith("沒有更新：") and words in line and "都還是原來的" in line
+    assert not any(e in line for e in ENGLISH) and "[" not in line and str(home) not in line
+
+
+def test_when_putting_back_fails_too_the_reason_is_still_plain(iplot, update, home, source, monkeypatch):
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name == "main.py.new" or (self.name == "ui.old" and Path(target).name == "ui"):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(self))
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [line] = app.logs
+    assert "沒有權限" in line and "ui.old" in line and not any(e in line for e in ENGLISH) and "[" not in line
