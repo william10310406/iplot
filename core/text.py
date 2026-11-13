@@ -19,6 +19,7 @@ T: dict[str, str] = {
     "input_cancelled": "在提問時按了取消",
     "not_found": "找不到模組『{name}』",
     "ambiguous": "有兩個以上的模組叫『{name}』：{paths}",
+    "file_unreadable": "iplot.py 讀不了：它的編碼不是 UTF-8、含有看不見的特殊字元，或是沒有讀取的權限。用文字編輯器打開，另存成 UTF-8",
     "bad_name": "名稱不能是空白、以 . 開頭、結尾是 . 或空白、含 / \\ : * ? \" < > |，"
                 "也不能是 CON、NUL 這類 Windows 保留字（模組要能複製到任何系統）",
     "already_exists": "『{name}』已經是模組了",

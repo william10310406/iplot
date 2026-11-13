@@ -71,3 +71,21 @@ def test_icon_absent_or_not_a_string_is_none(tmp_path):
 
 def test_broken_file_has_no_icon(tmp_path):
     assert read_meta(write(tmp_path, 'ICON = "🧩"\ndef run(app)\n')).icon is None
+
+
+def test_unreadable_file_says_so_in_plain_words(tmp_path):
+    """體驗 2-03：iplot.py 讀不了（不是 UTF-8、含空字元、是資料夾），那一格顯示的是中文，不是 Python 的英文原文。"""
+    from core.text import T
+
+    big5 = tmp_path / "a" / "iplot.py"
+    big5.parent.mkdir()
+    big5.write_bytes("x = '中文'\n".encode("big5"))
+    nul = tmp_path / "b" / "iplot.py"
+    nul.parent.mkdir()
+    nul.write_bytes(b"x = 1\x00\n")
+    folder = tmp_path / "c" / "iplot.py"
+    folder.mkdir(parents=True)
+    for f in (big5, nul, folder):
+        m = read_meta(f)
+        assert m.error == T["file_unreadable"], f
+        assert "codec" not in m.error and "null" not in m.error and "Errno" not in m.error
