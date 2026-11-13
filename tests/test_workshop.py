@@ -1102,3 +1102,19 @@ def test_a_failed_download_names_the_cause_and_says_to_try_again(workshop, mods,
     answer = workshop.Api(FakeApp(mods.parent), [entry], mods).install("整理桌面")
     assert answer.startswith("無法安裝：") and "沒有網路" in answer and "再試一次" in answer
     assert not any(e in answer for e in ENGLISH) and not (mods / "整理桌面").exists()
+
+
+def test_an_unreadable_listing_does_not_show_the_json_parser_text(mods, tmp_path):
+    """體驗 3-02：清單不是 JSON 時，不把 `Expecting value: line 1 column 1` 這種英文給人看；我們自己寫的中文原因照留。"""
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text("[]", encoding="utf-8")
+    app = FakeApp(mods.parent, workshop_url=bad.as_uri())
+    run(app)
+    [line] = app.logs
+    assert line.startswith("讀不懂工作坊的清單") and "Expecting" not in line and "line 1" not in line
+    assert "WORKSHOP_URL" in line and "再雙擊一次「工作坊」" in line
+    app = FakeApp(mods.parent, workshop_url=wrong.as_uri())
+    run(app)
+    assert "格式不對" in app.logs[0], "我們自己寫的中文原因保留"

@@ -17,7 +17,9 @@ def run(app):
     try:
         entries, notice = workshop.read_listing(url)
     except ValueError as exc:  # 不是 JSON、格式不對、網址寫錯
-        return app.log(f"讀不懂工作坊的清單（index.json），或 WORKSHOP_URL 寫錯了：{exc}")
+        why = f"（{exc}）" if type(exc) is ValueError else ""  # 自己寫的中文原因照留；JSON 解析器的英文原文不給人看
+        return app.log(f"讀不懂工作坊的清單（index.json）{why}。可能是 config.py 的 WORKSHOP_URL 寫錯了（它要指到 index.json），"
+                       "或清單暫時壞了；確認之後再雙擊一次「工作坊」。")
     except workshop.NETWORK as exc:
         return app.log(f"工作坊的清單抓不下來：{workshop.plain(exc)}。也請確認 config.py 的 WORKSHOP_URL 沒有寫錯，再雙擊一次「工作坊」。")
     modules_dir = app.home / "modules"
