@@ -1,3 +1,5 @@
+import errno
+import os
 import shutil
 import unicodedata
 from pathlib import Path
@@ -357,3 +359,39 @@ def test_marker_that_cannot_be_removed_does_not_block_the_module(home, view, mon
     assert c.press(find(c, "外來")).ok and (folder / "ran.txt").exists()
     c.press(find(c, "外來"))
     assert len(view.confirmed) == 2
+
+
+@pytest.mark.parametrize("code, words", [(errno.EACCES, "權限"), (errno.EPERM, "權限"), (errno.ENOSPC, "滿了"),
+                                         (errno.EROFS, "唯讀"), (errno.ENOTDIR, "不是資料夾"), (errno.EIO, "沒辦法")])
+def test_failed_create_gives_a_plain_reason_not_the_python_text(home, view, monkeypatch, code, words):
+    """體驗 2-02：建不了模組時，原因是中文，不出現 Errno 與英文原文。"""
+    c = started(home, view)
+
+    def boom(parent, name):
+        raise OSError(code, os.strerror(code), str(parent / name))
+
+    monkeypatch.setattr("core.core.new_module", boom)
+    assert c.create(home / "modules", "A") is None
+    line = view.logs[-1]
+    assert line.startswith(f"無法在 {home / 'modules'} 建立模組：") and words in line
+    assert "Errno" not in line and os.strerror(code) not in line
+
+
+def test_failed_snapshot_gives_a_plain_reason_too(home, view, monkeypatch):
+    make_module(home / "modules", "A")
+    c = started(home, view)
+
+    def boom(*args):
+        raise PermissionError(errno.EACCES, "Permission denied", "/x/.history")
+
+    monkeypatch.setattr(history, "snapshot", boom)
+    assert c.press(find(c, "A")).ok
+    line = next(line for line in view.logs if line.startswith("無法存上一版"))
+    assert "權限" in line and "Permission denied" not in line
+
+
+def test_an_os_error_without_an_errno_still_gets_a_plain_sentence():
+    from core.errors import reason
+    from core.text import T
+
+    assert reason(OSError("something odd")) == T["os_other"]

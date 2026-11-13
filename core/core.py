@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from . import history, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
-from .errors import from_exception
+from .errors import from_exception, reason
 from .text import SYSTEM_MODULE, T
 from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result, Root, Scope
 
@@ -118,7 +118,7 @@ class Core:
             try:
                 history.snapshot(info.file, self.config.history_keep)
             except OSError as exc:
-                self.view.log(T["snapshot_failed"].format(message=exc))
+                self.view.log(T["snapshot_failed"].format(message=reason(exc)))
             result = runner.run_module(info, App(self, info), handler, args)
             for line in result.output.splitlines():
                 self.view.log(line)
@@ -165,7 +165,7 @@ class Core:
         except AlreadyExists:
             return self.view.log(T["already_exists"].format(name=name))
         except OSError as exc:
-            return self.view.log(T["create_failed"].format(path=parent, message=exc))
+            return self.view.log(T["create_failed"].format(path=parent, message=reason(exc)))
         self.rescan()
         self.action("edit", folder / "iplot.py", self.config.editor, None)
         return folder

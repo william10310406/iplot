@@ -1,6 +1,7 @@
 """錯誤是資料：例外變成 ErrorInfo，ErrorInfo 變成面板上的一句話。"""
 
 import dataclasses
+import errno
 import traceback
 from pathlib import Path
 
@@ -36,3 +37,8 @@ def describe(error: ErrorInfo) -> str:
     else:
         key = "error_no_line" if error.line is None else "error_at_line"
     return T[key].format(**dataclasses.asdict(error))
+
+
+def reason(exc: OSError) -> str:
+    """OSError 變成一句中文原因，不帶 Errno 與 Python 的英文原文；認不得的用籠統的一句（體驗 2-02）。"""
+    return T.get("os_" + errno.errorcode.get(exc.errno or 0, ""), T["os_other"])

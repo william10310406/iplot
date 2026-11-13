@@ -61,14 +61,21 @@ T: dict[str, str] = {
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",
-    "create_failed": "無法在 {path} 建立模組：{message}",
-    "snapshot_failed": "無法存上一版：{message}",
+    "create_failed": "無法在 {path} 建立模組：{message}。確認那個位置可以寫入，或換一個位置再按一次 ＋",
+    "snapshot_failed": "無法存上一版：{message}。這次照常執行，只是沒有留下可以復原的上一版",
     "config_type": "{name} 的型別不對，應該是 {expected}",
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
     "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
     "start_failed": "iPLoT 沒辦法啟動。技術細節記在 iPLoT 資料夾裡的 logs/iplot.log。可以試試：關掉這個視窗再開一次；"
                     "還是不行，就用安全模式開（在終端機進到 iPLoT 資料夾，打 python3 main.py --safe），"
                     "或把 logs/iplot.log 拿給幫你的人看。",
+    "os_EACCES": "沒有權限",
+    "os_EPERM": "沒有權限",
+    "os_ENOSPC": "磁碟滿了",
+    "os_EROFS": "這個位置是唯讀的",
+    "os_ENOTDIR": "路徑裡有一段不是資料夾",
+    "os_ENAMETOOLONG": "名稱太長",
+    "os_other": "系統沒辦法做這件事",
     "no_system": "沒有『{module}』模組，無法執行 {name}。要有這個功能，在 modules/ 新增一個叫『{module}』的模組"
                  "並定義 {name}(app, …)；見 docs/07_接口與邊界.md",
 }
