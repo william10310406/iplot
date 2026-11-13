@@ -25,8 +25,8 @@ def run(app):
         if not app.confirm(f"有新版 {latest}（現在是 {on_disk}）：\n{info.get('notes', '')}\n\n要更新嗎？"):
             return app.log("已取消更新")
         package = update.download(zip_url, app.home / ".backup" / f"download-{latest}.zip", sha256)
-    except http.client.InvalidURL as exc:
-        return app.log(f"網址寫錯了，沒有更新：{exc}（看 config.py 的 UPDATE_URL，或 update.json 裡的 zip_url）")
+    except http.client.InvalidURL:  # 它的原文是英文的網址規則，不給人看
+        return app.log("網址寫錯了，沒有更新（看 config.py 的 UPDATE_URL，或 update.json 裡的 zip_url）")
     except KeyError as exc:
         return app.log(f"更新來源的 update.json 少了 {exc} 這一項，沒有更新")
     except update.NETWORK as exc:  # 要排在 ValueError 前面：憑證驗證失敗兩種都是

@@ -565,3 +565,13 @@ def test_an_ssl_failure_is_blamed_on_the_connection_not_on_the_files(iplot, upda
     iplot.run(app)
     [line] = app.logs
     assert "憑證" in line and "下載的檔案有問題" not in line and "CERTIFICATE" not in line
+
+
+@pytest.mark.parametrize("url", ["https://exa mple.invalid:80a/update.json"])
+def test_a_mistyped_url_does_not_show_the_python_text(iplot, home, url):
+    """體驗 5-02：網址寫錯，說去看 UPDATE_URL，不貼 http.client 的英文原文。"""
+    app = FakeApp(home, update_url=url)
+    iplot.run(app)
+    [line] = app.logs
+    assert "UPDATE_URL" in line and "zip_url" in line
+    assert not any(w in line for w in ("nonnumeric", "port", "control characters", "URL can't", "InvalidURL", "found at least"))
