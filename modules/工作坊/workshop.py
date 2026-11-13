@@ -348,7 +348,7 @@ def install(entry, modules_dir, confirmed=False):
     包裡與磁碟上每一個有 iplot.py 的資料夾都先放好 .unconfirmed，才開始放程式。"""
     name = entry["name"]
     if not isinstance(name, str) or not name.strip() or name.startswith(".") or set(name) & set("/\\"):
-        raise ValueError("索引裡的模組名稱不是單純的資料夾名")
+        raise ValueError("清單裡的模組名稱不是單純的資料夾名")
     if _bundled(name, modules_dir):
         raise ValueError(f"「{name}」是 iPLoT 自己要用的隨附模組，工作坊不覆蓋它")
     folder, tmp = modules_dir / name, modules_dir / ".workshop-tmp"

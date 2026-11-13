@@ -1152,3 +1152,9 @@ def test_a_failed_copy_gives_a_plain_reason_in_front_of_the_rollback_report(work
     monkeypatch.undo()
     assert answer.startswith("無法安裝：磁碟滿了；沒有裝成，已從快照放回"), answer
     assert not any(e in answer for e in ENGLISH) and "[" not in answer
+
+
+def test_a_bad_name_is_blamed_on_the_list_not_the_index(workshop, mods, entry):
+    """體驗 3-06：畫面上一律叫「清單」，不叫「索引」。"""
+    answer = workshop.Api(FakeApp(mods.parent), [{**entry, "name": "../外面"}], mods).install("../外面")
+    assert answer == "無法安裝：清單裡的模組名稱不是單純的資料夾名" and "索引" not in answer
