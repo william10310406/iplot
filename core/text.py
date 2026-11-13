@@ -47,6 +47,7 @@ T: dict[str, str] = {
     "installing": "第一次啟動：正在安裝介面（需要網路，約 {size}）…",
     "install_done": "安裝完成，重新啟動中…",
     "install_failed": "介面安裝失敗：{message}\n安裝需要網路。再試一次：重新啟動 iPLoT。現在先改用備用面板",
+    "no_pip": "這個 Python 沒有 pip（Python 用來安裝套件的工具），裝不了介面。請改用 python.org 的 Python（它內含 pip）",
     "no_tk": "這個 Python 沒有 tkinter，安全模式與備用面板都開不了；請用 python.org 的版本",
     "web_failed": "網頁面板開不起來：{message}。已改用備用面板",
     "refreshing": "介面要用的套件換了版本，正在重新安裝（需要網路）…",
