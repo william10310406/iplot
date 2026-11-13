@@ -355,3 +355,30 @@ def test_safe_mode_never_touches_lib(boot, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["main.py", "--safe"])
     boot.main.main()
     assert kinds(boot) == ["tk"]
+
+
+def test_unexpected_startup_error_is_a_plain_sentence_and_the_traceback_goes_to_the_log(home, monkeypatch, capsys):
+    """體驗 1-02：啟動途中出了沒預料到的例外，終端機是一句人話；traceback 寫進 logs/iplot.log，不印在使用者眼前。"""
+    main = load_main()
+    monkeypatch.setattr(main, "__file__", str(home / "main.py"))
+
+    def boom():
+        raise RuntimeError("secret detail 123")
+
+    monkeypatch.setattr(main, "main", boom)
+    with pytest.raises(SystemExit) as ei:
+        main.run()
+    out = capsys.readouterr()
+    assert ei.value.code == 1
+    assert out.out.strip() == T["start_failed"] and "logs/iplot.log" in T["start_failed"] and "--safe" in T["start_failed"]
+    assert "Traceback" not in out.out + out.err and "RuntimeError" not in out.out + out.err
+    log = (home / "logs" / "iplot.log").read_text(encoding="utf-8")
+    assert "RuntimeError: secret detail 123" in log and "Traceback" in log
+
+
+def test_a_normal_exit_is_not_touched_by_the_startup_catch(home, monkeypatch):
+    main = load_main()
+    monkeypatch.setattr(main, "main", lambda: (_ for _ in ()).throw(SystemExit("bye")))
+    with pytest.raises(SystemExit) as ei:
+        main.run()
+    assert ei.value.code == "bye"

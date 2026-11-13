@@ -65,6 +65,9 @@ T: dict[str, str] = {
     "config_type": "{name} 的型別不對，應該是 {expected}",
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
     "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
+    "start_failed": "iPLoT 沒辦法啟動。技術細節記在 iPLoT 資料夾裡的 logs/iplot.log。可以試試：關掉這個視窗再開一次；"
+                    "還是不行，就用安全模式開（在終端機進到 iPLoT 資料夾，打 python3 main.py --safe），"
+                    "或把 logs/iplot.log 拿給幫你的人看。",
     "no_system": "沒有『{module}』模組，無法執行 {name}。要有這個功能，在 modules/ 新增一個叫『{module}』的模組"
                  "並定義 {name}(app, …)；見 docs/07_接口與邊界.md",
 }
