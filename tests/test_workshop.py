@@ -1127,3 +1127,10 @@ def test_the_page_shows_progress_while_installing():
     progress, call = page.index('cell.textContent = "安裝中…"'), page.index("window.pywebview.api.install(")
     assert progress < call, "先顯示進行中，再等 Python"
     assert 'if (answer === "需要確認") { cell.textContent = before;' in page, "要確認的時候不能留在「安裝中…」"
+
+
+def test_an_empty_list_says_why_and_what_to_do():
+    """體驗 3-04：空清單說可能的原因與下一步（頁面是靜態文字，這裡直接讀出來比對）。"""
+    page = (MODULE / "page.html").read_text(encoding="utf-8")
+    empty = page[page.index('id="empty"'):].split("</p>")[0]
+    assert "還沒有人上傳" in empty and "再開一次" in empty
