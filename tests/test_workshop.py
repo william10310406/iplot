@@ -629,7 +629,7 @@ def test_a_failed_snapshot_is_one_sentence_and_leaves_no_half_zip(workshop, mods
     answer = api.install("記帳", True)
     monkeypatch.undo()
     assert len(calls) == 2, "真的走到存快照"
-    assert answer == "無法安裝：[Errno 28] 模擬：磁碟滿了；沒有裝成，還沒動到資料夾（存快照時出錯）", answer
+    assert answer == "無法安裝：磁碟滿了；沒有裝成，還沒動到資料夾（存快照時出錯）", answer  # 體驗 3-05：原因是中文，沒有 [Errno 28]
     assert tree(folder) == before, "資料夾逐位元組不變，.history/ 沒有新檔"
 
 
@@ -1134,3 +1134,21 @@ def test_an_empty_list_says_why_and_what_to_do():
     page = (MODULE / "page.html").read_text(encoding="utf-8")
     empty = page[page.index('id="empty"'):].split("</p>")[0]
     assert "還沒有人上傳" in empty and "再開一次" in empty
+
+
+def test_a_failed_copy_gives_a_plain_reason_in_front_of_the_rollback_report(workshop, mods, src, monkeypatch):
+    """體驗 3-05：寫檔寫到一半失敗（磁碟滿了、沒有權限），「無法安裝：」後面是中文原因，不是 [Errno 28] 加英文。"""
+    make_module(mods, "整理桌面", "print('我自己的')\n")
+    real, calls = workshop.shutil.copyfile, []
+
+    def copyfile(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(target))
+        return real(source, target)
+
+    monkeypatch.setattr(workshop.shutil, "copyfile", copyfile)
+    answer = workshop.Api(FakeApp(mods.parent), [pack(src, "整理桌面", V2)], mods).install("整理桌面", True)
+    monkeypatch.undo()
+    assert answer.startswith("無法安裝：磁碟滿了；沒有裝成，已從快照放回"), answer
+    assert not any(e in answer for e in ENGLISH) and "[" not in answer

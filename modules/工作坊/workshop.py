@@ -376,7 +376,7 @@ def install(entry, modules_dir, confirmed=False):
         try:
             saved = snapshot(folder) if folder.exists() else None
         except OSError as exc:
-            raise NotInstalled(f"{exc}；沒有裝成，還沒動到資料夾（存快照時出錯）") from exc
+            raise NotInstalled(f"{plain(exc).partition('。')[0]}；沒有裝成，還沒動到資料夾（存快照時出錯）") from exc
         try:
             folder.mkdir(exist_ok=True)
             for rel in _module_dirs(folder, [rel for rel, _ in files]):  # 先放標記，才放程式
@@ -396,7 +396,7 @@ def install(entry, modules_dir, confirmed=False):
                 done = f"沒有裝成，快照讀不到、沒有放回，資料夾現在是新舊混合：{folder}"
             else:
                 done = "沒有裝成，已從快照放回" if back else f"沒有裝成，放回時出錯，快照在 {saved}"
-            raise NotInstalled(f"{exc}；{done}") from exc
+            raise NotInstalled(f"{plain(exc).partition('。')[0]}；{done}") from exc
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return state(entry, modules_dir)
