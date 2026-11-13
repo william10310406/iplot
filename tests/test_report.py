@@ -1985,6 +1985,8 @@ def assert_unreadable(view, home, how, name, tmp_path, opened):
     assert "再按一次" not in line and "「" not in line
     if how == "big5":
         assert f"草稿留在 回報/{name}" in line and "UTF-8" in line
+        assert "codec" not in line and "0x" not in line and "position" not in line, "體驗 4-01：解碼器的英文不給人看"
+        assert "草稿的編碼不是 UTF-8" in line
     else:
         assert "<檔名已遮蔽>.md" in line  # FileNotFoundError 的字帶著草稿的完整路徑：遮過
     for leak in (str(tmp_path), os.path.realpath(tmp_path)):
