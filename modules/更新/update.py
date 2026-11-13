@@ -3,13 +3,16 @@
 
 只換 PARTS 列的四樣。config.py、custom.css、modules/、logs/、lib/ 一律不碰，iPLoT 資料夾以外的東西也不碰（D69）。"""
 import contextlib
+import errno
 import hashlib
 import http.client
 import json
 import os
 import re
 import shutil
+import socket
 import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -30,6 +33,33 @@ def _context():
     if not context.cert_store_stats()["x509_ca"] and os.path.exists("/etc/ssl/cert.pem"):
         context.load_verify_locations("/etc/ssl/cert.pem")
     return context
+
+
+def plain(exc):
+    """連不上、下載不下來、寫不進去的原因，一句中文，後面接現在可以怎麼做。不給人看 Python 的英文原文與錯誤代碼。
+    網路的三種失敗各一句：沒有網路、逾時、網站回了錯誤（帶代碼）；另外有憑證不對、磁碟與權限。"""
+    reason = getattr(exc, "reason", exc)
+    if isinstance(exc, urllib.error.HTTPError):
+        code = exc.code
+        what = ("找不到那個檔案" if code == 404 else "網站不讓我們讀，或短時間內被問太多次" if code in (401, 403, 429)
+                else "網站暫時有問題" if code >= 500 else "網站不接受這個要求")
+        return f"網站回了錯誤（{code}）：{what}。晚一點再試一次"
+    if any(isinstance(e, TimeoutError) for e in (exc, reason)):
+        return "連線逾時了，網路可能太慢或不穩。確認網路之後再試一次"
+    if any(isinstance(e, ssl.SSLError) for e in (exc, reason)):
+        return "網站的憑證驗證不過（電腦的日期時間不對，或網路被擋住時會這樣）。確認之後再試一次"
+    if isinstance(reason, FileNotFoundError):
+        return "找不到那個檔案，網址可能寫錯了"
+    code = getattr(reason, "errno", None)
+    if code == errno.ENOSPC:
+        return "磁碟滿了。清出一些空間之後再試一次"
+    if code in (errno.EACCES, errno.EPERM, errno.EROFS):
+        return "沒有權限寫進 iPLoT 這個資料夾。確認它可以寫入之後再試一次"
+    if isinstance(reason, (socket.gaierror, ConnectionRefusedError)) or isinstance(exc, urllib.error.URLError):
+        return "連不上網站，可能是沒有網路。確認網路之後再試一次"
+    if isinstance(exc, (http.client.HTTPException, ConnectionError)):
+        return "連線到一半斷了，網路可能不穩。確認網路之後再試一次"
+    return "讀寫時出了意外。再試一次；還是不行，請回報這個問題"
 
 
 def _open(url, timeout):

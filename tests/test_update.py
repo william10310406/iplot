@@ -505,3 +505,63 @@ def test_backup_is_named_after_the_version_on_disk(iplot, home, source):
     iplot.run(app)
     [saved] = [p for p in (home / ".backup").iterdir() if p.is_dir()]
     assert saved.name.startswith("0.4.9-")
+
+
+# 體驗打磨 5：網路的三種失敗（沒有網路、逾時、對方回錯誤）各有一句人話
+
+import errno  # noqa: E402
+import socket  # noqa: E402
+import ssl  # noqa: E402
+import urllib.error  # noqa: E402
+
+ENGLISH = ("Errno", "timed out", "Not Found", "nodename", "CERTIFICATE", "urlopen", "No space left", "Permission denied")
+
+
+def http_error(code, reason):
+    return urllib.error.HTTPError("https://x.test/update.json", code, reason, {}, None)
+
+
+@pytest.mark.parametrize("exc, words", [
+    (urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known")), "沒有網路"),
+    (urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")), "沒有網路"),
+    (TimeoutError("timed out"), "逾時"),
+    (urllib.error.URLError(TimeoutError("timed out")), "逾時"),
+    (http_error(404, "Not Found"), "404"),
+    (http_error(403, "rate limit exceeded"), "403"),
+    (http_error(429, "Too Many Requests"), "太多次"),
+    (http_error(503, "Service Unavailable"), "暫時有問題"),
+    (urllib.error.URLError(ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")), "憑證"),
+    (ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED"), "憑證"),
+    (OSError(errno.ENOSPC, "No space left on device"), "磁碟滿了"),
+    (PermissionError(errno.EACCES, "Permission denied"), "權限"),
+    (urllib.error.URLError(FileNotFoundError(2, "No such file or directory")), "找不到"),
+])
+def test_plain_says_what_went_wrong_in_chinese(update, exc, words):
+    sentence = update.plain(exc)
+    assert words in sentence, sentence
+    assert not any(e in sentence for e in ENGLISH), sentence
+
+
+def test_no_network_is_a_sentence_with_the_next_step(iplot, update, home, source, monkeypatch):
+    def offline(*args, **kwargs):
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known"))
+
+    monkeypatch.setattr(update, "fetch_json", offline)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    before = tree(home)
+    iplot.run(app)
+    [line] = app.logs
+    assert line.startswith("沒有更新：") and "沒有網路" in line and "UPDATE_URL" in line and "再試一次" in line
+    assert not any(e in line for e in ENGLISH) and tree(home) == before
+
+
+def test_an_ssl_failure_is_blamed_on_the_connection_not_on_the_files(iplot, update, home, source, monkeypatch):
+    """SSLCertVerificationError 同時是 ValueError 和 OSError：不能被「update.json 或下載的檔案有問題」那一條接走。"""
+    def bad_cert(*args, **kwargs):
+        raise ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")
+
+    monkeypatch.setattr(update, "fetch_json", bad_cert)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [line] = app.logs
+    assert "憑證" in line and "下載的檔案有問題" not in line and "CERTIFICATE" not in line
