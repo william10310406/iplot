@@ -1045,3 +1045,60 @@ def test_run_with_empty_uploads_opens_an_empty_list(mods, src, entry):
     run(app)
     [(_, html, _)] = app.pages
     assert "沒有人審查" in html and "<tr" not in html and "整理桌面" not in html
+
+
+# 體驗打磨 3：網路的三種失敗（沒有網路、逾時、對方回錯誤）各有一句人話
+
+import errno  # noqa: E402
+import socket  # noqa: E402
+import ssl  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+ENGLISH = ("Errno", "timed out", "Not Found", "nodename", "CERTIFICATE", "urlopen", "No space left", "Permission denied")
+
+
+def http_error(code, reason):
+    return urllib.error.HTTPError("https://x.test/index.json", code, reason, {}, None)
+
+
+@pytest.mark.parametrize("exc, words", [
+    (urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known")), "沒有網路"),
+    (urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")), "沒有網路"),
+    (TimeoutError("timed out"), "逾時"),
+    (urllib.error.URLError(TimeoutError("timed out")), "逾時"),
+    (http_error(404, "Not Found"), "404"),
+    (http_error(403, "rate limit exceeded"), "403"),
+    (http_error(429, "Too Many Requests"), "太多次"),
+    (http_error(503, "Service Unavailable"), "暫時有問題"),
+    (urllib.error.URLError(ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")), "憑證"),
+    (OSError(errno.ENOSPC, "No space left on device"), "磁碟滿了"),
+    (PermissionError(errno.EACCES, "Permission denied"), "權限"),
+    (urllib.error.URLError(FileNotFoundError(2, "No such file or directory")), "找不到"),
+])
+def test_plain_says_what_went_wrong_in_chinese(workshop, exc, words):
+    sentence = workshop.plain(exc)
+    assert words in sentence, sentence
+    assert not any(e in sentence for e in ENGLISH), sentence
+
+
+def test_a_failed_listing_is_a_sentence_with_the_next_step(mods, monkeypatch):
+    def boom(url, **kw):
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    app = FakeApp(mods.parent, workshop_url="https://example.test/index.json")
+    run(app)
+    [line] = app.logs
+    assert line.startswith("工作坊的清單抓不下來：") and "沒有網路" in line and "再雙擊一次「工作坊」" in line
+    assert "WORKSHOP_URL" in line and not any(e in line for e in ENGLISH) and app.pages == []
+
+
+def test_a_failed_download_names_the_cause_and_says_to_try_again(workshop, mods, entry, monkeypatch):
+    def boom(url, **kw):
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    answer = workshop.Api(FakeApp(mods.parent), [entry], mods).install("整理桌面")
+    assert answer.startswith("無法安裝：") and "沒有網路" in answer and "再試一次" in answer
+    assert not any(e in answer for e in ENGLISH) and not (mods / "整理桌面").exists()

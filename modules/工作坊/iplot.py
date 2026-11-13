@@ -19,7 +19,7 @@ def run(app):
     except ValueError as exc:  # 不是 JSON、格式不對、網址寫錯
         return app.log(f"讀不懂工作坊的清單（index.json），或 WORKSHOP_URL 寫錯了：{exc}")
     except workshop.NETWORK as exc:
-        return app.log(f"連不上工作坊的來源：{getattr(exc, 'reason', exc)}")
+        return app.log(f"工作坊的清單抓不下來：{workshop.plain(exc)}。也請確認 config.py 的 WORKSHOP_URL 沒有寫錯，再雙擊一次「工作坊」。")
     modules_dir = app.home / "modules"
     template = (Path(__file__).parent / "page.html").read_text(encoding="utf-8")
     app.page("工作坊", workshop.render(entries, modules_dir, template, notice), workshop.Api(app, entries, modules_dir))
