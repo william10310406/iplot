@@ -7,8 +7,9 @@ T: dict[str, str] = {
     "here": "這一層",
     "parent": "上一層",
     "empty_group": "尚無模組，按 ＋ 新增",
-    "root_missing": "找不到 {path}",
-    "root_unreadable": "讀不到 {path}",
+    "root_missing": "找不到 {path}。確認那個資料夾還在；如果是在 config.py 的 ROOTS 自己加的位置、不需要了，把那一行拿掉",
+    "root_unreadable": "讀不到 {path}，可能是沒有權限。macOS 請到「系統設定 → 隱私權與安全性 → 檔案與檔案夾」，把 Python 的開關打開；"
+                       "如果是在 config.py 的 ROOTS 自己加的位置、不需要了，把那一行拿掉",
     "done": "{title} 完成（{seconds:.1f} 秒）",
     "error_at_line": "模組『{module}』第 {line} 行出錯：{kind}，{message}",
     "error_no_line": "模組『{module}』出錯：{kind}，{message}",
