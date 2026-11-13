@@ -617,3 +617,12 @@ def test_when_putting_back_fails_too_the_reason_is_still_plain(iplot, update, ho
     iplot.run(app)
     [line] = app.logs
     assert "沒有權限" in line and "ui.old" in line and not any(e in line for e in ENGLISH) and "[" not in line
+
+
+def test_the_question_says_what_updating_does_and_that_the_old_version_is_kept(home, source):
+    """體驗 5-05：確認框說明更新會換什麼、舊版在哪、你的東西動不動；最後一句還是「要更新嗎？」。"""
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    run(app)
+    [prompt] = app.confirms
+    assert prompt.startswith("有新版 9.9.9（現在是 0.4.9）：\n這一版改了什麼\n\n") and prompt.endswith("要更新嗎？")
+    assert ".backup/" in prompt and "模組和設定不動" in prompt and "重新啟動" in prompt

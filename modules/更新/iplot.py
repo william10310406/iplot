@@ -22,7 +22,9 @@ def run(app):
             if on_disk != app.version:
                 return app.log(f"已經換成 {on_disk} 了，執行「重新啟動」就會用新版")
             return app.log(f"已是最新（{app.version}）")
-        if not app.confirm(f"有新版 {latest}（現在是 {on_disk}）：\n{info.get('notes', '')}\n\n要更新嗎？"):
+        if not app.confirm(f"有新版 {latest}（現在是 {on_disk}）：\n{info.get('notes', '')}\n\n"
+                           "更新會換掉 iPLoT 的核心（core/、ui/、main.py、requirements/），舊版先備份在 .backup/；"
+                           "你的模組和設定不動。換完要執行「重新啟動」才會用新版。\n要更新嗎？"):
             return app.log("已取消更新")
         package = update.download(zip_url, app.home / ".backup" / f"download-{latest}.zip", sha256)
     except http.client.InvalidURL:  # 它的原文是英文的網址規則，不給人看
