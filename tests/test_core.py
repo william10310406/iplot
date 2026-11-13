@@ -395,3 +395,9 @@ def test_an_os_error_without_an_errno_still_gets_a_plain_sentence():
     from core.text import T
 
     assert reason(OSError("something odd")) == T["os_other"]
+
+
+def test_the_foreign_module_question_says_what_running_means():
+    """體驗 2-05：第一次執行外來的模組前，問題說清楚「執行」是什麼意思，不只是「要執行嗎？」。"""
+    text = T["confirm_foreign"].format(title="外來的")
+    assert "外來的" in text and "電腦上執行" in text and "讀寫" in text and text.endswith("要執行嗎？")
