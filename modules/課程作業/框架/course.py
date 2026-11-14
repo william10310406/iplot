@@ -483,6 +483,8 @@ def _course_button(app, folder: Path, popen, apple_silicon: bool | None) -> None
         return
     ok, failed = install(python, need, say=app.log, popen=popen)
     said = summary_of_install(ok, failed)
+    if failed:  # 沒裝好的多半是網路：說下一步（體驗 8g-05）
+        said += f"。網路正常的話，再按一次「{course.name}」，只會補沒裝好的"
     if len(pending) > 1:
         later = pending[1]
         said += f"；{later[0].rstrip('：')}{'（' + later[2] + '）' if later[2] else ''}再按一次「{course.name}」"
@@ -715,7 +717,7 @@ def _ready(app, course: Course, code: str, need: list[str], popen, apple: bool, 
         ok, failed = install(python, lack, say=app.log, popen=popen)
         app.log(summary_of_install(ok, failed))
         if failed:
-            app.log(f"{code} 要的套件沒裝齊，沒跑")
+            app.log(f"{code} 要的套件沒裝齊，沒跑。網路正常的話，再按一次，只會補沒裝好的")
             return False
     return True
 

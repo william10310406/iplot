@@ -457,3 +457,25 @@ def test_a_venv_that_cannot_be_built_says_what_to_check(course_mod, tmp_path, mo
     with pytest.raises(RuntimeError) as err:
         course_mod.ensure_venv(tmp_path / "v3", lambda s: None, popen=gone)
     assert "找不到 Python" in str(err.value) and "No such" not in str(err.value) and "再按一次" in str(err.value)
+
+
+def test_failed_installs_say_what_to_do_next(course_mod, tmp_path, monkeypatch):
+    """體驗 8g-05：課那一格裝不齊時，總結後面說下一步（網路正常的話再按一次）。"""
+    import types
+
+    class App(types.SimpleNamespace):
+        def log(self, text):
+            self.logs.append(text)
+
+        def confirm(self, prompt):
+            return True
+
+    course = tmp_path / "測試課"
+    course.mkdir()
+    (course / "課程.py").write_text('NAME = "測試課"\nPACKAGES = [(["numpy"], "基本", "約 1 MB")]\n', encoding="utf-8")
+    monkeypatch.delenv("CW_NO_INSTALL", raising=False)
+    monkeypatch.setattr(course_mod, "ensure_venv", lambda *a, **k: tmp_path / "py")
+    monkeypatch.setattr(course_mod, "install", lambda python, pkgs, say, **kw: ([], [("numpy", "ERROR: x")]))
+    app = App(logs=[])
+    course_mod.course_button(app, course)
+    assert app.logs[-1] == "裝不了 numpy（ERROR: x）。網路正常的話，再按一次「測試課」，只會補沒裝好的"
