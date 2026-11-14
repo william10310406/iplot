@@ -245,6 +245,7 @@ function addFiles(files) {
       if (day && day.date === date && r.images) photoRow(r.images);
       if (!r.error) say("已加入：" + file.name);
     };
+    reader.onerror = () => say("讀不到「" + file.name + "」。確認檔案還在、有權限打開，再加一次", true);
     reader.readAsDataURL(file);
   }
 }

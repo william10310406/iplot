@@ -375,8 +375,8 @@ def test_duplicate_names_get_a_number(load, tmp_path):
 
 def test_add_image_rejects_too_big_and_non_images(load, tmp_path):
     p = load("photos")
-    assert p.add_image(tmp_path, "x.jpg", b"\0" * (30 * 1024 * 1024 + 1)) == (None, "x.jpg：太大（超過 30 MB）")
-    assert p.add_image(tmp_path, "x.txt", b"hi") == (None, "x.txt：不是圖片")
+    assert p.add_image(tmp_path, "x.jpg", b"\0" * (30 * 1024 * 1024 + 1)) == (None, "x.jpg：太大（超過 30 MB）。縮小之後再加")
+    assert p.add_image(tmp_path, "x.txt", b"hi") == (None, "x.txt：不是圖片。可以加 JPG、PNG、GIF、HEIC")
     assert list(tmp_path.iterdir()) == []
 
 
@@ -1141,9 +1141,9 @@ def test_add_image_decodes_base64_and_rejects_junk(load, tmp_path):
     got = a.add_image("2026-10-14", "a.jpg", "data:image/jpeg;base64," + base64.b64encode(gps_jpeg()).decode())
     assert [i["name"] for i in got["images"]] == ["a.jpg"] and "error" not in got
     assert (tmp_path / "資料/2026/10/14/a.jpg").read_bytes() == gps_jpeg() and (tmp_path / "資料/2026/10/14/index.html").exists()
-    assert a.add_image("2026-10-14", "b.jpg", "not base64!")["error"] == "b.jpg：不是圖片"
+    assert a.add_image("2026-10-14", "b.jpg", "not base64!")["error"] == "b.jpg：不是圖片。可以加 JPG、PNG、GIF、HEIC"
     big = base64.b64encode(b"\0" * (30 * 1024 * 1024 + 1)).decode()
-    assert a.add_image("2026-10-14", "c.jpg", big)["error"] == "c.jpg：太大（超過 30 MB）"
+    assert a.add_image("2026-10-14", "c.jpg", big)["error"] == "c.jpg：太大（超過 30 MB）。縮小之後再加"
 
 
 def test_remove_image_trashes_the_jpg_and_the_heic_together(load, tmp_path):
@@ -1474,3 +1474,8 @@ def test_removing_the_publish_folder_asks_first_and_the_button_says_what_it_does
     assert "直接刪除，不進垃圾桶，不能復原" in body
     confirm = html_text[html_text.index("async function confirmPublish"):][:260]
     assert confirm.index('askAction === "unpublish"') < confirm.index('call("publish")')
+
+
+def test_a_file_the_page_cannot_read_gets_a_sentence():
+    """體驗 6-07：拖進來的檔讀不到（FileReader 失敗）時不再什麼都不說。"""
+    assert "reader.onerror" in page_html() and "讀不到「" in page_html()
