@@ -39,5 +39,10 @@ def new_module(parent: Path, name: str) -> Path:
     if file.exists():  # 不分大小寫：原版的 iPLoT.py 也算，絕不覆寫
         raise AlreadyExists(name)
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(template(), encoding="utf-8")
+    tmp = file.with_name("iplot.py.tmp")  # 先寫暫存再換名：寫到一半失敗，不會留下一個擋住自己的空 iplot.py（體驗 2-10）
+    try:
+        tmp.write_text(template(), encoding="utf-8")
+        tmp.replace(file)
+    finally:
+        tmp.unlink(missing_ok=True)
     return file.parent

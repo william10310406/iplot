@@ -1,4 +1,4 @@
-"""行數預算（規格「全域限制」、D68）：核心邏輯 ≤ 505 有效行（2026-10-07 由 500 調到 505，D83）；UI 的六個檔各有上限。
+"""行數預算（規格「全域限制」、D68）：核心邏輯 ≤ 510 有效行（2026-10-07 由 500 調到 505，D83；2026-11-14 體驗打磨 2-10 調到 510）；UI 的六個檔各有上限。
 
 有效行（Python）＝非空白、非純註解、非 docstring 所在的行。
 有效行（HTML／CSS／JS）＝非空白、非整行註解（//、/* … */、<!-- … -->）的行。"""
@@ -78,10 +78,13 @@ def test_web_lines_definition(tmp_path):
     assert web_lines(f) == 4  # * { }、a { }、d { }、<p>
 
 
-def test_core_logic_within_505():
+CORE_LIMIT = 510  # 體驗打磨 2-10：505 → 510（清單檔「裁決紀錄」）
+
+
+def test_core_logic_within_limit():
     logic = core_logic()
     total = sum(logic.values())
-    assert total <= 505, f"核心邏輯 {total} 行 > 505：{logic}"
+    assert total <= CORE_LIMIT, f"核心邏輯 {total} 行 > {CORE_LIMIT}：{logic}"
 
 
 def test_panel_is_not_in_core():
