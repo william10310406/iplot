@@ -161,6 +161,7 @@ async function showMonth() {
   }
   if (row.children.length) table.append(row);
   $("view").replaceChildren(table);
+  if (!Object.keys(r.days).length && !$("status").textContent) say("這個月還沒有內容。單擊某一天，就可以寫行程、心情，或加照片");
 }
 
 async function showYear() {

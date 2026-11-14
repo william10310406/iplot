@@ -1479,3 +1479,10 @@ def test_removing_the_publish_folder_asks_first_and_the_button_says_what_it_does
 def test_a_file_the_page_cannot_read_gets_a_sentence():
     """體驗 6-07：拖進來的檔讀不到（FileReader 失敗）時不再什麼都不說。"""
     assert "reader.onerror" in page_html() and "讀不到「" in page_html()
+
+
+def test_an_empty_month_tells_the_first_step():
+    """體驗 6-08（E7）：第一次打開、這個月什麼都沒有時，狀態列說第一步；狀態列已經有別的話就不蓋掉它。"""
+    html_text = page_html()
+    body = html_text[html_text.index("async function showMonth()"):html_text.index("async function showYear()")]
+    assert "單擊某一天，就可以寫行程、心情，或加照片" in body and '!$("status").textContent' in body
