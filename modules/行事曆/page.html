@@ -161,7 +161,8 @@ async function showMonth() {
   }
   if (row.children.length) table.append(row);
   $("view").replaceChildren(table);
-  if (!Object.keys(r.days).length && !$("status").textContent) say("這個月還沒有內容。單擊某一天，就可以寫行程、心情，或加照片");
+  if (r.missing) say("找不到資料夾「" + r.folder + "」（外接碟沒接上？）。接上之後按「今天」，或按 ⚙ 換一個資料夾", true);
+  else if (!Object.keys(r.days).length && !$("status").textContent) say("這個月還沒有內容。單擊某一天，就可以寫行程、心情，或加照片");
 }
 
 async function showYear() {

@@ -235,7 +235,9 @@ class Api:
             if self._platform == "darwin" and ICON_FILE.exists():
                 self._dock_icon(ICON_FILE, self._platform)
         root = self._root()
-        return {"ym": ym, "today": self._today().isoformat(), "days": diary.month_summary(root, ym), "folder": str(root)}
+        missing = root != self._default_root.resolve() and not root.exists()  # 換過的資料夾不在了：外接碟沒接上（體驗 6-09）
+        return {"ym": ym, "today": self._today().isoformat(), "days": diary.month_summary(root, ym), "folder": str(root),
+                **({"missing": True} if missing else {})}
 
     @_guarded
     def year(self, y):

@@ -1486,3 +1486,20 @@ def test_an_empty_month_tells_the_first_step():
     html_text = page_html()
     body = html_text[html_text.index("async function showMonth()"):html_text.index("async function showYear()")]
     assert "單擊某一天，就可以寫行程、心情，或加照片" in body and '!$("status").textContent' in body
+
+
+def test_month_says_when_the_chosen_folder_is_gone_but_not_for_the_untouched_default(load, tmp_path):
+    """體驗 6-09：換過的資料夾不在了（外接碟沒接上）→ month 回 missing；預設資料夾第一次還沒建，不算。"""
+    a = api(load, tmp_path)
+    assert "missing" not in a.month("2026-10")
+    gone = tmp_path / "外接碟" / "行事曆"
+    load("diary").save_root(tmp_path / "設定.json", gone)
+    got = a.month("2026-10")
+    assert got["missing"] is True and got["folder"] == str(gone.resolve()) and got["days"] == {}
+    gone.mkdir(parents=True)
+    assert "missing" not in a.month("2026-10")
+
+
+def test_the_page_turns_missing_into_a_sentence_with_a_next_step():
+    html_text = page_html()
+    assert "r.missing" in html_text and "接上之後按「今天」，或按 ⚙ 換一個資料夾" in html_text
