@@ -1503,3 +1503,8 @@ def test_month_says_when_the_chosen_folder_is_gone_but_not_for_the_untouched_def
 def test_the_page_turns_missing_into_a_sentence_with_a_next_step():
     html_text = page_html()
     assert "r.missing" in html_text and "接上之後按「今天」，或按 ⚙ 換一個資料夾" in html_text
+
+
+def test_rebuild_says_it_is_working_before_the_slow_part():
+    """體驗 6-10：按「重建全部網頁」立刻說「重建中…」。"""
+    assert 'say("重建中…"); const r = await call("rebuild")' in page_html()

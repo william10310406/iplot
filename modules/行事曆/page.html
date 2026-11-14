@@ -420,7 +420,7 @@ function wire() {
   });
   $("reveal").addEventListener("click", () => call("reveal_folder"));
   $("openIndex").addEventListener("click", () => call("open_page", "index", ""));
-  $("rebuild").addEventListener("click", async () => { const r = await call("rebuild"); if (!r.error) say("重建了 " + r.pages + " 頁"); });
+  $("rebuild").addEventListener("click", async () => { say("重建中…"); const r = await call("rebuild"); if (!r.error) say("重建了 " + r.pages + " 頁"); });
   $("panel").addEventListener("click", () => call("launch", "主控面板"));
   $("files").addEventListener("change", (e) => { if (day) addFiles(e.target.files); e.target.value = ""; });
   window.addEventListener("focus", onFocus);  // 重掃模組列（設計第 15 節第 7 條）、過了午夜換「今天」
