@@ -1473,3 +1473,15 @@ def test_publishing_with_nothing_public_removes_the_publish_folder_without_any_c
     empty = body[body.index("if (!s.public_days)"):]
     empty = empty[:empty.index("return;")]                     # 這個分支從頭到第一個 return
     assert 'call("publish")' in empty and 'ask(' not in empty and '"拿掉"' not in html_text and "unpublish" not in html_text
+
+
+def test_month_view_clears_only_its_own_two_status_sentences_when_they_no_longer_apply():
+    """審查 S1：「這個月還沒有內容」「找不到資料夾」是 showMonth 自己說的，換月份、接回外接碟之後不能留在狀態列；
+    別的訊息（「已存」等）不碰。"""
+    html_text = page_html()
+    body = html_text[html_text.index("async function showMonth()"):html_text.index("async function showYear()")]
+    clear = body[body.index('$("view").replaceChildren(table);'):]
+    assert 'startsWith("這個月還沒有內容")' in clear and 'startsWith("找不到資料夾「")' in clear
+    assert clear.index("startsWith") < clear.index("if (r.missing)")                 # 先判斷舊的是不是自己說的
+    assert clear.index("if (r.missing)") < clear.index('say("")') < clear.index("這個月還沒有內容。單擊")  # missing 時不清；不是 missing 才清、再決定要不要說空月份
+    assert clear.count('say("")') == 1
