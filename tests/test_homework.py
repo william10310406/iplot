@@ -1907,3 +1907,19 @@ def test_a_venv_that_cannot_be_built_says_what_to_check(tmp_path, load, monkeypa
     with pytest.raises(RuntimeError) as err:
         hk.ensure_venv(tmp_path / "v3", lambda s: None, popen=gone)
     assert "找不到 Python" in str(err.value) and "No such" not in str(err.value) and "再按一次" in str(err.value)
+
+
+def test_course_run_says_what_to_do_when_something_could_not_be_installed(tmp_path, course_module, monkeypatch):
+    """體驗 8f-02：有套件裝不了（多半是網路）時，總結後面說下一步；只有 Apple Silicon 才有的那種不會叫人再按。"""
+    c = course_module
+    c.absent = {"numpy"}
+    monkeypatch.setattr(c.hk, "install", lambda python, pkgs, say, **kw: ([], [("numpy", "ERROR: no network")]))
+    app = HwApp(tmp_path, COURSE)
+    c.mod.run(app)
+    assert app.logs[-1].startswith("裝不了 numpy（ERROR: no network）") and app.logs[-1].endswith("再按一次「科學計算」，只會補沒裝好的")
+    c.absent = {"mlx-lm"}
+    monkeypatch.setattr(c.hk, "course_batches", lambda *a: (("numpy",), ("mlx-lm",)))
+    monkeypatch.setattr(c.hk, "install", lambda python, pkgs, say, **kw: ([], [("mlx-lm", c.hk.NO_APPLE_SILICON)]))
+    app2 = HwApp(tmp_path, COURSE)
+    c.mod.run(app2)
+    assert "再按一次" not in app2.logs[-1]
