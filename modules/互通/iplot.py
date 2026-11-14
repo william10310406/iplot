@@ -147,6 +147,7 @@ class Api:
         """「加上（N 個檔）」：不收頁面給的任何東西，在這裡重新算一次候選（candidates），每一個用 snippet.add 加上
         （它先存快照）。回補了哪些、問題（一個一句）、新的狀態，頁面用 textContent 重畫。"""
         import snippet
+        from boot import plain
 
         done, problems = [], []
         for info, titles in candidates(self._home, self._config):
@@ -157,7 +158,7 @@ class Api:
             except SyntaxError:
                 problems.append(f"{name}：有語法錯誤，沒補")
             except (OSError, ValueError) as exc:
-                problems.append(f"{name}：沒補：{exc}")
+                problems.append(f"{name}：沒補：{plain(exc)}")
         return {"patched": done, "problems": problems,
                 "status": status(self._home, self._config, self._python, self._folder)}
 

@@ -4,6 +4,7 @@
 
 import ast
 import dataclasses
+import errno
 import getpass
 import importlib
 import importlib.util
@@ -773,7 +774,7 @@ def test_records_are_replaced_atomically(load, home, interop, monkeypatch):     
     before = (interop / ".sync-error").read_bytes()
 
     def boom(*a, **k):
-        raise OSError("磁碟滿了")
+        raise OSError(errno.ENOSPC, "No space left on device")
 
     monkeypatch.setattr(os, "replace", boom)
     problems = do_sync(load, home, interop, platform="darwin")
@@ -1098,11 +1099,11 @@ def test_patch_says_one_sentence_per_problem(load, home, tmp_path, monkeypatch):
     made, interop, config = _patch_tree(home, tmp_path)
 
     def broken(path, keep):
-        raise OSError("唯讀")
+        raise OSError(errno.EROFS, "Read-only file system")
 
     monkeypatch.setattr(load("snippet"), "add", broken)
     result = load_button().Api(None, home, config, "/py", interop).patch()
-    assert (result["patched"], result["problems"]) == ([], ["A：沒補：唯讀", "A › C：沒補：唯讀"])
+    assert (result["patched"], result["problems"]) == ([], ["A：沒補：資料夾是唯讀的", "A › C：沒補：資料夾是唯讀的"])
 
 
 def test_status_counts_reasons_and_candidates(load, home, tmp_path):
@@ -1600,3 +1601,37 @@ def test_an_added_snippet_finds_iplot_from_beside_it(load, tmp_path):
     load("snippet").add(beside / "iplot.py", 20)
     r = subprocess.run([sys.executable, "iplot.py"], cwd=beside, capture_output=True, text=True)
     assert r.returncode == 3
+
+
+PLAIN = [(OSError(errno.ENOSPC, "No space left on device"), "磁碟滿了"),
+         (OSError(errno.EACCES, "Permission denied"), "沒有權限"),
+         (OSError(errno.EROFS, "Read-only file system"), "唯讀"),
+         (OSError("x"), "系統不讓"),
+         (UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"), "UTF-8"),
+         (ValueError("source code string cannot contain null bytes"), "讀不懂")]
+
+
+@pytest.mark.parametrize("exc, plain", PLAIN)
+def test_boot_plain_is_one_chinese_reason_without_the_systems_english(load, exc, plain):
+    """體驗 7-01：寫檔、改檔、做捷徑失敗的原因是中文。"""
+    got = load("boot").plain(exc)
+    assert plain in got and not re.search("[A-Za-z]{4,}", got.replace("UTF-8", ""))
+
+
+def test_shortcut_and_sync_problems_use_the_plain_reason(load, home, interop, monkeypatch):
+    boot, shortcut = load("boot"), load("shortcut")
+    exc = OSError(errno.EACCES, "Permission denied")
+    base = home / "x捷徑"
+    (base / "舊.app" / "Contents").mkdir(parents=True)
+    (base / "舊.app" / "Contents" / "Info.plist").write_bytes(plistlib.dumps({"IPLoTInterop": 1}))
+
+    def boom(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(shortcut.shutil, "rmtree", boom)
+    monkeypatch.setattr(shortcut, "write", boom)
+    problems = shortcut.sync(base, {"新": home}, "/py", home / "run.py")
+    assert problems == [f"捷徑「舊」：拿不掉：{boot.plain(exc)}", f"捷徑「新」：做不出來：{boot.plain(exc)}"]
+    monkeypatch.setattr(load("sync").shortcut, "sync", lambda *a, **k: ["x"])
+    monkeypatch.setattr(os, "replace", boom)
+    assert do_sync(load, home, interop, platform="darwin")[-1] == f"紀錄寫不進去：{boot.plain(exc)}"
