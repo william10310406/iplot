@@ -393,3 +393,31 @@ def test_mac_says_so_when_the_path_is_gone_instead_of_doing_nothing(launches, tm
         call()
     assert launches == [] and app.logs == [f"找不到「{gone}」，可能被改名或刪掉了，沒有打開"] * 4
 
+
+def _kaigong(tmp_path):
+    spec = importlib.util.spec_from_file_location("kaigong", MODULES / "開工" / "iplot.py")
+    mod = importlib.util.module_from_spec(spec)
+    old, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = old
+    logs, did = [], []
+    app = types.SimpleNamespace(home=tmp_path, log=logs.append, open=lambda p: did.append(("open", p)),
+                                edit=lambda p: did.append(("edit", p)), terminal=lambda p: did.append(("terminal", p)))
+    return mod, app, logs
+
+
+def test_kaigong_says_what_is_missing_instead_of_claiming_everything_opened(tmp_path):
+    """體驗 8b-01：docs/ 或設計文件被刪掉時，最後那一行不說「都開了」。"""
+    mod, app, logs = _kaigong(tmp_path)
+    mod.run(app)
+    assert logs == ["開工：docs、02_重構設計.md 找不到，其餘都開了"]
+    (tmp_path / "docs").mkdir()
+    logs.clear()
+    mod.run(app)
+    assert logs == ["開工：02_重構設計.md 找不到，其餘都開了"]
+    (tmp_path / "docs" / "02_重構設計.md").write_text("x")
+    logs.clear()
+    mod.run(app)
+    assert logs == ["開工：iPLoT 資料夾、docs、設計文件、終端機都開了"]
