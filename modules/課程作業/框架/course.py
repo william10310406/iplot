@@ -135,9 +135,13 @@ def read_course(folder: Path) -> Course:
         tree = ast.parse(file.read_text(encoding="utf-8-sig"), str(file))
     except SyntaxError as exc:
         where = f"第 {exc.lineno} 行" if exc.lineno else "某一行"
-        raise CourseError(f"{MARK} 的{where}語法不對：{exc.msg}") from exc
-    except (OSError, ValueError) as exc:  # 讀不到、不是 UTF-8、含 NUL 位元組
-        raise CourseError(f"讀不了 {folder.name}/{MARK}：{exc}") from exc
+        raise CourseError(f"{MARK} 的{where}語法不對：檢查那一行的括號、引號有沒有成對，名字後面是不是 = 值") from exc
+    except UnicodeDecodeError as exc:
+        raise CourseError(f"讀不了 {folder.name}/{MARK}：不是 UTF-8。用文字編輯器打開它，另存成 UTF-8 再按一次") from exc
+    except OSError as exc:  # 讀不到：中文原因，不貼系統的英文（體驗 8g-03）
+        raise CourseError(f"讀不了 {folder.name}/{MARK}：{_why(exc)}") from exc
+    except ValueError as exc:  # 含 NUL 位元組
+        raise CourseError(f"讀不了 {folder.name}/{MARK}：檔裡有不能出現的字元。用文字編輯器打開它，把怪字元拿掉") from exc
     values: dict[str, object] = {}
     for node in tree.body:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
