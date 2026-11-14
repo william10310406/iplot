@@ -574,9 +574,9 @@ def test_page_has_doing_copy_and_last(load):
         assert needle in html, needle
 
 
-def test_reporter_version_is_0_2_0(load):
-    assert load("report").REPORTER == "0.2.0"
-    assert "## [0.2.0]" in (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
+def test_reporter_version_is_the_changelogs_newest_section(load):
+    assert load("report").REPORTER == "0.2.1"
+    assert "## [0.2.1]" in (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
 
 
 def test_core_logic_is_untouched_by_m9():

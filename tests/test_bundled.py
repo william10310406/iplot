@@ -365,7 +365,7 @@ def test_iplots_own_modules_stay_untouched(name):
 @pytest.mark.parametrize("name", ["開工", "打開核心原始碼"])
 def test_changed_workshop_modules_say_so_in_their_changelog(name):
     text = (MODULES / name / "CHANGELOG.md").read_text(encoding="utf-8")
-    top = text[text.index("## [0"):]  # 「未發佈」（體驗打磨加的）不算版本
+    top = text[text.index("## [0.5.1]"):]  # 0.5.1 這一節本身；更新的版本（開工 0.5.2）排在它前面
     assert top.startswith("## [0.5.1] - ") and "加上「互通」的那一小段：可以直接 python3 iplot.py。" in top.split("## [0.5.0]")[0]
 
 

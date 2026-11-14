@@ -62,10 +62,11 @@ def test_meta_is_chinese_with_an_icon():
     assert m.description.startswith("Lean 實數遊戲") and "不用安裝" in m.description
 
 
-def test_changelog_top_section_is_0_1_0_with_a_first_paragraph():
+def test_changelog_has_the_0_1_0_section_with_a_first_paragraph_under_the_newest_one():
     text = (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
     text = text.replace("## [Unreleased]", "## [-]")  # 體驗打磨加的「未發佈」不算版本（tools/publish.py 的 latest() 也略過它）
-    top = text[text.index("## [0"):]
+    assert text[text.index("## [0"):].startswith("## [0.1.1] - 2026-11-15\n\n")  # 最新的一節：publish.py 取它的版本號
+    top = text[text.index("## [0.1.0]"):]
     assert top.startswith("## [0.1.0] - 2026-11-10\n\n")
     first = top.split("\n\n")[1]
     assert "Lean 實數遊戲" in first and "需要網路" in first and "瀏覽器" in first

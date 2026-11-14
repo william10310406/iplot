@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.6.2")
+    assert core.__version__.startswith("0.6.3")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
@@ -113,6 +113,18 @@ def test_0_6_2_notes_carry_both_paths():
     assert notes.index("「互通」按「覆蓋」或「更新」") < notes.index("再回來按「更新」")
 
 
-def test_docs_08_repeats_the_0_6_2_notes():
-    doc = (ROOT / "docs" / "08_操作說明-0.6.2.md").read_text(encoding="utf-8")
-    assert _notes("0.6.2") in doc
+def test_0_6_3_notes_are_for_users_not_for_the_publisher():
+    """「要更新嗎？」的對話框裡就是這一段（清單 1-07）：三到五行、沒有反引號、沒有寫給發佈者的提醒。"""
+    notes = _notes("0.6.3")
+    assert 3 <= len(notes.splitlines()) <= 5
+    assert "`" not in notes
+    for banned in ("按送出前", "直接告訴我", "人名或學號"):
+        assert banned not in notes
+    for part in ("已經是 0.6.0、0.6.1、0.6.2 的人：按「確定」", "重新啟動", "還在 0.5.x 的人請先按「取消」", "「互通」按「覆蓋」或「更新」"):
+        assert part in notes, part
+    assert notes.index("先按「取消」") < notes.index("再回來按「更新」")
+
+
+def test_docs_08_repeats_the_0_6_3_notes():
+    doc = (ROOT / "docs" / "08_操作說明-0.6.3.md").read_text(encoding="utf-8")
+    assert _notes("0.6.3") in doc
