@@ -14,7 +14,12 @@ def _launch(argv, **kw):
 
 def _there(app, path) -> bool:
     """路徑還在才打開；不在就在訊息區說一句。open 的錯誤只會印在看不到的終端機，使用者只會覺得按了沒反應（體驗 8a-01）。"""
-    if Path(path).exists():
+    if isinstance(path, str) and "://" in path:  # 網址不是路徑：不檢查，交給 open
+        return True
+    try:
+        if Path(path).exists():
+            return True
+    except OSError:  # 查不了（例如沒有權限）：當作在，交給 open 自己處理
         return True
     app.log(GONE.format(path=path))
     return False

@@ -421,3 +421,29 @@ def test_kaigong_says_what_is_missing_instead_of_claiming_everything_opened(tmp_
     logs.clear()
     mod.run(app)
     assert logs == ["開工：iPLoT 資料夾、docs、設計文件、終端機都開了"]
+
+
+def test_mac_hands_urls_to_open_without_checking_that_they_exist(launches, tmp_path):
+    """審查 S5：傳進來的是網址（含 ://）時不當路徑檢查，直接交給 open。"""
+    from conftest import FakeApp
+
+    m, app = backend("mac"), FakeApp(tmp_path)
+    m.open(app, "https://example.com/a b")
+    assert [a for a, _ in launches] == [["open", "https://example.com/a b"]] and app.logs == []
+
+
+def test_mac_treats_a_path_it_cannot_check_as_existing(launches, tmp_path, monkeypatch):
+    """審查 S5：Path.exists() 丟例外（例如沒有權限）時當作存在、交給 open 自己處理，不是丟例外也不是說「找不到」。"""
+    from pathlib import Path
+
+    from conftest import FakeApp
+
+    def refuse(self, *args, **kw):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "exists", refuse)
+    m, app = backend("mac"), FakeApp(tmp_path)
+    m.open(app, tmp_path / "x.txt")
+    m.reveal(app, tmp_path / "x.txt")
+    assert [a for a, _ in launches] == [["open", str(tmp_path / "x.txt")], ["open", "-R", str(tmp_path / "x.txt")]]
+    assert app.logs == []
