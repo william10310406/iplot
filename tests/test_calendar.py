@@ -1041,7 +1041,7 @@ def test_save_reports_unreadable_fields_as_sentences(load, tmp_path):
     folder = write_day(tmp_path / "資料", "2026-10-14")
     (folder / "做了.txt").write_bytes(b"\xff\xfe")
     got = a.save("2026-10-14", {"做了": "x"})
-    assert got == {"saved": [], "unreadable": [f"讀不到這個檔（不是 UTF-8），沒有覆寫它：{(folder / '做了.txt').resolve()}"]}
+    assert got == {"saved": [], "unreadable": [f"讀不到這個檔（不是 UTF-8），沒有覆寫它。用文字編輯器打開它、另存成 UTF-8，再回到這一天：{(folder / '做了.txt').resolve()}"]}
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="用 chmod 讓資料夾擋住寫入只在 macOS 才有")
@@ -1264,7 +1264,7 @@ def test_page_html_has_the_five_moods_the_three_fields_and_the_sentences():
     assert all(m in html_text for m in ("😄", "🙂", "😐", "😟", "😢", "行程", "看到了什麼", "做了什麼", "公開", "看網頁",
                                         "發佈", "重建全部網頁", "換資料夾", "打開資料夾", "打開綜合網頁", "圖示面板"))
     assert "要放上網路的有 " in html_text and "產生發佈用的資料夾？" in html_text and "已存" in html_text
-    assert "🌐" in html_text and "🖼" in html_text and "today" in html_text and "讀不到這個檔（不是 UTF-8），沒有覆寫它：" in html_text
+    assert "🌐" in html_text and "🖼" in html_text and "today" in html_text and "讀不到這個檔（不是 UTF-8），沒有覆寫它。用文字編輯器打開它、另存成 UTF-8，再回到這一天：" in html_text
 
 
 def test_page_html_debounces_typing_and_rescans_modules_only_on_focus():       # 設計第 15 節第 8、7 條
@@ -1444,3 +1444,9 @@ def test_page_never_shows_the_raw_exception_text_in_the_status_bar():
     html_text = page_html()
     assert "say(String(e" not in html_text
     assert "console.error(e)" in html_text and "剛才的動作沒做成。再做一次；還是不行就關掉行事曆再打開。" in html_text
+
+
+def test_unreadable_sentences_all_say_what_to_do_next():
+    """體驗 6-04：「讀不到這個檔」的每一處都有下一步（另存成 UTF-8）。"""
+    html_text, pages = page_html(), (CALENDAR / "pages.py").read_text(encoding="utf-8")
+    assert html_text.count("另存成 UTF-8，再回到這一天") == 2 and "另存成 UTF-8，重建網頁就看得到" in pages

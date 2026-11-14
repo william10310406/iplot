@@ -259,7 +259,7 @@ async function showDay() {
   box.append(el("h2", "", cur.getFullYear() + " 年 " + (cur.getMonth() + 1) + " 月 " + cur.getDate() + " 日"));
   const moods = el("div", "moods");
   if (day.unreadable["心情"]) {
-    box.append(el("p", "unreadable", "讀不到這個檔（不是 UTF-8），沒有覆寫它：" + day.unreadable["心情"]));
+    box.append(el("p", "unreadable", "讀不到這個檔（不是 UTF-8），沒有覆寫它。用文字編輯器打開它、另存成 UTF-8，再回到這一天：" + day.unreadable["心情"]));
   } else {
     for (const m of MOODS) {
       const b = el("button", m === day.mood ? "on" : "", m);
@@ -281,7 +281,7 @@ async function showDay() {
   for (const [key, label] of FIELDS) {
     box.append(el("label", "field", label));
     if (day.unreadable[key]) {
-      box.append(el("p", "unreadable", "讀不到這個檔（不是 UTF-8），沒有覆寫它：" + day.unreadable[key]));
+      box.append(el("p", "unreadable", "讀不到這個檔（不是 UTF-8），沒有覆寫它。用文字編輯器打開它、另存成 UTF-8，再回到這一天：" + day.unreadable[key]));
       continue;
     }
     const t = el("textarea");
