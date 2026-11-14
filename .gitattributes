@@ -16,3 +16,6 @@ modules/科學計算/ export-ignore
 modules/課程作業/ export-ignore
 .claude/ export-ignore
 docs/日誌/ export-ignore
+docs/11_* export-ignore
+docs/想法清單.md export-ignore
+modules/Lean/ export-ignore
