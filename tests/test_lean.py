@@ -64,7 +64,8 @@ def test_meta_is_chinese_with_an_icon():
 
 def test_changelog_top_section_is_0_1_0_with_a_first_paragraph():
     text = (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
-    top = text[text.index("## ["):]
+    text = text.replace("## [Unreleased]", "## [-]")  # 體驗打磨加的「未發佈」不算版本（tools/publish.py 的 latest() 也略過它）
+    top = text[text.index("## [0"):]
     assert top.startswith("## [0.1.0] - 2026-11-10\n\n")
     first = top.split("\n\n")[1]
     assert "Lean 實數遊戲" in first and "需要網路" in first and "瀏覽器" in first
