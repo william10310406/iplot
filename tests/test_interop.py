@@ -1635,3 +1635,21 @@ def test_shortcut_and_sync_problems_use_the_plain_reason(load, home, interop, mo
     monkeypatch.setattr(load("sync").shortcut, "sync", lambda *a, **k: ["x"])
     monkeypatch.setattr(os, "replace", boom)
     assert do_sync(load, home, interop, platform="darwin")[-1] == f"紀錄寫不進去：{boot.plain(exc)}"
+
+
+def test_an_unexpected_crash_is_logged_and_said_in_one_sentence(entry, home, monkeypatch, capsys):
+    """體驗 7-02：從捷徑打開時，run.py 自己的意外不能只是沒反應：寫進 logs/iplot.log，跳提示框說一句。"""
+    run = entry.run
+    monkeypatch.setattr(run, "__file__", str(home / "modules" / "互通" / "run.py"))
+    (home / "core").mkdir(exist_ok=True)
+    (home / "core" / "app.py").write_text("", encoding="utf-8")
+    (home / "main.py").write_text("", encoding="utf-8")
+
+    def boom(argv):
+        raise RuntimeError("壞掉了 secret-detail")
+
+    monkeypatch.setattr(run, "main", boom)
+    assert run.entry(["A"]) == run.CANNOT_START
+    assert entry.alerts == [("互通", run.CRASHED)] and "logs/iplot.log" in run.CRASHED
+    assert "RuntimeError: 壞掉了 secret-detail" in (home / "logs" / "iplot.log").read_text(encoding="utf-8")
+    assert "RuntimeError" not in run.CRASHED and "secret-detail" not in entry.alerts[0][1]

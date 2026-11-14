@@ -26,6 +26,7 @@ NO_TK = ("在面板外跑的模組不能開 tkinter 視窗（彈出式視窗用�
          "要用 tkinter，請從面板的安全模式執行：python3 main.py --safe")
 OUTSIDE = "「互通」要放在 iPLoT 的 modules/ 裡才能用：{path}"
 NO_POPUP = "彈出式視窗開不起來：{reason}"
+CRASHED = "互通沒做成。細節記在 iPLoT 資料夾的 logs/iplot.log；再打開一次，還是不行就把那個檔交給幫你的人。"
 USAGE = "用法：python3 run.py <模組資料夾或名稱> [檔案…]"
 OURS = ("boot", "popup", "sync", "snippet", "shortcut")  # 這個資料夾自己的檔：用完就從 sys.modules 拿掉
 
@@ -168,8 +169,28 @@ def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
         sys.meta_path.remove(guard)
 
 
+def entry(argv: list[str]) -> int:
+    """__main__ 的入口：main 沒接住的意外不能只是沒反應（從捷徑打開時 stderr 沒人看）：traceback 記進 iPLoT 的
+    logs/iplot.log（找得到 iPLoT 的話），跳一個提示框說一句話（體驗 7-02）。"""
+    try:
+        return main(argv)
+    except Exception:  # noqa: BLE001  最外層：什麼意外都只能變成一句話
+        import traceback
+
+        text = traceback.format_exc()
+        print(text, file=sys.stderr)
+        home = boot.iplot_home(os.path.abspath(__file__))
+        if home is not None:
+            with contextlib.suppress(OSError):
+                (home / "logs").mkdir(exist_ok=True)
+                with (home / "logs" / "iplot.log").open("a", encoding="utf-8", errors="replace") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n{text}\n")
+        boot.alert("互通", CRASHED)
+        return CANNOT_START
+
+
 if __name__ == "__main__":
-    code = main(sys.argv[1:])
+    code = entry(sys.argv[1:])
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(code)  # 模組自己開的非 daemon 執行緒不能讓程序賴著不走
