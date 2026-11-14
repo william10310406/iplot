@@ -1667,3 +1667,10 @@ def test_copy_that_cannot_start_pbcopy_answers_false_not_an_exception(load, home
 
     monkeypatch.setattr(subprocess, "run", gone)
     assert api.copy("指令") is False
+
+
+def test_page_says_a_sentence_when_resync_or_patch_fails():
+    """體驗 7-04：「再同步一次」「加上」呼叫失敗時，不把「同步中…」留在畫面上，也不是什麼都不說。"""
+    html_text = (INTEROP / "page.html").read_text(encoding="utf-8")
+    assert html_text.count(".catch(") == 2 and "這次沒做成。再按一次；還是不行就關掉這個視窗，在面板再按一次「互通」。" in html_text
+    assert html_text.index(".catch(() => { $(\"syncing\")") < html_text.index('$("resync").disabled = false; });')
