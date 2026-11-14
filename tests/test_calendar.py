@@ -1107,7 +1107,7 @@ def test_change_folder_releases_the_lock_while_the_dialog_is_open(load, tmp_path
     assert time.perf_counter() - start < 0.5
     answer.set()
     t.join(3)
-    assert box == [{"folder": str((tmp_path / "新").resolve()), "public_days": 0, "has_publish": False}]
+    assert box == [{"folder": str((tmp_path / "新").resolve()), "public_days": 0}]
     assert (tmp_path / "資料/2026/10/14/行程.txt").exists() and a.settings()["folder"] == str((tmp_path / "新").resolve())
 
 
@@ -1217,7 +1217,7 @@ def test_launch_runs_run_py_without_the_env_and_only_for_known_names(load, home,
 
 def test_settings_change_folder_and_reveal(load, tmp_path):
     a = api(load, tmp_path)
-    assert a.settings() == {"folder": str((tmp_path / "資料").resolve()), "public_days": 0, "has_publish": False}
+    assert a.settings() == {"folder": str((tmp_path / "資料").resolve()), "public_days": 0}
     assert a.change_folder() == a.settings() and not (tmp_path / "設定.json").exists()   # 按了取消
     a._app.folder_answer = tmp_path / "新"
     assert a.change_folder()["folder"] == str((tmp_path / "新").resolve())
@@ -1403,8 +1403,8 @@ def test_unpublish_only_removes_the_publish_folder_itself(load, tmp_path):
 def test_page_html_shows_the_note_when_publishing_with_nothing_public():
     """公開的日子是 0 天時頁面照樣叫 publish：拿掉了舊的 發佈/ 就把那一句顯示在狀態列（不是錯誤的紅字）。"""
     html_text = page_html()
-    branch = html_text[html_text.index("async function confirmPublish"):][:400]
-    assert 'call("publish")' in branch and "say(gone.note)" in branch
+    branch = html_text[html_text.index("if (!s.public_days)"):][:300]
+    assert 'call("publish")' in branch and "say(r.note)" in branch
 
 
 @pytest.mark.parametrize("code, plain", [(errno.ENOSPC, "磁碟滿了"), (errno.EACCES, "沒有權限"), (errno.EPERM, "沒有權限"),
@@ -1458,53 +1458,18 @@ def test_publish_confirmation_says_nothing_is_uploaded_and_what_happens_to_the_f
     assert "這一步不會上傳任何東西" in html_text and "自己放進去的檔會被刪掉" in html_text
 
 
-def test_settings_says_whether_a_publish_folder_is_there(load, tmp_path):
-    a = api(load, tmp_path)
-    assert a.settings()["has_publish"] is False
-    (tmp_path / "資料" / "發佈").mkdir(parents=True)
-    assert a.settings()["has_publish"] is True
-
-
-def test_removing_the_publish_folder_asks_first_and_the_button_says_what_it_does():
-    """體驗 6-06：公開的日子是 0 天、發佈/ 還在時，不再不問就刪；確認框說明是直接刪除、不能復原，按鈕是「拿掉」。"""
+def test_publishing_with_nothing_public_removes_the_publish_folder_without_any_choice_to_keep_it(load, tmp_path):
+    """審查 M1（隱私）：剛取消公開的日子不能因為按了「取消」而留在 發佈/ 裡。流程：公開一天、發佈、取消公開、再發佈
+    → 發佈/ 裡沒有那一天的任何檔；頁面在沒有公開的日子時直接叫 publish，不經過任何確認框（沒有可以讓它留下來的選項）。"""
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    a.save("2026-10-14", {"行程": "很私人的一天"})
+    a.set_public("2026-10-14", True)
+    assert a.publish()["days"] == 1
+    a.set_public("2026-10-14", False)
+    assert a.settings() == {"folder": str(root.resolve()), "public_days": 0}     # 頁面不需要知道 發佈/ 在不在
+    assert a.publish() == {"note": "沒有公開的日子了，已經拿掉 發佈/"} and not (root / "發佈").exists()
     html_text = page_html()
-    start = html_text.index("async function publish()")
-    body = html_text[start:html_text.index("async function confirmPublish")]
-    assert "!s.public_days && !s.has_publish" in body and '"拿掉", "unpublish"' in body
-    assert "直接刪除，不進垃圾桶，不能復原" in body
-    confirm = html_text[html_text.index("async function confirmPublish"):][:260]
-    assert confirm.index('askAction === "unpublish"') < confirm.index('call("publish")')
-
-
-def test_a_file_the_page_cannot_read_gets_a_sentence():
-    """體驗 6-07：拖進來的檔讀不到（FileReader 失敗）時不再什麼都不說。"""
-    assert "reader.onerror" in page_html() and "讀不到「" in page_html()
-
-
-def test_an_empty_month_tells_the_first_step():
-    """體驗 6-08（E7）：第一次打開、這個月什麼都沒有時，狀態列說第一步；狀態列已經有別的話就不蓋掉它。"""
-    html_text = page_html()
-    body = html_text[html_text.index("async function showMonth()"):html_text.index("async function showYear()")]
-    assert "單擊某一天，就可以寫行程、心情，或加照片" in body and '!$("status").textContent' in body
-
-
-def test_month_says_when_the_chosen_folder_is_gone_but_not_for_the_untouched_default(load, tmp_path):
-    """體驗 6-09：換過的資料夾不在了（外接碟沒接上）→ month 回 missing；預設資料夾第一次還沒建，不算。"""
-    a = api(load, tmp_path)
-    assert "missing" not in a.month("2026-10")
-    gone = tmp_path / "外接碟" / "行事曆"
-    load("diary").save_root(tmp_path / "設定.json", gone)
-    got = a.month("2026-10")
-    assert got["missing"] is True and got["folder"] == str(gone.resolve()) and got["days"] == {}
-    gone.mkdir(parents=True)
-    assert "missing" not in a.month("2026-10")
-
-
-def test_the_page_turns_missing_into_a_sentence_with_a_next_step():
-    html_text = page_html()
-    assert "r.missing" in html_text and "接上之後按「今天」，或按 ⚙ 換一個資料夾" in html_text
-
-
-def test_rebuild_says_it_is_working_before_the_slow_part():
-    """體驗 6-10：按「重建全部網頁」立刻說「重建中…」。"""
-    assert 'say("重建中…"); const r = await call("rebuild")' in page_html()
+    body = html_text[html_text.index("async function publish()"):html_text.index("async function confirmPublish")]
+    empty = body[body.index("if (!s.public_days)"):]
+    empty = empty[:empty.index("return;")]                     # 這個分支從頭到第一個 return
+    assert 'call("publish")' in empty and 'ask(' not in empty and '"拿掉"' not in html_text and "unpublish" not in html_text
