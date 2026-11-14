@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import collections
 import contextlib
+import errno
 import importlib.util
 import json
 import os
@@ -361,8 +362,17 @@ def homeworks(course: Course) -> list[tuple[str, Path]]:
     return [(code, file) for _, code, file in sorted(found)]
 
 
+REASONS = {errno.ENOSPC: "磁碟滿了", errno.EACCES: "沒有權限", errno.EPERM: "沒有權限", errno.EROFS: "資料夾是唯讀的",
+           errno.ENOENT: "找不到檔案或資料夾", errno.ENOTDIR: "路徑上有一段不是資料夾", errno.ENAMETOOLONG: "名稱太長"}
+
+
+def _why(exc: OSError) -> str:
+    """OSError 的原因：一句中文，不貼系統的英文（Permission denied 等）（體驗 8g-01）。"""
+    return REASONS.get(exc.errno, "系統不讓讀或寫")
+
+
 def _unreadable(file: Path, exc: OSError) -> str:
-    return f"讀不了 {file.name}（{exc.strerror or exc}）"
+    return f"讀不了 {file.name}（{_why(exc)}）"
 
 
 def _os_problem(exc: OSError, file: Path | None, course_folder: Path) -> str:
@@ -370,13 +380,13 @@ def _os_problem(exc: OSError, file: Path | None, course_folder: Path) -> str:
     才說「讀不了 <作業檔>」（D147）。"""
     where = Path(os.path.abspath(exc.filename)) if exc.filename else None
     if where is None or (file is not None and where == Path(os.path.abspath(file))):
-        return _unreadable(file, exc) if file is not None else f"出了問題（{exc.strerror or exc}）"
+        return _unreadable(file, exc) if file is not None else f"出了問題（{_why(exc)}）"
     base = Path(os.path.abspath(course_folder)).parent
     try:
         shown = where.relative_to(base).as_posix()
     except ValueError:
         shown = str(where)
-    return f"{shown} 有問題（{exc.strerror or exc}）"
+    return f"{shown} 有問題（{_why(exc)}）"
 
 
 def _kind_of(file: Path, kinds: list[ModuleType]) -> ModuleType | None:
