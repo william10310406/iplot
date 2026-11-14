@@ -351,7 +351,7 @@ async function publish() {
     if (r.note) say(r.note);
     return;
   }
-  $("askText").textContent = "要放上網路的有 " + s.public_days + " 天（只有打開『公開』的日子）。產生發佈用的資料夾？";
+  $("askText").textContent = "打開『公開』的有 " + s.public_days + " 天。要產生發佈用的資料夾嗎？這一步不會上傳任何東西；發佈/ 裡原有的檔會換成新產生的，自己放進去的檔會被刪掉。";
   $("ask").hidden = false;
 }
 

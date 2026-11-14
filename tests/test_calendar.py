@@ -1263,7 +1263,7 @@ def test_page_html_has_the_five_moods_the_three_fields_and_the_sentences():
     html_text = page_html()
     assert all(m in html_text for m in ("😄", "🙂", "😐", "😟", "😢", "行程", "看到了什麼", "做了什麼", "公開", "看網頁",
                                         "發佈", "重建全部網頁", "換資料夾", "打開資料夾", "打開綜合網頁", "圖示面板"))
-    assert "要放上網路的有 " in html_text and "產生發佈用的資料夾？" in html_text and "已存" in html_text
+    assert "打開『公開』的有 " in html_text and "要產生發佈用的資料夾嗎？" in html_text and "已存" in html_text
     assert "🌐" in html_text and "🖼" in html_text and "today" in html_text and "讀不到這個檔（不是 UTF-8），沒有覆寫它。用文字編輯器打開它、另存成 UTF-8，再回到這一天：" in html_text
 
 
@@ -1450,3 +1450,9 @@ def test_unreadable_sentences_all_say_what_to_do_next():
     """體驗 6-04：「讀不到這個檔」的每一處都有下一步（另存成 UTF-8）。"""
     html_text, pages = page_html(), (CALENDAR / "pages.py").read_text(encoding="utf-8")
     assert html_text.count("另存成 UTF-8，再回到這一天") == 2 and "另存成 UTF-8，重建網頁就看得到" in pages
+
+
+def test_publish_confirmation_says_nothing_is_uploaded_and_what_happens_to_the_folder():
+    """體驗 6-05：確認框說明這一步做什麼（只產生資料夾、不上傳；發佈/ 裡原有的檔會換掉或刪掉）。"""
+    html_text = page_html()
+    assert "這一步不會上傳任何東西" in html_text and "自己放進去的檔會被刪掉" in html_text
