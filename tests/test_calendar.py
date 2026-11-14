@@ -4,6 +4,7 @@
 
 import dataclasses
 import datetime
+import errno
 import importlib
 import inspect
 import json
@@ -374,8 +375,8 @@ def test_duplicate_names_get_a_number(load, tmp_path):
 
 def test_add_image_rejects_too_big_and_non_images(load, tmp_path):
     p = load("photos")
-    assert p.add_image(tmp_path, "x.jpg", b"\0" * (30 * 1024 * 1024 + 1)) == (None, "x.jpg：太大（超過 30 MB）")
-    assert p.add_image(tmp_path, "x.txt", b"hi") == (None, "x.txt：不是圖片")
+    assert p.add_image(tmp_path, "x.jpg", b"\0" * (30 * 1024 * 1024 + 1)) == (None, "x.jpg：太大（超過 30 MB）。縮小之後再加")
+    assert p.add_image(tmp_path, "x.txt", b"hi") == (None, "x.txt：不是圖片。可以加 JPG、PNG、GIF、HEIC")
     assert list(tmp_path.iterdir()) == []
 
 
@@ -828,10 +829,11 @@ def test_a_launch_that_fails_is_one_sentence(load, home, tmp_path):
     with_run_py(home)
 
     def popen(argv, **kw):
-        raise OSError("沒有這個程式")
+        raise OSError(errno.ENOENT, "No such file or directory")
 
     mod.open_or_focus(app, tmp_path / "行事曆", environ={}, ps=lambda: "", popen=popen, activate=never, me=999)
-    assert app.logs == ["打不開行事曆：沒有這個程式"]
+    assert len(app.logs) == 1 and app.logs[0].startswith("打不開行事曆：找不到檔案或資料夾。")
+    assert "No such" not in app.logs[0] and "Errno" not in app.logs[0]  # 體驗 6-01：不貼系統的英文原因
 
 
 def test_in_own_process_removes_the_env_first_writes_pid_opens_the_page_then_removes_pid(load, home, tmp_path):
@@ -1039,7 +1041,7 @@ def test_save_reports_unreadable_fields_as_sentences(load, tmp_path):
     folder = write_day(tmp_path / "資料", "2026-10-14")
     (folder / "做了.txt").write_bytes(b"\xff\xfe")
     got = a.save("2026-10-14", {"做了": "x"})
-    assert got == {"saved": [], "unreadable": [f"讀不到這個檔（不是 UTF-8），沒有覆寫它：{(folder / '做了.txt').resolve()}"]}
+    assert got == {"saved": [], "unreadable": [f"讀不到這個檔（不是 UTF-8），沒有覆寫它。用文字編輯器打開它、另存成 UTF-8，再回到這一天：{(folder / '做了.txt').resolve()}"]}
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="用 chmod 讓資料夾擋住寫入只在 macOS 才有")
@@ -1139,9 +1141,9 @@ def test_add_image_decodes_base64_and_rejects_junk(load, tmp_path):
     got = a.add_image("2026-10-14", "a.jpg", "data:image/jpeg;base64," + base64.b64encode(gps_jpeg()).decode())
     assert [i["name"] for i in got["images"]] == ["a.jpg"] and "error" not in got
     assert (tmp_path / "資料/2026/10/14/a.jpg").read_bytes() == gps_jpeg() and (tmp_path / "資料/2026/10/14/index.html").exists()
-    assert a.add_image("2026-10-14", "b.jpg", "not base64!")["error"] == "b.jpg：不是圖片"
+    assert a.add_image("2026-10-14", "b.jpg", "not base64!")["error"] == "b.jpg：不是圖片。可以加 JPG、PNG、GIF、HEIC"
     big = base64.b64encode(b"\0" * (30 * 1024 * 1024 + 1)).decode()
-    assert a.add_image("2026-10-14", "c.jpg", big)["error"] == "c.jpg：太大（超過 30 MB）"
+    assert a.add_image("2026-10-14", "c.jpg", big)["error"] == "c.jpg：太大（超過 30 MB）。縮小之後再加"
 
 
 def test_remove_image_trashes_the_jpg_and_the_heic_together(load, tmp_path):
@@ -1261,8 +1263,8 @@ def test_page_html_has_the_five_moods_the_three_fields_and_the_sentences():
     html_text = page_html()
     assert all(m in html_text for m in ("😄", "🙂", "😐", "😟", "😢", "行程", "看到了什麼", "做了什麼", "公開", "看網頁",
                                         "發佈", "重建全部網頁", "換資料夾", "打開資料夾", "打開綜合網頁", "圖示面板"))
-    assert "要放上網路的有 " in html_text and "產生發佈用的資料夾？" in html_text and "已存" in html_text
-    assert "🌐" in html_text and "🖼" in html_text and "today" in html_text and "讀不到這個檔（不是 UTF-8），沒有覆寫它：" in html_text
+    assert "打開『公開』的有 " in html_text and "要產生發佈用的資料夾嗎？" in html_text and "已存" in html_text
+    assert "🌐" in html_text and "🖼" in html_text and "today" in html_text and "讀不到這個檔（不是 UTF-8），沒有覆寫它。用文字編輯器打開它、另存成 UTF-8，再回到這一天：" in html_text
 
 
 def test_page_html_debounces_typing_and_rescans_modules_only_on_focus():       # 設計第 15 節第 8、7 條
@@ -1403,3 +1405,83 @@ def test_page_html_shows_the_note_when_publishing_with_nothing_public():
     html_text = page_html()
     branch = html_text[html_text.index("if (!s.public_days)"):][:300]
     assert 'call("publish")' in branch and "say(r.note)" in branch
+
+
+@pytest.mark.parametrize("code, plain", [(errno.ENOSPC, "磁碟滿了"), (errno.EACCES, "沒有權限"), (errno.EPERM, "沒有權限"),
+                                          (errno.EROFS, "唯讀"), (errno.ENOENT, "找不到"), (errno.ENAMETOOLONG, "太長"),
+                                          (errno.EIO, "系統不讓")])
+def test_os_errors_become_a_plain_reason_in_chinese(load, tmp_path, code, plain):
+    """體驗 6-01：存不進去、打不開模組、照片沒放上網路，原因是中文，不貼系統的英文（Permission denied 等）。"""
+    diary = load("diary")
+    exc = OSError(code, os.strerror(code))
+    assert plain in diary.reason(exc) and os.strerror(code) not in diary.reason(exc)
+    assert diary.reason(OSError("沒有 errno")) == diary.reason(OSError(errno.EIO, "x"))  # 認不得的用籠統的一句
+    a = api(load, tmp_path)
+    a._root = lambda: (_ for _ in ()).throw(exc)  # _guarded 接住 OSError
+    got = a.month("2026-10")
+    assert got["error"].startswith("存不進去：") and os.strerror(code) not in got["error"] and plain in got["error"]
+    a2 = api(load, tmp_path, popen=lambda *x, **k: (_ for _ in ()).throw(exc))
+    (a2._app.home / "modules" / "互通").mkdir(parents=True)
+    (a2._app.home / "modules" / "互通" / "run.py").write_text("")
+    make = a2._app.home / "modules" / "甲"
+    make.mkdir()
+    (make / "iplot.py").write_text("def run(app):\n    pass\n")
+    got = a2.launch("甲")
+    assert got["error"].startswith("打不開「甲」：") and plain in got["error"] and os.strerror(code) not in got["error"]
+
+
+def test_text_that_cannot_be_encoded_is_a_plain_sentence_not_python_english(load, tmp_path):
+    """體驗 6-02：存不了的字元（UnicodeError 也是 ValueError）不貼 Python 的英文原文；原來的檔案完好。"""
+    a = api(load, tmp_path)
+    a.save("2026-10-14", {"行程": "原來的"})
+    got = a.save("2026-10-14", {"行程": "壞\ud800字"})
+    assert got == {"error": "這段文字裡有存不進去的字元，請改掉它再存"}
+    assert a.day("2026-10-14")["行程"] == "原來的"
+
+
+def test_page_never_shows_the_raw_exception_text_in_the_status_bar():
+    """體驗 6-03：呼叫 Python 出了沒接住的例外，狀態列說固定的一句中文，原文只進 console。"""
+    html_text = page_html()
+    assert "say(String(e" not in html_text
+    assert "console.error(e)" in html_text and "剛才的動作沒做成。再做一次；還是不行就關掉行事曆再打開。" in html_text
+
+
+def test_unreadable_sentences_all_say_what_to_do_next():
+    """體驗 6-04：「讀不到這個檔」的每一處都有下一步（另存成 UTF-8）。"""
+    html_text, pages = page_html(), (CALENDAR / "pages.py").read_text(encoding="utf-8")
+    assert html_text.count("另存成 UTF-8，再回到這一天") == 2 and "另存成 UTF-8，重建網頁就看得到" in pages
+
+
+def test_publish_confirmation_says_nothing_is_uploaded_and_what_happens_to_the_folder():
+    """體驗 6-05：確認框說明這一步做什麼（只產生資料夾、不上傳；發佈/ 裡原有的檔會換掉或刪掉）。"""
+    html_text = page_html()
+    assert "這一步不會上傳任何東西" in html_text and "自己放進去的檔會被刪掉" in html_text
+
+
+def test_publishing_with_nothing_public_removes_the_publish_folder_without_any_choice_to_keep_it(load, tmp_path):
+    """審查 M1（隱私）：剛取消公開的日子不能因為按了「取消」而留在 發佈/ 裡。流程：公開一天、發佈、取消公開、再發佈
+    → 發佈/ 裡沒有那一天的任何檔；頁面在沒有公開的日子時直接叫 publish，不經過任何確認框（沒有可以讓它留下來的選項）。"""
+    a, root = api(load, tmp_path), tmp_path / "資料"
+    a.save("2026-10-14", {"行程": "很私人的一天"})
+    a.set_public("2026-10-14", True)
+    assert a.publish()["days"] == 1
+    a.set_public("2026-10-14", False)
+    assert a.settings() == {"folder": str(root.resolve()), "public_days": 0}     # 頁面不需要知道 發佈/ 在不在
+    assert a.publish() == {"note": "沒有公開的日子了，已經拿掉 發佈/"} and not (root / "發佈").exists()
+    html_text = page_html()
+    body = html_text[html_text.index("async function publish()"):html_text.index("async function confirmPublish")]
+    empty = body[body.index("if (!s.public_days)"):]
+    empty = empty[:empty.index("return;")]                     # 這個分支從頭到第一個 return
+    assert 'call("publish")' in empty and 'ask(' not in empty and '"拿掉"' not in html_text and "unpublish" not in html_text
+
+
+def test_month_view_clears_only_its_own_two_status_sentences_when_they_no_longer_apply():
+    """審查 S1：「這個月還沒有內容」「找不到資料夾」是 showMonth 自己說的，換月份、接回外接碟之後不能留在狀態列；
+    別的訊息（「已存」等）不碰。"""
+    html_text = page_html()
+    body = html_text[html_text.index("async function showMonth()"):html_text.index("async function showYear()")]
+    clear = body[body.index('$("view").replaceChildren(table);'):]
+    assert 'startsWith("這個月還沒有內容")' in clear and 'startsWith("找不到資料夾「")' in clear
+    assert clear.index("startsWith") < clear.index("if (r.missing)")                 # 先判斷舊的是不是自己說的
+    assert clear.index("if (r.missing)") < clear.index('say("")') < clear.index("這個月還沒有內容。單擊")  # missing 時不清；不是 missing 才清、再決定要不要說空月份
+    assert clear.count('say("")') == 1

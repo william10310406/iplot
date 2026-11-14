@@ -80,9 +80,11 @@ def test_install_failure_without_error_lines_returns_the_last_five(home, req):
     assert install.install(home, req, lambda line: None, FakePopen(lines, 2)) == "\n".join(lines[-5:])
 
 
-def test_install_without_pip_reports_the_reason(home, req):
+def test_install_without_pip_says_so_in_plain_words(home, req):
+    """體驗 1-06：Python 沒有 pip，說的是這件事，不是 pip 的英文、也不讓人以為是網路的問題。"""
     result = install.install(home, req, lambda line: None, FakePopen(["/usr/bin/python3: No module named pip"], 1))
-    assert "No module named pip" in result
+    assert result == T["no_pip"] and "pip" in result and "python.org" in result
+    assert "No module named" not in result and not (home / "lib" / ".installed").exists()
 
 
 def test_installed_compares_hash(home, req):

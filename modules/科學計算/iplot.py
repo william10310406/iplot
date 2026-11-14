@@ -27,6 +27,8 @@ def run(app):
         return
     ok, failed = hk_tk.install(python, need, say=app.log)
     said = hk_tk.summary_of_install(ok, failed)
+    if any(pkg not in hk_tk.APPLE_SILICON_ONLY for pkg, _ in failed):  # 沒裝好的多半是網路：說下一步（體驗 8f-02）
+        said += "。網路正常的話，再按一次「科學計算」，只會補沒裝好的"
     if need[0] in basic and hk_tk.missing(python, heavy):
         said += f"；第二批（HK9–HK12 用的 torch 那些，{hk_tk.BATCH_SIZES[1]}）再按一次「科學計算」"
     app.log(said)

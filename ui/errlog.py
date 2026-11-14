@@ -77,7 +77,7 @@ def write(home: Path, error: ErrorInfo, recent: list[str]) -> None:
 class Offer:
     """自動跳出「出錯了，要回報嗎？」該不該問：同一種錯誤 WINDOW 秒內只問一次；勾了「這次執行期間不要再問」
     （muted）之後都不問。config.py 的錯誤（自己改壞的設定）、「回報與討論」自己的錯誤、學生作業的錯誤
-    （student_homework）不問。只記在記憶體。"""
+    （student_homework）、在 input() 的提問框按取消（體驗 2-08）不問。只記在記憶體。"""
 
     def __init__(self, window: float = WINDOW, clock: Callable[[], float] = time.monotonic) -> None:
         self._window, self._clock = window, clock
@@ -85,7 +85,8 @@ class Offer:
         self.muted = False
 
     def due(self, error: ErrorInfo) -> bool:
-        if self.muted or error.source == "config" or error.module == REPORT_MODULE or student_homework(error):
+        if (self.muted or error.source == "config" or error.module == REPORT_MODULE
+                or error.kind == "InputCancelled" or student_homework(error)):  # 按取消是自己的動作，不是出錯
             return False
         key, now = (error.kind, str(error.file), error.line), self._clock()
         if now - self._asked.get(key, -self._window) < self._window:

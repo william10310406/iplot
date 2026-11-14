@@ -629,7 +629,7 @@ def test_a_failed_snapshot_is_one_sentence_and_leaves_no_half_zip(workshop, mods
     answer = api.install("記帳", True)
     monkeypatch.undo()
     assert len(calls) == 2, "真的走到存快照"
-    assert answer == "無法安裝：[Errno 28] 模擬：磁碟滿了；沒有裝成，還沒動到資料夾（存快照時出錯）", answer
+    assert answer == "無法安裝：磁碟滿了；沒有裝成，還沒動到資料夾（存快照時出錯）", answer  # 體驗 3-05：原因是中文，沒有 [Errno 28]
     assert tree(folder) == before, "資料夾逐位元組不變，.history/ 沒有新檔"
 
 
@@ -1045,3 +1045,116 @@ def test_run_with_empty_uploads_opens_an_empty_list(mods, src, entry):
     run(app)
     [(_, html, _)] = app.pages
     assert "沒有人審查" in html and "<tr" not in html and "整理桌面" not in html
+
+
+# 體驗打磨 3：網路的三種失敗（沒有網路、逾時、對方回錯誤）各有一句人話
+
+import errno  # noqa: E402
+import socket  # noqa: E402
+import ssl  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+ENGLISH = ("Errno", "timed out", "Not Found", "nodename", "CERTIFICATE", "urlopen", "No space left", "Permission denied")
+
+
+def http_error(code, reason):
+    return urllib.error.HTTPError("https://x.test/index.json", code, reason, {}, None)
+
+
+@pytest.mark.parametrize("exc, words", [
+    (urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known")), "沒有網路"),
+    (urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")), "沒有網路"),
+    (TimeoutError("timed out"), "逾時"),
+    (urllib.error.URLError(TimeoutError("timed out")), "逾時"),
+    (http_error(404, "Not Found"), "404"),
+    (http_error(403, "rate limit exceeded"), "403"),
+    (http_error(429, "Too Many Requests"), "太多次"),
+    (http_error(503, "Service Unavailable"), "暫時有問題"),
+    (urllib.error.URLError(ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")), "憑證"),
+    (OSError(errno.ENOSPC, "No space left on device"), "磁碟滿了"),
+    (PermissionError(errno.EACCES, "Permission denied"), "權限"),
+    (urllib.error.URLError(FileNotFoundError(2, "No such file or directory")), "找不到"),
+])
+def test_plain_says_what_went_wrong_in_chinese(workshop, exc, words):
+    sentence = workshop.plain(exc)
+    assert words in sentence, sentence
+    assert not any(e in sentence for e in ENGLISH), sentence
+
+
+def test_a_failed_listing_is_a_sentence_with_the_next_step(mods, monkeypatch):
+    def boom(url, **kw):
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    app = FakeApp(mods.parent, workshop_url="https://example.test/index.json")
+    run(app)
+    [line] = app.logs
+    assert line.startswith("工作坊的清單抓不下來：") and "沒有網路" in line and "再雙擊一次「工作坊」" in line
+    assert "WORKSHOP_URL" in line and not any(e in line for e in ENGLISH) and app.pages == []
+
+
+def test_a_failed_download_names_the_cause_and_says_to_try_again(workshop, mods, entry, monkeypatch):
+    def boom(url, **kw):
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    answer = workshop.Api(FakeApp(mods.parent), [entry], mods).install("整理桌面")
+    assert answer.startswith("無法安裝：") and "沒有網路" in answer and "再試一次" in answer
+    assert not any(e in answer for e in ENGLISH) and not (mods / "整理桌面").exists()
+
+
+def test_an_unreadable_listing_does_not_show_the_json_parser_text(mods, tmp_path):
+    """體驗 3-02：清單不是 JSON 時，不把 `Expecting value: line 1 column 1` 這種英文給人看；我們自己寫的中文原因照留。"""
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text("[]", encoding="utf-8")
+    app = FakeApp(mods.parent, workshop_url=bad.as_uri())
+    run(app)
+    [line] = app.logs
+    assert line.startswith("讀不懂工作坊的清單") and "Expecting" not in line and "line 1" not in line
+    assert "WORKSHOP_URL" in line and "再雙擊一次「工作坊」" in line
+    app = FakeApp(mods.parent, workshop_url=wrong.as_uri())
+    run(app)
+    assert "格式不對" in app.logs[0], "我們自己寫的中文原因保留"
+
+
+def test_the_page_shows_progress_while_installing():
+    """體驗 3-03：頁面是 JS，這裡只釘住順序與字：按下去先換成「安裝中…」才呼叫 Python；要確認時換回原來的字。
+    （沒有可以跑 JS 的環境，所以是字串順序的檢查，不是執行。）"""
+    page = (MODULE / "page.html").read_text(encoding="utf-8")
+    progress, call = page.index('cell.textContent = "安裝中…"'), page.index("window.pywebview.api.install(")
+    assert progress < call, "先顯示進行中，再等 Python"
+    assert 'if (answer === "需要確認") { cell.textContent = before;' in page, "要確認的時候不能留在「安裝中…」"
+
+
+def test_an_empty_list_says_why_and_what_to_do():
+    """體驗 3-04：空清單說可能的原因與下一步（頁面是靜態文字，這裡直接讀出來比對）。"""
+    page = (MODULE / "page.html").read_text(encoding="utf-8")
+    empty = page[page.index('id="empty"'):].split("</p>")[0]
+    assert "還沒有人上傳" in empty and "再開一次" in empty
+
+
+def test_a_failed_copy_gives_a_plain_reason_in_front_of_the_rollback_report(workshop, mods, src, monkeypatch):
+    """體驗 3-05：寫檔寫到一半失敗（磁碟滿了、沒有權限），「無法安裝：」後面是中文原因，不是 [Errno 28] 加英文。"""
+    make_module(mods, "整理桌面", "print('我自己的')\n")
+    real, calls = workshop.shutil.copyfile, []
+
+    def copyfile(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(target))
+        return real(source, target)
+
+    monkeypatch.setattr(workshop.shutil, "copyfile", copyfile)
+    answer = workshop.Api(FakeApp(mods.parent), [pack(src, "整理桌面", V2)], mods).install("整理桌面", True)
+    monkeypatch.undo()
+    assert answer.startswith("無法安裝：磁碟滿了；沒有裝成，已從快照放回"), answer
+    assert not any(e in answer for e in ENGLISH) and "[" not in answer
+
+
+def test_a_bad_name_is_blamed_on_the_list_not_the_index(workshop, mods, entry):
+    """體驗 3-06：畫面上一律叫「清單」，不叫「索引」。"""
+    answer = workshop.Api(FakeApp(mods.parent), [{**entry, "name": "../外面"}], mods).install("../外面")
+    assert answer == "無法安裝：清單裡的模組名稱不是單純的資料夾名" and "索引" not in answer

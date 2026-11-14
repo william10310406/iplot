@@ -10,6 +10,7 @@ from typing import Any
 
 from core.core import Core
 from core.errors import describe
+from core.text import T
 from core.types import ErrorInfo, Scope
 
 
@@ -89,6 +90,8 @@ def install(home: Path, req: Path, say: Callable[[str], None], popen: Any = subp
         say(line.rstrip("\n"))
         tail = [*tail, line.rstrip("\n")][-5:]
     if proc.wait() != 0:
+        if any("No module named pip" in line for line in tail):
+            return T["no_pip"]
         return "\n".join([line for line in tail if line.startswith("ERROR")] or tail)
     lib.mkdir(exist_ok=True)
     (lib / ".installed").write_text(_digest(req), encoding="utf-8")

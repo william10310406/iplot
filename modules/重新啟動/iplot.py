@@ -30,4 +30,7 @@ ICON = "🔄"
 
 def run(app):
     os.chdir(app.home)  # 執行期間的工作目錄是這個模組的資料夾；新的 iPLoT 要從自己的資料夾起來
-    os.execv(sys.executable, [sys.executable, str(app.home / "main.py")])
+    try:
+        os.execv(sys.executable, [sys.executable, str(app.home / "main.py")])
+    except OSError:  # 換不了程序（例如 Python 被搬走了）：舊的面板還在，照常用
+        app.log("沒有重新啟動。請關掉 iPLoT（視窗和終端機都關），再開一次。")

@@ -14,10 +14,10 @@ def read_meta(file: Path) -> Meta:
         tree = ast.parse(file.read_text(encoding="utf-8-sig"), str(file))
     except SyntaxError as exc:
         if exc.lineno is None:
-            return Meta(None, "", False, False, str(exc))
+            return Meta(None, "", False, False, T["file_unreadable"])
         return Meta(None, "", False, False, T["syntax_error"].format(line=exc.lineno, message=exc.msg))
-    except (ValueError, OSError) as exc:  # 解碼失敗、3.10 的 NUL 位元組、讀不到
-        return Meta(None, "", False, False, str(exc))
+    except (ValueError, OSError):  # 解碼失敗、3.10 的 NUL 位元組、讀不到
+        return Meta(None, "", False, False, T["file_unreadable"])
     consts, funcs = {}, set()  # 頂層的 TITLE = "…"、ICON = "…"：只認字串常數
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):

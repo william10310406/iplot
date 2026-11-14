@@ -154,5 +154,24 @@ def main() -> None:
         bootstrap(home, config, err, str(exc), rebooted)
 
 
+def run() -> None:
+    """啟動；途中沒預料到的例外不把 traceback 丟到使用者眼前：寫進 logs/iplot.log，終端機只說一句（體驗 1-02）。"""
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001  最外層：使用者看到的是一句話，細節在記錄檔
+        import time
+        import traceback
+
+        logs = Path(__file__).resolve().parent / "logs"
+        try:
+            logs.mkdir(exist_ok=True)
+            with (logs / "iplot.log").open("a", encoding="utf-8", errors="replace") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n{''.join(traceback.format_exception(exc))}\n")
+        except (OSError, ValueError):
+            pass  # 記錄寫不了就算了：不能讓說明這一句也出不來
+        print(T["start_failed"], flush=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    main()
+    run()

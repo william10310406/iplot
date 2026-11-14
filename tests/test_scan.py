@@ -172,3 +172,14 @@ def test_icon_folder_is_not_an_icon_file(home):
 def test_icon_constant_reaches_module_info(home):
     folder = make_module(home / "modules", "A", 'ICON = "🧩"\ndef run(app):\n    pass\n')
     assert module_info(folder, home / "modules", "here").icon == "🧩"
+
+
+def test_missing_and_unreadable_roots_say_what_to_do(home):
+    """體驗 2-04：ROOTS 多加的位置不存在或讀不到時，那一組說原因，也說下一步（確認資料夾、權限、拿掉那一行）。"""
+    gone = home / "不見了"
+    f = home / "file.txt"
+    f.write_text("x", encoding="utf-8")
+    missing, unreadable = find_modules([Root("x", "extra", gone), Root("y", "extra", f)])
+    assert str(gone) in missing.note and "ROOTS" in missing.note and "還在" in missing.note
+    assert str(f) in unreadable.note and "ROOTS" in unreadable.note and "權限" in unreadable.note
+    assert "隱私權與安全性" in unreadable.note

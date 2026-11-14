@@ -430,7 +430,7 @@ def test_launch_without_hk_file_only_logs(tmp_path, load):
     old_hk(tmp_path / "外面")
     hk.launch(app, tmp_path / "外面", popen=popen)
     assert popen.calls == []
-    assert app.logs[-1] == "找不到課程資料夾（上層沒有 hk_tk.py）"
+    assert app.logs[-1] == "找不到課程資料夾（上層沒有 hk_tk.py）。把這份作業放回課程資料夾（有 hk_tk.py 的那一個）裡，再按一次"
 
 
 # ── Task 3：gather 與匯入老師的作業包 ──
@@ -1892,3 +1892,54 @@ def test_batch_collects_a_folder_of_student_files(tmp_path, load):
     assert students_in(out) == ["李大華", "王小明"]
     assert (out / "王小明" / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1
     assert said[-1].startswith("收了 2 份進 HK1（新 2、覆蓋 0）；多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）")
+
+
+def test_a_venv_that_cannot_be_built_says_what_to_check(tmp_path, load, monkeypatch):
+    """體驗 8f-01：建不了課程的 .venv，說原因（代碼）與下一步；叫不起 Python 也是同一種句子，不是 OSError 的英文。"""
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    with pytest.raises(RuntimeError, match=r"建不了課程的 v2.*代碼 1.*確認這個 Python 有 venv 功能、磁碟還有空間，再按一次"):
+        hk.ensure_venv(tmp_path / "v2", lambda s: None, popen=FakePopen(fail=lambda argv: True))
+
+    def gone(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    with pytest.raises(RuntimeError) as err:
+        hk.ensure_venv(tmp_path / "v3", lambda s: None, popen=gone)
+    assert "找不到 Python" in str(err.value) and "No such" not in str(err.value) and "再按一次" in str(err.value)
+
+
+def test_course_run_says_what_to_do_when_something_could_not_be_installed(tmp_path, course_module, monkeypatch):
+    """體驗 8f-02：有套件裝不了（多半是網路）時，總結後面說下一步；只有 Apple Silicon 才有的那種不會叫人再按。"""
+    c = course_module
+    c.absent = {"numpy"}
+    monkeypatch.setattr(c.hk, "install", lambda python, pkgs, say, **kw: ([], [("numpy", "ERROR: no network")]))
+    app = HwApp(tmp_path, COURSE)
+    c.mod.run(app)
+    assert app.logs[-1].startswith("裝不了 numpy（ERROR: no network）") and app.logs[-1].endswith("再按一次「科學計算」，只會補沒裝好的")
+    c.absent = {"mlx-lm"}
+    monkeypatch.setattr(c.hk, "course_batches", lambda *a: (("numpy",), ("mlx-lm",)))
+    monkeypatch.setattr(c.hk, "install", lambda python, pkgs, say, **kw: ([], [("mlx-lm", c.hk.NO_APPLE_SILICON)]))
+    app2 = HwApp(tmp_path, COURSE)
+    c.mod.run(app2)
+    assert "再按一次" not in app2.logs[-1]
+
+
+@pytest.mark.parametrize("what, call", [("匯入", lambda hk, app, tmp, course: hk.import_kit(app, [teacher_kit(tmp)], course)),
+                                          ("收作業", lambda hk, app, tmp, course: hk.collect(app, [tmp / "x.txt"], course / "HK5"))])
+def test_import_and_collect_that_hit_a_full_disk_say_one_sentence(tmp_path, load, monkeypatch, what, call):
+    """體驗 8f-03：匯入、收作業做到一半碰到磁碟滿了（或沒有權限），一句中文，不是 OSError 的英文與 traceback。"""
+    import errno
+
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    app = HwApp(tmp_path, course)
+
+    def full(*a, **k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(hk, "gather", full)
+    (tmp_path / "x.txt").write_text("x", encoding="utf-8")
+    said = call(hk, app, tmp_path, course)
+    assert said == f"{what}沒做完：磁碟滿了。已經放進去的留著，處理好之後再做一次" and app.logs == [said]
+    assert "No space" not in said and app.rescans == 0

@@ -232,3 +232,26 @@ def test_support_make_homework_follows_the_courses_format(tmp_path):
     lab = make_course(tmp_path, "實驗課", CODE="Lab{n}", FOLDER="Lab{n:03d}")
     assert cw_support.make_homework(lab, 12, src="x = 1\n") == lab / "Lab012" / "Lab12.py"
     assert (lab / "Lab012" / "Lab12.py").read_text(encoding="utf-8") == "x = 1\n"
+
+
+def test_course_py_that_cannot_be_read_is_plain_chinese_with_a_next_step(course_mod, tmp_path):
+    """體驗 8g-03：課程.py 語法錯、不是 UTF-8、含怪字元、讀不到，一句中文，不貼 Python 的英文（invalid syntax、codec…）。"""
+    import errno
+    from unittest import mock
+
+    def reason(text=None, raw=None):
+        folder = tmp_path / "課"
+        folder.mkdir(exist_ok=True)
+        (folder / "課程.py").write_bytes(raw if raw is not None else text.encode("utf-8"))
+        with pytest.raises(course_mod.CourseError) as err:
+            course_mod.read_course(folder)
+        return str(err.value)
+
+    syntax = reason("NAME = (\n")
+    assert "語法不對：檢查那一行的括號、引號有沒有成對" in syntax and "invalid syntax" not in syntax and "was never closed" not in syntax
+    utf = reason(raw=b"NAME = '\xff'\n")
+    assert "不是 UTF-8。用文字編輯器打開它，另存成 UTF-8 再按一次" in utf and "codec" not in utf
+    nul = reason(raw=b"NAME = 'x'\x00\n")  # 新一點的 Python 把 NUL 當語法錯，舊一點的是 ValueError：兩種都是中文
+    assert ("語法不對" in nul or "檔裡有不能出現的字元" in nul) and "null" not in nul
+    with mock.patch.object(course_mod.ast, "parse", side_effect=OSError(errno.EACCES, "Permission denied")):
+        assert reason("NAME = 'x'\n").endswith("：沒有權限")

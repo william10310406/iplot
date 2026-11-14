@@ -29,6 +29,10 @@ def _local(folder: Path, loaded: set[str]) -> list[str]:
     return [name for name in set(sys.modules) - loaded if inside(sys.modules[name])]
 
 
+class InputCancelled(EOFError):
+    """input() 的對話框按了取消。仍是 EOFError，模組的 except EOFError 照舊接得到；面板靠這個型別（kind）分得出來。"""
+
+
 def _dialog(app: Any, out: io.StringIO) -> Callable[..., str]:
     """代替 input() 的函式：跳對話框問，按取消丟 EOFError。上次問完之後 print 的東西放在提示前面，
     就像螢幕上問題前面的那幾行（猜數字的「太大」要在下一次問之前看得到）。"""
@@ -39,7 +43,7 @@ def _dialog(app: Any, out: io.StringIO) -> Callable[..., str]:
         text, shown = out.getvalue()[shown:] + str(prompt), len(out.getvalue())
         answer = app.ask(text.strip())
         if answer is None:  # 按了取消：真的 input() 在鍵盤關掉（Ctrl-D）時也是 EOFError（D49）
-            raise EOFError(T["input_cancelled"])
+            raise InputCancelled(T["input_cancelled"])
         return answer
 
     return ask

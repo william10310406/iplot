@@ -1,6 +1,7 @@
 """工作坊模組「主控面板」（modules/主控面板）：app.run("主控面板") 打開面板，已經開著就叫到最前面（D82）。
 ps、lsof、Popen、叫到最前面都換成假的：絕不真的開面板、不真的動別的程序。"""
 
+import errno
 import importlib.util
 import subprocess
 import sys
@@ -101,16 +102,16 @@ def test_not_running_launches_detached(panel_mod, home):
 
 def test_launch_failure_is_one_sentence(panel_mod, home):
     def broken(argv, **kw):
-        raise OSError("x")
+        raise OSError(errno.ENOENT, "No such file or directory")
 
     app, _, _ = go(panel_mod, home, popen=broken)
-    assert app.logs == ["打不開主控面板：x"]
+    assert app.logs == ["打不開主控面板：找不到 Python 或 iPLoT 的 main.py。確認 iPLoT 資料夾還在，再雙擊一次"]  # 體驗 7-08：中文原因、有下一步
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="把已經開著的主控面板叫到最前面只在 macOS 才有")
 def test_appkit_missing_still_logs(panel_mod, home):
     app, _, _ = go(panel_mod, home, ps=lambda: ps_for(home), activate=lambda pid, platform: False)
-    assert app.logs == ["主控面板已經開著，但沒辦法把它叫到最前面"]
+    assert app.logs == ["主控面板已經開著，但沒辦法把它叫到最前面。到 Dock 點一下 Python 的圖示"]
 
 
 def test_elsewhere_launches_and_says_it_cannot_bring_forward(panel_mod, home):

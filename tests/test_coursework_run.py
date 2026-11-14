@@ -795,7 +795,7 @@ def test_a_course_python_that_cannot_start_is_named(course_mod, hw):
         return fake(argv, **kw)
 
     app, _ = press(course_mod, file, "1", popen=popen)
-    assert app.logs[-1] == f"HK1：測試課/.venv/{VENV_PY.as_posix()} 有問題（No such file or directory），沒跑"
+    assert app.logs[-1] == f"HK1：測試課/.venv/{VENV_PY.as_posix()} 有問題（找不到檔案或資料夾），沒跑"
 
 
 def test_course_button_names_the_path_of_an_os_error_instead_of_a_traceback(course_mod, hw, monkeypatch):
@@ -810,4 +810,15 @@ def test_course_button_names_the_path_of_an_os_error_instead_of_a_traceback(cour
 
     app = CwApp(course)
     course_mod.course_button(app, course, popen=popen)
-    assert app.logs[-1] == f"測試課：測試課/.venv/{VENV_PY.as_posix()} 有問題（Permission denied），沒裝"
+    assert app.logs[-1] == f"測試課：測試課/.venv/{VENV_PY.as_posix()} 有問題（沒有權限），沒裝"
+
+
+def test_os_problems_use_a_chinese_reason_never_the_systems_english(course_mod):
+    """體驗 8g-01：「讀不了」「有問題」括號裡的原因是中文。"""
+    import errno
+
+    for code, plain in [(errno.ENOSPC, "磁碟滿了"), (errno.EACCES, "沒有權限"), (errno.EROFS, "唯讀"), (errno.ENOENT, "找不到"),
+                        (errno.EIO, "系統不讓")]:
+        exc = OSError(code, os.strerror(code), "/x/y")
+        said = course_mod._unreadable(Path("/x/y"), exc) + course_mod._os_problem(exc, None, Path("/c/課"))
+        assert plain in said and os.strerror(code) not in said

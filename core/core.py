@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from . import history, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
-from .errors import from_exception
+from .errors import from_exception, reason
 from .text import SYSTEM_MODULE, T
 from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result, Root, Scope
 
@@ -118,7 +118,7 @@ class Core:
             try:
                 history.snapshot(info.file, self.config.history_keep)
             except OSError as exc:
-                self.view.log(T["snapshot_failed"].format(message=exc))
+                self.view.log(T["snapshot_failed"].format(message=self._why(exc)))
             result = runner.run_module(info, App(self, info), handler, args)
             for line in result.output.splitlines():
                 self.view.log(line)
@@ -165,10 +165,18 @@ class Core:
         except AlreadyExists:
             return self.view.log(T["already_exists"].format(name=name))
         except OSError as exc:
-            return self.view.log(T["create_failed"].format(path=parent, message=exc))
+            return self.view.log(T["create_failed"].format(path=parent, message=self._why(exc)))
         self.rescan()
         self.action("edit", folder / "iplot.py", self.config.editor, None)
         return folder
+
+    def _why(self, exc: OSError) -> str:
+        """OSError 的中文原因；errno 與英文原文寫進 logs/iplot.log，事後才查得到（審查 S4）。"""
+        with contextlib.suppress(OSError):
+            (self.home / "logs").mkdir(exist_ok=True)
+            with (self.home / "logs" / "iplot.log").open("a", encoding="utf-8", errors="replace") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n{type(exc).__name__}: {exc}\n")
+        return reason(exc)
 
     def report_internal(self, exc_type: type, exc: BaseException, tb: Any) -> None:
         """核心自己的錯誤（tkinter 回呼裡丟出來的）：寫進 logs/iplot.log，再進面板。記錄檔寫不了就只進面板。"""

@@ -89,3 +89,20 @@ def test_template_passes_ruff():
                         "--stdin-filename", "iplot.py", "-"], input=template(), capture_output=True,
                        encoding="utf-8")   # 範本有中文與 emoji：不能用 Windows 預設的 cp1252 寫進 stdin
     assert r.returncode == 0, r.stdout
+
+
+def test_failed_write_leaves_no_half_written_iplot_and_the_name_is_free_again(tmp_path, monkeypatch):
+    # 體驗 2-10：磁碟滿了、寫到一半被中斷，不會留下空的 iplot.py（之後同名再按「＋」會說「已經是模組」）
+    import errno
+    from pathlib import Path
+
+    def full(self, *a, **k):
+        self.touch()  # 寫到一半：檔案已經出現了
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    with monkeypatch.context() as m:
+        m.setattr(Path, "write_text", full)
+        with pytest.raises(OSError):
+            new_module(tmp_path, "A")
+    assert sorted(p.name for p in (tmp_path / "A").iterdir()) == []
+    assert new_module(tmp_path, "A").joinpath("iplot.py").read_text(encoding="utf-8") == template()

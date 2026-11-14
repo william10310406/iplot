@@ -4,6 +4,7 @@
 
 import ast
 import dataclasses
+import errno
 import getpass
 import importlib
 import importlib.util
@@ -773,7 +774,7 @@ def test_records_are_replaced_atomically(load, home, interop, monkeypatch):     
     before = (interop / ".sync-error").read_bytes()
 
     def boom(*a, **k):
-        raise OSError("磁碟滿了")
+        raise OSError(errno.ENOSPC, "No space left on device")
 
     monkeypatch.setattr(os, "replace", boom)
     problems = do_sync(load, home, interop, platform="darwin")
@@ -966,6 +967,7 @@ def test_main_outside_modules_alerts_and_returns_2(entry, load, monkeypatch):
     monkeypatch.setattr(load("boot"), "iplot_home", lambda run_file: None)
     assert entry.go(["A"], home=None) == 2
     assert entry.alerts[0][1].startswith("「互通」要放在 iPLoT 的 modules/ 裡才能用：")
+    assert entry.alerts[0][1].endswith("把整個「互通」資料夾搬進 iPLoT 的 modules/，再打開一次")  # 體驗 7-07：有下一步
 
 
 def test_main_popup_cannot_start_alerts_and_returns_2(entry, home):
@@ -975,7 +977,7 @@ def test_main_popup_cannot_start_alerts_and_returns_2(entry, home):
         raise entry.wv.WebViewException("沒有 WebKit")
 
     entry.wv.start = broken
-    assert entry.go(["A"]) == 2 and entry.alerts == [("互通", "彈出式視窗開不起來：沒有 WebKit")]
+    assert entry.go(["A"]) == 2 and entry.alerts == [("互通", "彈出式視窗開不起來：沒有 WebKit。再打開一次；還是不行就從 iPLoT 的面板打開這個模組")]
 
 
 def test_a_module_importing_tkinter_gets_the_sentence(entry, home, monkeypatch):
@@ -1098,11 +1100,11 @@ def test_patch_says_one_sentence_per_problem(load, home, tmp_path, monkeypatch):
     made, interop, config = _patch_tree(home, tmp_path)
 
     def broken(path, keep):
-        raise OSError("唯讀")
+        raise OSError(errno.EROFS, "Read-only file system")
 
     monkeypatch.setattr(load("snippet"), "add", broken)
     result = load_button().Api(None, home, config, "/py", interop).patch()
-    assert (result["patched"], result["problems"]) == ([], ["A：沒補：唯讀", "A › C：沒補：唯讀"])
+    assert (result["patched"], result["problems"]) == ([], ["A：沒補：資料夾是唯讀的", "A › C：沒補：資料夾是唯讀的"])
 
 
 def test_status_counts_reasons_and_candidates(load, home, tmp_path):
@@ -1600,3 +1602,116 @@ def test_an_added_snippet_finds_iplot_from_beside_it(load, tmp_path):
     load("snippet").add(beside / "iplot.py", 20)
     r = subprocess.run([sys.executable, "iplot.py"], cwd=beside, capture_output=True, text=True)
     assert r.returncode == 3
+
+
+PLAIN = [(OSError(errno.ENOSPC, "No space left on device"), "磁碟滿了"),
+         (OSError(errno.EACCES, "Permission denied"), "沒有權限"),
+         (OSError(errno.EROFS, "Read-only file system"), "唯讀"),
+         (OSError("x"), "系統不讓"),
+         (UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"), "UTF-8"),
+         (ValueError("source code string cannot contain null bytes"), "讀不懂")]
+
+
+@pytest.mark.parametrize("exc, plain", PLAIN)
+def test_boot_plain_is_one_chinese_reason_without_the_systems_english(load, exc, plain):
+    """體驗 7-01：寫檔、改檔、做捷徑失敗的原因是中文。"""
+    got = load("boot").plain(exc)
+    assert plain in got and not re.search("[A-Za-z]{4,}", got.replace("UTF-8", ""))
+
+
+def test_shortcut_and_sync_problems_use_the_plain_reason(load, home, interop, monkeypatch):
+    boot, shortcut = load("boot"), load("shortcut")
+    exc = OSError(errno.EACCES, "Permission denied")
+    base = home / "x捷徑"
+    (base / "舊.app" / "Contents").mkdir(parents=True)
+    (base / "舊.app" / "Contents" / "Info.plist").write_bytes(plistlib.dumps({"IPLoTInterop": 1}))
+
+    def boom(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(shortcut.shutil, "rmtree", boom)
+    monkeypatch.setattr(shortcut, "write", boom)
+    problems = shortcut.sync(base, {"新": home}, "/py", home / "run.py")
+    assert problems == [f"捷徑「舊」：拿不掉：{boot.plain(exc)}", f"捷徑「新」：做不出來：{boot.plain(exc)}"]
+    monkeypatch.setattr(load("sync").shortcut, "sync", lambda *a, **k: ["x"])
+    monkeypatch.setattr(os, "replace", boom)
+    assert do_sync(load, home, interop, platform="darwin")[-1] == f"紀錄寫不進去：{boot.plain(exc)}"
+
+
+def test_an_unexpected_crash_is_logged_and_said_in_one_sentence(entry, home, monkeypatch, capsys):
+    """體驗 7-02：從捷徑打開時，run.py 自己的意外不能只是沒反應：寫進 logs/iplot.log，跳提示框說一句。"""
+    run = entry.run
+    monkeypatch.setattr(run, "__file__", str(home / "modules" / "互通" / "run.py"))
+    (home / "core").mkdir(exist_ok=True)
+    (home / "core" / "app.py").write_text("", encoding="utf-8")
+    (home / "main.py").write_text("", encoding="utf-8")
+
+    def boom(argv):
+        raise RuntimeError("壞掉了 secret-detail")
+
+    monkeypatch.setattr(run, "main", boom)
+    assert run.entry(["A"]) == run.CANNOT_START
+    assert entry.alerts == [("互通", run.CRASHED)] and "logs/iplot.log" in run.CRASHED
+    assert "RuntimeError: 壞掉了 secret-detail" in (home / "logs" / "iplot.log").read_text(encoding="utf-8")
+    assert "RuntimeError" not in run.CRASHED and "secret-detail" not in entry.alerts[0][1]
+
+
+def test_copy_that_cannot_start_pbcopy_answers_false_not_an_exception(load, home, monkeypatch):
+    """體驗 7-03：pbcopy 叫不起來時回 False，頁面才說「請自己選取上面那一行複製」。"""
+    from conftest import FakeApp
+    interop = make_module(home / "modules", "互通")
+    api = load_button().Api(FakeApp(home), home, DEFAULT_CONFIG, "/py", interop)
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def gone(*a, **k):
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory", "pbcopy")
+
+    monkeypatch.setattr(subprocess, "run", gone)
+    assert api.copy("指令") is False
+
+
+def test_page_says_a_sentence_when_resync_or_patch_fails():
+    """體驗 7-04：「再同步一次」「加上」呼叫失敗時，不把「同步中…」留在畫面上，也不是什麼都不說。"""
+    html_text = (INTEROP / "page.html").read_text(encoding="utf-8")
+    assert html_text.count(".catch(") == 2 and "這次沒做成。再按一次；還是不行就關掉這個視窗，在面板再按一次「互通」。" in html_text
+    assert html_text.index(".catch(() => { $(\"syncing\")") < html_text.index('$("resync").disabled = false; });')
+
+
+def test_add_goes_through_a_temp_file_so_a_failed_write_leaves_the_module_intact(load, tmp_path, monkeypatch):
+    """體驗 7-05：「加上」改的是使用者的 iplot.py；換上去之前失敗（磁碟滿了），原來的檔一個位元組都沒變、沒有暫存檔留下。
+    成功時權限不變。"""
+    snippet = load("snippet")
+    path = tmp_path / "iplot.py"
+    path.write_text('"""x"""\nprint(1)\n', encoding="utf-8")
+    path.chmod(0o750)
+    before = path.read_bytes()
+
+    def full(*a, **k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    with monkeypatch.context() as m:
+        m.setattr(os, "replace", full)
+        with pytest.raises(OSError):
+            snippet.add(path, 5)
+    assert path.read_bytes() == before and sorted(p.name for p in tmp_path.iterdir() if p.name != ".history") == ["iplot.py"]
+    assert snippet.add(path, 5) is True
+    assert snippet.has(path.read_text(encoding="utf-8")) and path.stat().st_mode & 0o777 == 0o750
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name != ".history") == ["iplot.py"]
+
+
+def test_cancelling_a_question_in_the_popup_is_one_neutral_line_not_an_error(entry, home, load, monkeypatch):
+    """體驗 7-06：從捷徑打開的模組，在提問框按取消：小視窗一行「模組『X』已取消」，不是紅色的錯誤列、「出錯了」；
+    結束碼仍是 1（取消執行）。模組自己丟的 EOFError 照舊是錯誤。"""
+    make_module(home / "modules", "問", "def run(app):\n    input('年齡')\n")
+    monkeypatch.setattr(load("popup").Popup, "ask", lambda self, prompt, default="": None)
+    assert entry.go(["問"]) == 1
+    w = entry.wv.windows[0]
+    assert ["模組『問』已取消"] in w.calls("log") and not w.calls("report") and w.calls("done")[0][0] == "cancelled"
+    assert not any("EOFError" in str(c) or "InputCancelled" in str(c) for c in w.calls("log"))
+
+
+def test_a_modules_own_eoferror_in_the_popup_is_still_an_error(entry, home):
+    make_module(home / "modules", "自己丟", "def run(app):\n    raise EOFError('自己丟的')\n")
+    assert entry.go(["自己丟"]) == 1
+    w = entry.wv.windows[0]
+    assert w.calls("report")[0][0]["kind"] == "EOFError" and w.calls("done")[0][0] == "error"

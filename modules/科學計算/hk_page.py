@@ -368,7 +368,7 @@ def collect(app, paths) -> None:
     folder = Path(app.module.folder)
     course = _course(folder / "iplot.py")
     if course is None:
-        app.log("找不到課程資料夾（上層沒有 hk_tk.py），沒有收")
+        app.log("找不到課程資料夾（上層沒有 hk_tk.py），沒有收。把這份作業放回課程資料夾（有 hk_tk.py 的那一個）裡，再按一次")
         return
     sys.modules.pop("hk_tk", None)  # 讀課程資料夾裡現在那一份
     sys.path.insert(0, str(course))

@@ -432,7 +432,7 @@ def test_an_unreadable_space_file_is_named(course_mod, course):
         app = pack(course_mod, course, "HK1")
     finally:
         secret.chmod(0o644)
-    assert app.logs[-1] == "HK1：測試課/HK01/HK1Space/secret.txt 有問題（Permission denied），沒有打包"
+    assert app.logs[-1] == "HK1：測試課/HK01/HK1Space/secret.txt 有問題（沒有權限），沒有打包"
 
 
 def test_versions_being_a_file_is_named_when_packing(course_mod, course):

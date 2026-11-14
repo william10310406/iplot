@@ -71,15 +71,16 @@ def test_bundled_meta(name):
     assert (m.error, m.has_run) == (None, True) and m.description
 
 
-def test_mac_argv(launches):
-    m, p = backend("mac"), Path("/x/a.txt")
+def test_mac_argv(launches, tmp_path):
+    m, p = backend("mac"), tmp_path / "a.txt"
+    p.write_text("x")  # 路徑要在：不在的話 8a-01 會說一句、不打開
     m.open(None, p)
     m.reveal(None, p)
     m.terminal(None, p)
     m.edit(None, p, None, 7)
     m.edit(None, p, ("code", "-g", "{file}:{line}"), 7)
     m.edit(None, p, ("code", "-g", "{file}:{line}"), None)
-    s = str(p)  # 不寫死 "/x/a.txt"：在 Windows 的 runner 上 str(Path) 是反斜線
+    s = str(p)
     assert [a for a, _ in launches] == [
         ["open", s], ["open", "-R", s], ["open", "-a", "Terminal", s],
         ["open", "-t", s], ["code", "-g", f"{s}:7"], ["code", "-g", f"{s}:1"]]
@@ -364,5 +365,85 @@ def test_iplots_own_modules_stay_untouched(name):
 @pytest.mark.parametrize("name", ["開工", "打開核心原始碼"])
 def test_changed_workshop_modules_say_so_in_their_changelog(name):
     text = (MODULES / name / "CHANGELOG.md").read_text(encoding="utf-8")
-    top = text[text.index("## ["):]
+    top = text[text.index("## [0"):]  # 「未發佈」（體驗打磨加的）不算版本
     assert top.startswith("## [0.5.1] - ") and "加上「互通」的那一小段：可以直接 python3 iplot.py。" in top.split("## [0.5.0]")[0]
+
+
+def test_restart_that_cannot_exec_says_what_to_do_and_is_not_a_module_error(fake_core, monkeypatch):
+    """體驗 5-06：換不了程序（例如 Python 被搬走了），一句人話：沒有重新啟動、關掉 iPLoT 再開一次；
+    不是「OSError，[Errno 2] …」的模組錯誤，面板留著。"""
+    def refuse(exe, argv):
+        raise FileNotFoundError(2, "No such file or directory", exe)
+
+    monkeypatch.setattr(os, "execv", refuse)
+    result = run_bundled("重新啟動", fake_core)
+    assert result.ok and result.error is None
+    line = fake_core.view.logs[-1]
+    assert "沒有重新啟動" in line and "關掉 iPLoT" in line and "再開一次" in line
+    assert "Errno" not in line and "No such file" not in line
+
+
+def test_mac_says_so_when_the_path_is_gone_instead_of_doing_nothing(launches, tmp_path):
+    """體驗 8a-01：打開、編輯、顯示、開終端機的路徑已經不在（改名、刪掉），訊息區說一句，不叫 open（它的錯誤印在看不到的終端機）。"""
+    from conftest import FakeApp
+
+    m, app, gone = backend("mac"), FakeApp(tmp_path), tmp_path / "不見了.txt"
+    for call in (lambda: m.open(app, gone), lambda: m.edit(app, gone, None, 3), lambda: m.reveal(app, gone),
+                 lambda: m.terminal(app, gone)):
+        call()
+    assert launches == [] and app.logs == [f"找不到「{gone}」，可能被改名或刪掉了，沒有打開"] * 4
+
+
+def _kaigong(tmp_path):
+    spec = importlib.util.spec_from_file_location("kaigong", MODULES / "開工" / "iplot.py")
+    mod = importlib.util.module_from_spec(spec)
+    old, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = old
+    logs, did = [], []
+    app = types.SimpleNamespace(home=tmp_path, log=logs.append, open=lambda p: did.append(("open", p)),
+                                edit=lambda p: did.append(("edit", p)), terminal=lambda p: did.append(("terminal", p)))
+    return mod, app, logs
+
+
+def test_kaigong_says_what_is_missing_instead_of_claiming_everything_opened(tmp_path):
+    """體驗 8b-01：docs/ 或設計文件被刪掉時，最後那一行不說「都開了」。"""
+    mod, app, logs = _kaigong(tmp_path)
+    mod.run(app)
+    assert logs == ["開工：docs、02_重構設計.md 找不到，其餘都開了"]
+    (tmp_path / "docs").mkdir()
+    logs.clear()
+    mod.run(app)
+    assert logs == ["開工：02_重構設計.md 找不到，其餘都開了"]
+    (tmp_path / "docs" / "02_重構設計.md").write_text("x")
+    logs.clear()
+    mod.run(app)
+    assert logs == ["開工：iPLoT 資料夾、docs、設計文件、終端機都開了"]
+
+
+def test_mac_hands_urls_to_open_without_checking_that_they_exist(launches, tmp_path):
+    """審查 S5：傳進來的是網址（含 ://）時不當路徑檢查，直接交給 open。"""
+    from conftest import FakeApp
+
+    m, app = backend("mac"), FakeApp(tmp_path)
+    m.open(app, "https://example.com/a b")
+    assert [a for a, _ in launches] == [["open", "https://example.com/a b"]] and app.logs == []
+
+
+def test_mac_treats_a_path_it_cannot_check_as_existing(launches, tmp_path, monkeypatch):
+    """審查 S5：Path.exists() 丟例外（例如沒有權限）時當作存在、交給 open 自己處理，不是丟例外也不是說「找不到」。"""
+    from pathlib import Path
+
+    from conftest import FakeApp
+
+    def refuse(self, *args, **kw):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "exists", refuse)
+    m, app = backend("mac"), FakeApp(tmp_path)
+    m.open(app, tmp_path / "x.txt")
+    m.reveal(app, tmp_path / "x.txt")
+    assert [a for a, _ in launches] == [["open", str(tmp_path / "x.txt")], ["open", "-R", str(tmp_path / "x.txt")]]
+    assert app.logs == []

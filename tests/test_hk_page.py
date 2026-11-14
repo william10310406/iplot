@@ -788,3 +788,16 @@ def test_ensure_in_batch_mode_says_to_build_the_venv_even_next_to_hk_tk(tmp_path
     with pytest.raises(RuntimeError, match="先按「科學計算」裝課程套件"):
         hp.ensure(["no-such-pkg-m6"], file, popen=popen, argv=[file])
     assert popen.calls == []
+
+
+def test_collect_without_a_course_folder_says_what_to_do(tmp_path, load):
+    """體驗 8f-04：找不到課程資料夾時，說下一步（放回課程資料夾再按一次），不只是「沒有收」。"""
+    import types
+
+    from conftest import FakeApp
+
+    page = load("hk_page")
+    app = FakeApp(tmp_path)
+    app.module = types.SimpleNamespace(folder=tmp_path / "孤零零")
+    page.collect(app, [])
+    assert app.logs == ["找不到課程資料夾（上層沒有 hk_tk.py），沒有收。把這份作業放回課程資料夾（有 hk_tk.py 的那一個）裡，再按一次"]

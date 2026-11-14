@@ -505,3 +505,124 @@ def test_backup_is_named_after_the_version_on_disk(iplot, home, source):
     iplot.run(app)
     [saved] = [p for p in (home / ".backup").iterdir() if p.is_dir()]
     assert saved.name.startswith("0.4.9-")
+
+
+# 體驗打磨 5：網路的三種失敗（沒有網路、逾時、對方回錯誤）各有一句人話
+
+import errno  # noqa: E402
+import socket  # noqa: E402
+import ssl  # noqa: E402
+import urllib.error  # noqa: E402
+
+ENGLISH = ("Errno", "timed out", "Not Found", "nodename", "CERTIFICATE", "urlopen", "No space left", "Permission denied")
+
+
+def http_error(code, reason):
+    return urllib.error.HTTPError("https://x.test/update.json", code, reason, {}, None)
+
+
+@pytest.mark.parametrize("exc, words", [
+    (urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known")), "沒有網路"),
+    (urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")), "沒有網路"),
+    (TimeoutError("timed out"), "逾時"),
+    (urllib.error.URLError(TimeoutError("timed out")), "逾時"),
+    (http_error(404, "Not Found"), "404"),
+    (http_error(403, "rate limit exceeded"), "403"),
+    (http_error(429, "Too Many Requests"), "太多次"),
+    (http_error(503, "Service Unavailable"), "暫時有問題"),
+    (urllib.error.URLError(ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")), "憑證"),
+    (ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED"), "憑證"),
+    (OSError(errno.ENOSPC, "No space left on device"), "磁碟滿了"),
+    (PermissionError(errno.EACCES, "Permission denied"), "權限"),
+    (urllib.error.URLError(FileNotFoundError(2, "No such file or directory")), "找不到"),
+])
+def test_plain_says_what_went_wrong_in_chinese(update, exc, words):
+    sentence = update.plain(exc)
+    assert words in sentence, sentence
+    assert not any(e in sentence for e in ENGLISH), sentence
+
+
+def test_no_network_is_a_sentence_with_the_next_step(iplot, update, home, source, monkeypatch):
+    def offline(*args, **kwargs):
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known"))
+
+    monkeypatch.setattr(update, "fetch_json", offline)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    before = tree(home)
+    iplot.run(app)
+    [line] = app.logs
+    assert line.startswith("沒有更新：") and "沒有網路" in line and "UPDATE_URL" in line and "再試一次" in line
+    assert not any(e in line for e in ENGLISH) and tree(home) == before
+
+
+def test_an_ssl_failure_is_blamed_on_the_connection_not_on_the_files(iplot, update, home, source, monkeypatch):
+    """SSLCertVerificationError 同時是 ValueError 和 OSError：不能被「update.json 或下載的檔案有問題」那一條接走。"""
+    def bad_cert(*args, **kwargs):
+        raise ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")
+
+    monkeypatch.setattr(update, "fetch_json", bad_cert)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [line] = app.logs
+    assert "憑證" in line and "下載的檔案有問題" not in line and "CERTIFICATE" not in line
+
+
+@pytest.mark.parametrize("url", ["https://exa mple.invalid:80a/update.json"])
+def test_a_mistyped_url_does_not_show_the_python_text(iplot, home, url):
+    """體驗 5-02：網址寫錯，說去看 UPDATE_URL，不貼 http.client 的英文原文。"""
+    app = FakeApp(home, update_url=url)
+    iplot.run(app)
+    [line] = app.logs
+    assert "UPDATE_URL" in line and "zip_url" in line
+    assert not any(w in line for w in ("nonnumeric", "port", "control characters", "URL can't", "InvalidURL", "found at least"))
+
+
+def test_a_broken_update_json_does_not_show_the_json_parser_text(home, source):
+    """體驗 5-03：update.json 不是 JSON 時，不貼 `Expecting value: line 1 column 1 (char 0)`，說讀不懂並指到 UPDATE_URL。"""
+    for body in (b"not json", b'{"version": "9"', b"\xff\xfe\x00"):
+        (source / "update.json").write_bytes(body)
+        app = FakeApp(home, update_url=(source / "update.json").as_uri())
+        before = tree(home)
+        run(app)
+        [line] = app.logs
+        assert line.startswith("沒有更新：update.json 讀不懂") and "UPDATE_URL" in line, line
+        assert not any(w in line for w in ("Expecting", "line 1", "char ", "codec", "0xff", "Unterminated")), line
+        assert tree(home) == before
+
+
+@pytest.mark.parametrize("code, words", [(errno.ENOSPC, "磁碟滿了"), (errno.EACCES, "沒有權限"), (errno.EROFS, "沒有權限")])
+def test_a_failed_swap_gives_a_plain_reason_not_the_python_text(iplot, update, home, source, monkeypatch, code, words):
+    """體驗 5-04：備份、換檔失敗，原因是中文，不是 `[Errno 28] No space left on device: '…'`。"""
+    def refuse(*args):
+        raise OSError(code, os.strerror(code), str(home / "core.new"))
+
+    monkeypatch.setattr(update, "backup", refuse)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [line] = app.logs
+    assert line.startswith("沒有更新：") and words in line and "都還是原來的" in line
+    assert not any(e in line for e in ENGLISH) and "[" not in line and str(home) not in line
+
+
+def test_when_putting_back_fails_too_the_reason_is_still_plain(iplot, update, home, source, monkeypatch):
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name == "main.py.new" or (self.name == "ui.old" and Path(target).name == "ui"):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(self))
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    iplot.run(app)
+    [line] = app.logs
+    assert "沒有權限" in line and "ui.old" in line and not any(e in line for e in ENGLISH) and "[" not in line
+
+
+def test_the_question_says_what_updating_does_and_that_the_old_version_is_kept(home, source):
+    """體驗 5-05：確認框說明更新會換什麼、舊版在哪、你的東西動不動；最後一句還是「要更新嗎？」。"""
+    app = FakeApp(home, update_url=(source / "update.json").as_uri())
+    run(app)
+    [prompt] = app.confirms
+    assert prompt.startswith("有新版 9.9.9（現在是 0.4.9）：\n這一版改了什麼\n\n") and prompt.endswith("要更新嗎？")
+    assert ".backup/" in prompt and "模組和設定不動" in prompt and "重新啟動" in prompt

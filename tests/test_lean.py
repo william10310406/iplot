@@ -64,7 +64,8 @@ def test_meta_is_chinese_with_an_icon():
 
 def test_changelog_top_section_is_0_1_0_with_a_first_paragraph():
     text = (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
-    top = text[text.index("## ["):]
+    text = text.replace("## [Unreleased]", "## [-]")  # 體驗打磨加的「未發佈」不算版本（tools/publish.py 的 latest() 也略過它）
+    top = text[text.index("## [0"):]
     assert top.startswith("## [0.1.0] - 2026-11-10\n\n")
     first = top.split("\n\n")[1]
     assert "Lean 實數遊戲" in first and "需要網路" in first and "瀏覽器" in first
@@ -118,3 +119,24 @@ def test_module_has_no_page_and_loads_nothing_external(lean):
     source = (MODULE / "iplot.py").read_text(encoding="utf-8")
     assert "app.page" not in source and "<html" not in source
     assert re.findall(r"https?://[^\s\"'<>]+", source).count(GAME) == 1
+
+
+@pytest.mark.parametrize("trouble, plain", [
+    (urllib.error.URLError("nodename nor servname provided"), "沒有網路"),
+    (TimeoutError("timed out"), "逾時"),
+    (urllib.error.URLError(TimeoutError("timed out")), "逾時"),
+    (urllib.error.HTTPError("https://x", 503, "Service Unavailable", {}, None), "503"),
+    (__import__("ssl").SSLCertVerificationError("certificate verify failed"), "憑證"),
+    (urllib.error.URLError(__import__("ssl").SSLError("bad")), "憑證"),
+    (ConnectionResetError(54, "Connection reset by peer"), "沒有網路"),
+    (http.client.RemoteDisconnected("Remote end closed connection without response"), "沒有網路"),
+])
+def test_the_reason_is_plain_chinese_never_pythons_english(lean, monkeypatch, tmp_path, trouble, plain):
+    """體驗 8e-01：「連不上 adam.math.hhu.de（…）」括號裡是中文原因。"""
+    def boom(url, **k):
+        raise trouble
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    app = FakeApp(tmp_path)
+    lean.run(app)
+    reason = app.logs[1].split("（", 1)[1].split("），", 1)[0]
+    assert plain in reason and not re.search("[A-Za-z]{4,}", reason) and "Error" not in app.logs[1]

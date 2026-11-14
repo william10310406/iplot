@@ -22,17 +22,21 @@ def run(app):
             if on_disk != app.version:
                 return app.log(f"已經換成 {on_disk} 了，執行「重新啟動」就會用新版")
             return app.log(f"已是最新（{app.version}）")
-        if not app.confirm(f"有新版 {latest}（現在是 {on_disk}）：\n{info.get('notes', '')}\n\n要更新嗎？"):
+        if not app.confirm(f"有新版 {latest}（現在是 {on_disk}）：\n{info.get('notes', '')}\n\n"
+                           "更新會換掉 iPLoT 的核心（core/、ui/、main.py、requirements/），舊版先備份在 .backup/；"
+                           "你的模組和設定不動。換完要執行「重新啟動」才會用新版。\n要更新嗎？"):
             return app.log("已取消更新")
         package = update.download(zip_url, app.home / ".backup" / f"download-{latest}.zip", sha256)
-    except http.client.InvalidURL as exc:
-        return app.log(f"網址寫錯了，沒有更新：{exc}（看 config.py 的 UPDATE_URL，或 update.json 裡的 zip_url）")
+    except http.client.InvalidURL:  # 它的原文是英文的網址規則，不給人看
+        return app.log("網址寫錯了，沒有更新（看 config.py 的 UPDATE_URL，或 update.json 裡的 zip_url）")
     except KeyError as exc:
         return app.log(f"更新來源的 update.json 少了 {exc} 這一項，沒有更新")
-    except ValueError as exc:  # sha256 對不上、update.json 不是 JSON、欄位不是文字
+    except update.NETWORK as exc:  # 要排在 ValueError 前面：憑證驗證失敗兩種都是
+        return app.log(f"沒有更新：{update.plain(exc)}。也請確認 config.py 的 UPDATE_URL 沒有寫錯。")
+    except ValueError as exc:  # sha256 對不上、欄位不是文字（自己寫的中文原因照留）；JSON 解析器的英文原文不給人看
+        if type(exc) is not ValueError:
+            return app.log("沒有更新：update.json 讀不懂（看 config.py 的 UPDATE_URL 是不是指到 update.json）")
         return app.log(f"沒有更新：{exc}（update.json 或下載的檔案有問題）")
-    except update.NETWORK as exc:
-        return app.log(f"連不上更新來源，或下載到一半斷了，沒有更新：{getattr(exc, 'reason', exc)}")
     saved = None
     try:  # 動到檔案的這一段：備份、換上去
         saved = update.backup(app.home, on_disk)
@@ -42,10 +46,10 @@ def run(app):
     except ValueError as exc:  # zip 的內容不對
         return app.log(f"沒有更新：{exc}（下載的包有問題）")
     except OSError as exc:  # 權限、磁碟滿、檔案被佔著：apply 會把換上去的放回去，看磁碟上是不是真的都回來了
-        left = update.unfinished(app.home)
+        left, why = update.unfinished(app.home), update.plain(exc).partition("。")[0]  # 原因的中文，不貼 [Errno] 與英文
         if not left:
-            return app.log(f"沒有更新：{exc}。core/、ui/、main.py、requirements/ 都還是原來的")
+            return app.log(f"沒有更新：{why}。core/、ui/、main.py、requirements/ 都還是原來的")
         kept = f"舊版的備份在 .backup/{saved.name}/" if saved else "這一次沒有做成備份"
-        return app.log(f"沒有更新，而且放回原來的版本時出錯了：{exc}。{'、'.join(left)} 要用手整理"
+        return app.log(f"沒有更新，而且放回原來的版本時出錯了：{why}。{'、'.join(left)} 要用手整理"
                        f"（{kept}，做法見 README 的「怎麼回到舊版」）")
     app.log(f"已更新到 {latest}，執行「重新啟動」就會用新版。舊版備份在 .backup/{saved.name}/")

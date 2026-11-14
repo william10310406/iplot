@@ -271,6 +271,9 @@ class WebPanel:
         """訊息區顯示錯誤：白話一句，「打開檔案」與「詳細」由頁面排。頁面壞到顯示不了也不往外丟。
         reportable 是 modules/回報與討論 在不在：在才有「回報這個問題」，也才自動問要不要回報（排在這件工作之後，D150）。
         這一筆與最近的訊息寫進 logs/last-error.json，給那個模組的「回報問題」附上。"""
+        if error.kind == "InputCancelled":  # 在提問框按了取消：自己的動作，訊息區只說一行，不是錯誤（體驗 2-08b）
+            self.log(T["module_cancelled"].format(module=error.module))
+            return
         self.errors.append(error)
         self.recent.add(describe(error))
         errlog.write(self.home, error, self.recent.lines())

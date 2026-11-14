@@ -1985,6 +1985,8 @@ def assert_unreadable(view, home, how, name, tmp_path, opened):
     assert "再按一次" not in line and "「" not in line
     if how == "big5":
         assert f"草稿留在 回報/{name}" in line and "UTF-8" in line
+        assert "codec" not in line and "0x" not in line and "position" not in line, "體驗 4-01：解碼器的英文不給人看"
+        assert "草稿的編碼不是 UTF-8" in line
     else:
         assert "<檔名已遮蔽>.md" in line  # FileNotFoundError 的字帶著草稿的完整路徑：遮過
     for leak in (str(tmp_path), os.path.realpath(tmp_path)):
@@ -2428,3 +2430,12 @@ def test_run_in_tk_unreadable_draft_is_one_sentence(tmp_path, tk, opened, how):
     assert result.ok, result.error
     assert view.asks == [MENU] and names[0].endswith("-回報.md")
     assert_unreadable(view, home, how, names[0], tmp_path, opened)
+
+
+def test_the_page_tells_someone_without_a_github_account_what_to_do():
+    """體驗 4-03：頁面說要有 GitHub 帳號、免費、怎麼註冊；不想註冊的人還能「複製整份報告」。（靜態文字，直接讀頁面比對。）"""
+    page = PAGE.read_text(encoding="utf-8")
+    menu = page[page.index('<section id="menu">'):page.index('<section id="edit">')]
+    assert "GitHub 帳號" in menu and "免費" in menu and "看論壇不用" in menu
+    login = page[page.index('<p class="login">'):].split("</p>")[0]
+    assert "還沒有 GitHub 帳號" in login and "github.com" in login and "複製整份報告" in login

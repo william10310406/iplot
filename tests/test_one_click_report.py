@@ -86,6 +86,13 @@ def test_offer_skips_config_errors_and_the_reporters_own_errors():
     assert offer.due(other(source="core", module=None))
 
 
+def test_offer_skips_a_cancelled_question_but_asks_about_the_modules_own_eoferror():
+    # 體驗 2-08：在提問框按取消是使用者自己的動作；模組自己丟的 EOFError 才是模組的錯
+    offer = errlog.Offer(clock=Clock())
+    assert not offer.due(other(kind="InputCancelled", message=T["input_cancelled"]))
+    assert offer.due(other(kind="EOFError", message=T["input_cancelled"]))
+
+
 # ── 最近的訊息與 logs/last-error.json（errlog.Recent、errlog.write）──
 
 def test_recent_keeps_the_last_lines_and_splits_multiline_text():
@@ -195,6 +202,36 @@ def crash(panel, home, name="壞掉"):
     before = len(panel.webview.windows[0].calls("report"))
     panel.submit(lambda: panel.press(panel.core, info))
     until(lambda: len(panel.webview.windows[0].calls("report")) > before)
+
+
+ASKS = "def run(app):\n    app.log('before')\n    input('年齡')\n    app.log('after')\n"
+
+
+def test_web_cancelling_a_question_is_one_neutral_line_not_an_error(live, home):
+    # 體驗 2-08b：訊息區一行「模組『X』已取消」，沒有錯誤列（沒有「回報這個問題」）、沒有 EOFError、不問要不要回報
+    panel, window = live
+    install_reporter(home, ON_ERROR)
+    make_module(home / "modules", "提問", ASKS)
+    panel.submit(panel.core.rescan)
+    panel.wait()
+    info = next(m for m in panel.core.all_modules() if m.name == "提問")
+    done = threading.Thread(target=lambda: panel.press(panel.core, info))
+    done.start()
+    until(lambda: window.calls("ask"))
+    panel.answer(window.calls("ask")[0][0], None)
+    done.join(5)
+    panel.wait()
+    assert [T["module_cancelled"].format(module="提問")] in window.calls("log")
+    assert not window.calls("report") and not offers(window) and not panel.errors
+    assert not (home / "logs" / "last-error.json").exists()
+    assert all("EOFError" not in str(c) and "InputCancelled" not in str(c) for c in window.calls("log"))
+
+
+def test_web_a_modules_own_eoferror_is_still_an_error(live, home):
+    panel, window = live
+    make_module(home / "modules", "自己丟", "def run(app):\n    raise EOFError('自己丟的')\n")
+    crash(panel, home, "自己丟")
+    assert window.calls("report")[-1][0]["kind"] == "EOFError"
 
 
 def answer_offer(panel, window, value, n=1):
@@ -330,6 +367,34 @@ def test_tk_offer_once_and_mute(home, monkeypatch):
         p.root.update()
         p.root.destroy()
     assert tkinter
+
+
+def test_tk_cancelling_a_question_is_one_neutral_line_not_an_error(home, monkeypatch):
+    pytest.importorskip("tkinter")
+    from conftest import new_tk
+    probe = new_tk()
+    probe.update()
+    probe.destroy()
+    from ui.tk import Panel
+
+    install_reporter(home, ON_ERROR)
+    p = Panel("0.6.2", safe=True)
+    try:
+        p.attach(Core(home, DEFAULT_CONFIG, p))
+        asked = []
+        monkeypatch.setattr(p, "ask_offer", lambda prompt: asked.append(prompt) or {"report": True, "mute": False})
+        p.report(other(kind="InputCancelled", message=T["input_cancelled"]))
+        p.root.update()
+        text = p.messages.get("1.0", "end")
+        assert T["module_cancelled"].format(module="科學計算") in text
+        assert "EOFError" not in text and "InputCancelled" not in text and T["report_issue"] not in text
+        assert not asked and not (home / "logs" / "last-error.json").exists()
+        p.report(other(kind="EOFError"))  # 模組自己丟的照舊是錯誤
+        p.root.update()
+        assert "EOFError" in p.messages.get("1.0", "end")
+    finally:
+        p.root.update()
+        p.root.destroy()
 
 
 # ── 「回報與討論」0.2.0：報告內容 ──
@@ -515,9 +580,10 @@ def test_reporter_version_is_0_2_0(load):
 
 
 def test_core_logic_is_untouched_by_m9():
-    """D150：這一版不動核心邏輯（core/ 除了 text.py），只動 ui/、main.py 與模組；核心邏輯的行數不變。"""
+    """D150：這一版不動核心邏輯（core/ 除了 text.py），只動 ui/、main.py 與模組；核心邏輯的行數不變（501）。
+    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505；2-10（新增模組先寫暫存檔再改名）加 5 行，是 510；審查 S4（OSError 的原文寫進 logs/iplot.log）加 6 行，是 516。"""
     from test_budget import core_logic
-    assert sum(core_logic().values()) == 501
+    assert sum(core_logic().values()) == 516
 
 
 
