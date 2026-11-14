@@ -24,8 +24,8 @@ NOT_A_MODULE = "不是模組：{path}（資料夾裡沒有 iplot.py）"
 GONE = "找不到這個模組：{path}。它可能被改名或刪掉了；捷徑已經重新整理。"
 NO_TK = ("在面板外跑的模組不能開 tkinter 視窗（彈出式視窗用的是 pywebview）；"
          "要用 tkinter，請從面板的安全模式執行：python3 main.py --safe")
-OUTSIDE = "「互通」要放在 iPLoT 的 modules/ 裡才能用：{path}"
-NO_POPUP = "彈出式視窗開不起來：{reason}"
+OUTSIDE = "「互通」要放在 iPLoT 的 modules/ 裡才能用：{path}。把整個「互通」資料夾搬進 iPLoT 的 modules/，再打開一次"
+NO_POPUP = "彈出式視窗開不起來：{reason}。再打開一次；還是不行就從 iPLoT 的面板打開這個模組"
 CRASHED = "互通沒做成。細節記在 iPLoT 資料夾的 logs/iplot.log；再打開一次，還是不行就把那個檔交給幫你的人。"
 USAGE = "用法：python3 run.py <模組資料夾或名稱> [檔案…]"
 OURS = ("boot", "popup", "sync", "snippet", "shortcut")  # 這個資料夾自己的檔：用完就從 sys.modules 拿掉

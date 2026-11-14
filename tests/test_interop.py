@@ -967,6 +967,7 @@ def test_main_outside_modules_alerts_and_returns_2(entry, load, monkeypatch):
     monkeypatch.setattr(load("boot"), "iplot_home", lambda run_file: None)
     assert entry.go(["A"], home=None) == 2
     assert entry.alerts[0][1].startswith("「互通」要放在 iPLoT 的 modules/ 裡才能用：")
+    assert entry.alerts[0][1].endswith("把整個「互通」資料夾搬進 iPLoT 的 modules/，再打開一次")  # 體驗 7-07：有下一步
 
 
 def test_main_popup_cannot_start_alerts_and_returns_2(entry, home):
@@ -976,7 +977,7 @@ def test_main_popup_cannot_start_alerts_and_returns_2(entry, home):
         raise entry.wv.WebViewException("沒有 WebKit")
 
     entry.wv.start = broken
-    assert entry.go(["A"]) == 2 and entry.alerts == [("互通", "彈出式視窗開不起來：沒有 WebKit")]
+    assert entry.go(["A"]) == 2 and entry.alerts == [("互通", "彈出式視窗開不起來：沒有 WebKit。再打開一次；還是不行就從 iPLoT 的面板打開這個模組")]
 
 
 def test_a_module_importing_tkinter_gets_the_sentence(entry, home, monkeypatch):
