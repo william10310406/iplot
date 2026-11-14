@@ -61,7 +61,7 @@ ALREADY_BEHIND = "行事曆已經開著（在 Dock 上找月曆的圖示）"
 CANNOT_WRITE = "存不進去：{why}。字還在，等一下會再試"
 UNREADABLE = "讀不到這個檔（不是 UTF-8），沒有覆寫它：{path}"
 NOT_FOUND = "找不到「{name}」（可能被改名或刪掉了）"
-CANNOT_LAUNCH = "打不開「{name}」：{why}"
+CANNOT_LAUNCH = "打不開「{name}」：{why}。到 iPLoT 的面板直接雙擊它試試"
 NO_PUBLIC = "還沒有打開「公開」的日子"
 UNPUBLISHED = "沒有公開的日子了，已經拿掉 發佈/"
 UPLOAD_NOTE = "上傳方式還沒設定：把『發佈』裡的東西放到網頁空間"
@@ -169,7 +169,7 @@ def open_or_focus(app, folder: pathlib.Path, *, environ=os.environ, ps=_ps, pope
     try:
         launch(app.home, folder, popen=popen, environ=environ)
     except OSError as exc:
-        app.log(f"打不開行事曆：{exc}")
+        app.log(f"打不開行事曆：{diary.reason(exc)}。確認「互通」還在，再雙擊一次")
         return
     app.log(OPENED)
 
@@ -185,7 +185,7 @@ def _guarded(method):
             except ValueError as exc:
                 return {"error": str(exc)}
             except OSError as exc:
-                return {"error": CANNOT_WRITE.format(why=exc.strerror or exc)}
+                return {"error": CANNOT_WRITE.format(why=diary.reason(exc))}
     return call
 
 
@@ -346,7 +346,7 @@ class Api:
                         env={k: v for k, v in self._environ.items() if k != ENV}, start_new_session=True,
                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError as exc:
-            return {"error": CANNOT_LAUNCH.format(name=name, why=exc)}
+            return {"error": CANNOT_LAUNCH.format(name=name, why=diary.reason(exc))}
         return {}
 
     @_guarded
@@ -361,7 +361,7 @@ class Api:
                 try:
                     diary.save_root(self._settings, pathlib.Path(chosen).absolute())
                 except OSError as exc:
-                    return {"error": CANNOT_WRITE.format(why=exc.strerror or exc)}
+                    return {"error": CANNOT_WRITE.format(why=diary.reason(exc))}
             return self._settings_now()
 
     @_guarded

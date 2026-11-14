@@ -300,7 +300,7 @@ def _publish_images(root: Path, out: Path, days: list[str], run, platform: str, 
                 if not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime:
                     photos.public_copy(src, dst, run=run, platform=platform)
             except (ValueError, OSError) as exc:
-                problems.append(NOT_PUBLISHED.format(date=date, name=name, why=exc))
+                problems.append(NOT_PUBLISHED.format(date=date, name=name, why=diary.reason(exc) if isinstance(exc, OSError) else exc))
                 skip.add((date, name))
                 continue
             wanted.add(dst)

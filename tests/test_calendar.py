@@ -4,6 +4,7 @@
 
 import dataclasses
 import datetime
+import errno
 import importlib
 import inspect
 import json
@@ -828,10 +829,11 @@ def test_a_launch_that_fails_is_one_sentence(load, home, tmp_path):
     with_run_py(home)
 
     def popen(argv, **kw):
-        raise OSError("沒有這個程式")
+        raise OSError(errno.ENOENT, "No such file or directory")
 
     mod.open_or_focus(app, tmp_path / "行事曆", environ={}, ps=lambda: "", popen=popen, activate=never, me=999)
-    assert app.logs == ["打不開行事曆：沒有這個程式"]
+    assert len(app.logs) == 1 and app.logs[0].startswith("打不開行事曆：找不到檔案或資料夾。")
+    assert "No such" not in app.logs[0] and "Errno" not in app.logs[0]  # 體驗 6-01：不貼系統的英文原因
 
 
 def test_in_own_process_removes_the_env_first_writes_pid_opens_the_page_then_removes_pid(load, home, tmp_path):
@@ -1403,3 +1405,26 @@ def test_page_html_shows_the_note_when_publishing_with_nothing_public():
     html_text = page_html()
     branch = html_text[html_text.index("if (!s.public_days)"):][:300]
     assert 'call("publish")' in branch and "say(r.note)" in branch
+
+
+@pytest.mark.parametrize("code, plain", [(errno.ENOSPC, "磁碟滿了"), (errno.EACCES, "沒有權限"), (errno.EPERM, "沒有權限"),
+                                          (errno.EROFS, "唯讀"), (errno.ENOENT, "找不到"), (errno.ENAMETOOLONG, "太長"),
+                                          (errno.EIO, "系統不讓")])
+def test_os_errors_become_a_plain_reason_in_chinese(load, tmp_path, code, plain):
+    """體驗 6-01：存不進去、打不開模組、照片沒放上網路，原因是中文，不貼系統的英文（Permission denied 等）。"""
+    diary = load("diary")
+    exc = OSError(code, os.strerror(code))
+    assert plain in diary.reason(exc) and os.strerror(code) not in diary.reason(exc)
+    assert diary.reason(OSError("沒有 errno")) == diary.reason(OSError(errno.EIO, "x"))  # 認不得的用籠統的一句
+    a = api(load, tmp_path)
+    a._root = lambda: (_ for _ in ()).throw(exc)  # _guarded 接住 OSError
+    got = a.month("2026-10")
+    assert got["error"].startswith("存不進去：") and os.strerror(code) not in got["error"] and plain in got["error"]
+    a2 = api(load, tmp_path, popen=lambda *x, **k: (_ for _ in ()).throw(exc))
+    (a2._app.home / "modules" / "互通").mkdir(parents=True)
+    (a2._app.home / "modules" / "互通" / "run.py").write_text("")
+    make = a2._app.home / "modules" / "甲"
+    make.mkdir()
+    (make / "iplot.py").write_text("def run(app):\n    pass\n")
+    got = a2.launch("甲")
+    assert got["error"].startswith("打不開「甲」：") and plain in got["error"] and os.strerror(code) not in got["error"]
