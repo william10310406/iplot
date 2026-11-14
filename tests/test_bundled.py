@@ -71,15 +71,16 @@ def test_bundled_meta(name):
     assert (m.error, m.has_run) == (None, True) and m.description
 
 
-def test_mac_argv(launches):
-    m, p = backend("mac"), Path("/x/a.txt")
+def test_mac_argv(launches, tmp_path):
+    m, p = backend("mac"), tmp_path / "a.txt"
+    p.write_text("x")  # 路徑要在：不在的話 8a-01 會說一句、不打開
     m.open(None, p)
     m.reveal(None, p)
     m.terminal(None, p)
     m.edit(None, p, None, 7)
     m.edit(None, p, ("code", "-g", "{file}:{line}"), 7)
     m.edit(None, p, ("code", "-g", "{file}:{line}"), None)
-    s = str(p)  # 不寫死 "/x/a.txt"：在 Windows 的 runner 上 str(Path) 是反斜線
+    s = str(p)
     assert [a for a, _ in launches] == [
         ["open", s], ["open", "-R", s], ["open", "-a", "Terminal", s],
         ["open", "-t", s], ["code", "-g", f"{s}:7"], ["code", "-g", f"{s}:1"]]
@@ -380,3 +381,15 @@ def test_restart_that_cannot_exec_says_what_to_do_and_is_not_a_module_error(fake
     line = fake_core.view.logs[-1]
     assert "沒有重新啟動" in line and "關掉 iPLoT" in line and "再開一次" in line
     assert "Errno" not in line and "No such file" not in line
+
+
+def test_mac_says_so_when_the_path_is_gone_instead_of_doing_nothing(launches, tmp_path):
+    """體驗 8a-01：打開、編輯、顯示、開終端機的路徑已經不在（改名、刪掉），訊息區說一句，不叫 open（它的錯誤印在看不到的終端機）。"""
+    from conftest import FakeApp
+
+    m, app, gone = backend("mac"), FakeApp(tmp_path), tmp_path / "不見了.txt"
+    for call in (lambda: m.open(app, gone), lambda: m.edit(app, gone, None, 3), lambda: m.reveal(app, gone),
+                 lambda: m.terminal(app, gone)):
+        call()
+    assert launches == [] and app.logs == [f"找不到「{gone}」，可能被改名或刪掉了，沒有打開"] * 4
+
