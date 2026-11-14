@@ -1684,6 +1684,7 @@ def test_add_goes_through_a_temp_file_so_a_failed_write_leaves_the_module_intact
     path = tmp_path / "iplot.py"
     path.write_text('"""x"""\nprint(1)\n', encoding="utf-8")
     path.chmod(0o750)
+    mode = path.stat().st_mode & 0o777  # POSIX 上是 0o750；Windows 沒有這種權限位元，只比「換名前後一樣」
     before = path.read_bytes()
 
     def full(*a, **k):
@@ -1695,7 +1696,7 @@ def test_add_goes_through_a_temp_file_so_a_failed_write_leaves_the_module_intact
             snippet.add(path, 5)
     assert path.read_bytes() == before and sorted(p.name for p in tmp_path.iterdir() if p.name != ".history") == ["iplot.py"]
     assert snippet.add(path, 5) is True
-    assert snippet.has(path.read_text(encoding="utf-8")) and path.stat().st_mode & 0o777 == 0o750
+    assert snippet.has(path.read_text(encoding="utf-8")) and path.stat().st_mode & 0o777 == mode
     assert sorted(p.name for p in tmp_path.iterdir() if p.name != ".history") == ["iplot.py"]
 
 
