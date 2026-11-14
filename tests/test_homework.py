@@ -1923,3 +1923,23 @@ def test_course_run_says_what_to_do_when_something_could_not_be_installed(tmp_pa
     app2 = HwApp(tmp_path, COURSE)
     c.mod.run(app2)
     assert "再按一次" not in app2.logs[-1]
+
+
+@pytest.mark.parametrize("what, call", [("匯入", lambda hk, app, tmp, course: hk.import_kit(app, [teacher_kit(tmp)], course)),
+                                          ("收作業", lambda hk, app, tmp, course: hk.collect(app, [tmp / "x.txt"], course / "HK5"))])
+def test_import_and_collect_that_hit_a_full_disk_say_one_sentence(tmp_path, load, monkeypatch, what, call):
+    """體驗 8f-03：匯入、收作業做到一半碰到磁碟滿了（或沒有權限），一句中文，不是 OSError 的英文與 traceback。"""
+    import errno
+
+    hk = load("hk_tk")
+    course = course_copy(tmp_path)
+    app = HwApp(tmp_path, course)
+
+    def full(*a, **k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(hk, "gather", full)
+    (tmp_path / "x.txt").write_text("x", encoding="utf-8")
+    said = call(hk, app, tmp_path, course)
+    assert said == f"{what}沒做完：磁碟滿了。已經放進去的留著，處理好之後再做一次" and app.logs == [said]
+    assert "No space" not in said and app.rescans == 0

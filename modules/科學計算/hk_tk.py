@@ -13,6 +13,7 @@ import ast
 import collections
 import contextlib
 import dataclasses
+import errno
 import json
 import os
 import platform
@@ -270,6 +271,17 @@ def summary_of_install(ok, failed) -> str:
     return "；".join(parts)
 
 
+REASONS = {errno.ENOSPC: "磁碟滿了", errno.EACCES: "沒有權限", errno.EPERM: "沒有權限", errno.EROFS: "資料夾是唯讀的",
+           errno.ENOENT: "找不到檔案或資料夾", errno.ENAMETOOLONG: "名稱太長"}
+
+
+def _stopped(app, what: str, exc: OSError) -> str:
+    """匯入、收作業做到一半碰到檔案系統的問題：一句話（原因是中文），已經放進去的留著（體驗 8f-03）。"""
+    said = f"{what}沒做完：{REASONS.get(exc.errno, '系統不讓寫入或打開')}。已經放進去的留著，處理好之後再做一次"
+    app.log(said)
+    return said
+
+
 def _nfc(name: str) -> str:
     return unicodedata.normalize("NFC", name)
 
@@ -483,6 +495,8 @@ def import_kit(app, paths: list[Path], course: Path) -> str:
         app.log(said)
         app.rescan()
         return said
+    except OSError as exc:
+        return _stopped(app, "匯入", exc)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -839,6 +853,8 @@ def collect(app, paths: list[Path], hk_folder: Path, python: Path | None = None,
         app.log(said)
         app.rescan()
         return said
+    except OSError as exc:
+        return _stopped(app, "收作業", exc)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
