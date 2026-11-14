@@ -906,12 +906,17 @@ def new_course(app, root: Path) -> None:
     if folder.exists() or folder.is_symlink():
         app.log(f"已經有叫「{name}」的資料夾了，沒有新增（不會蓋掉）")
         return
-    template = (HERE / "範本" / MARK).read_text(encoding="utf-8")
-    folder.mkdir()
-    text = re.sub(r'^NAME = "[^"\n]*"', lambda _: f"NAME = {json.dumps(name, ensure_ascii=False)}", template,
-                  count=1, flags=re.MULTILINE)
-    (folder / MARK).write_text(text, encoding="utf-8", newline="\n")
-    _course_buttons(folder, name)
+    try:
+        template = (HERE / "範本" / MARK).read_text(encoding="utf-8")
+        folder.mkdir()
+        text = re.sub(r'^NAME = "[^"\n]*"', lambda _: f"NAME = {json.dumps(name, ensure_ascii=False)}", template,
+                      count=1, flags=re.MULTILINE)
+        (folder / MARK).write_text(text, encoding="utf-8", newline="\n")
+        _course_buttons(folder, name)
+    except OSError as exc:  # 做到一半：拿掉剛建的資料夾，不留半門課（它擋著同名再建）（體驗 8g-04）
+        shutil.rmtree(folder, ignore_errors=True)
+        app.log(f"沒有新增「{name}」：{_why(exc)}。處理好之後再按一次")
+        return
     app.rescan()
     app.log(f"已新增「{name}」：按它旁邊的 ▸ 進去，「新增作業」建第一份作業")
 
@@ -931,10 +936,15 @@ def add_example(app, root: Path) -> None:
     except CourseError as exc:
         app.log(f"範例課程 {EXAMPLE}：{exc}")
         return
-    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__"))
-    for code, file in homeworks(course):
-        write_stub(dest / file.parent.relative_to(src), code, *HOMEWORK_STUB)
-    _course_buttons(dest, course.name)
+    try:
+        shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__"))
+        for code, file in homeworks(course):
+            write_stub(dest / file.parent.relative_to(src), code, *HOMEWORK_STUB)
+        _course_buttons(dest, course.name)
+    except OSError as exc:  # 做到一半：拿掉複製到一半的，不留半門課（體驗 8g-04）
+        shutil.rmtree(dest, ignore_errors=True)
+        app.log(f"沒有加入「{course.name}」：{_why(exc)}。處理好之後再按一次")
+        return
     app.rescan()
     app.log(f"已加入「{course.name}」：{len(homeworks(course))} 份作業，不用裝；按它旁邊的 ▸ 進去")
 
@@ -965,8 +975,13 @@ def new_homework(app, course_folder: Path) -> None:
     if n in have or folder.exists() or folder.is_symlink():
         app.log(f"已經有 {code}（資料夾 {have.get(n, folder.name)}）了，沒有新增（不會蓋掉）")
         return
-    file = kind.new(folder, code)
-    write_stub(folder, code, *HOMEWORK_STUB)
+    try:
+        file = kind.new(folder, code)
+        write_stub(folder, code, *HOMEWORK_STUB)
+    except OSError as exc:  # 做到一半：拿掉剛建的作業資料夾（不然同代號再建會說「已經有」）（體驗 8g-04）
+        shutil.rmtree(folder, ignore_errors=True)
+        app.log(f"沒有新增 {code}：{_why(exc)}。處理好之後再按一次")
+        return
     app.edit(file)
     app.rescan()
     app.log(f"已新增 {code}：{folder.name}/{file.name}，編輯器打開了")

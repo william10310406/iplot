@@ -4,6 +4,7 @@
 import ast
 import re
 import shutil
+import types
 
 import pytest
 from cw_support import CW, FRAMEWORK, TYPE_DIR, CwApp, load, make_course, make_homework
@@ -433,3 +434,33 @@ def test_template_says_name_is_used_only_when_the_course_is_made(course_mod, mod
                         encoding="utf-8")
     run_stub(mod / "測試課", mod, CwApp(tmp_path))
     assert stub_of(mod / "測試課").title == "測試課"  # 範本說的：改 NAME 不會改課那一格的字
+
+
+def test_a_failed_create_leaves_nothing_behind_and_says_why(course_mod, mod, tmp_path, monkeypatch):
+    """體驗 8g-04：新增一門課、加入範例課程、新增作業做到一半碰到磁碟滿了：一句中文，拿掉做到一半的資料夾，不然同名再建會說「已經有」。"""
+    import errno
+
+    def full(*a, **k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    app = ask(tmp_path, "測試課")
+    with monkeypatch.context() as m:
+        m.setattr(course_mod, "_course_buttons", full)
+        course_mod.new_course(app, mod)
+    assert not (mod / "測試課").exists() and app.rescans == 0
+    assert app.logs[-1] == "沒有新增「測試課」：磁碟滿了。處理好之後再按一次"
+    app2 = ask(tmp_path, "測試課")
+    course_mod.new_course(app2, mod)  # 回復之後同名可以再建
+    assert (mod / "測試課" / "課程.py").is_file()
+
+    app3 = CwApp(tmp_path)
+    with monkeypatch.context() as m:
+        m.setattr(course_mod, "_course_buttons", full)
+        course_mod.add_example(app3, mod)
+    assert not (mod / "科學計算").exists() and app3.rescans == 0 and app3.logs[-1].endswith("：磁碟滿了。處理好之後再按一次")
+    assert app3.logs[-1].startswith("沒有加入「科學計算」")
+
+    course = make_course(tmp_path)
+    monkeypatch.setattr(course_mod, "load_type", lambda *a, **k: types.SimpleNamespace(new=full))
+    app4 = new_hw(course_mod, tmp_path, course, "HK1")
+    assert not (course / "HK01").exists() and app4.edits == [] and app4.logs[-1] == "沒有新增 HK1：磁碟滿了。處理好之後再按一次"
