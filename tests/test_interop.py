@@ -1674,3 +1674,25 @@ def test_page_says_a_sentence_when_resync_or_patch_fails():
     html_text = (INTEROP / "page.html").read_text(encoding="utf-8")
     assert html_text.count(".catch(") == 2 and "這次沒做成。再按一次；還是不行就關掉這個視窗，在面板再按一次「互通」。" in html_text
     assert html_text.index(".catch(() => { $(\"syncing\")") < html_text.index('$("resync").disabled = false; });')
+
+
+def test_add_goes_through_a_temp_file_so_a_failed_write_leaves_the_module_intact(load, tmp_path, monkeypatch):
+    """體驗 7-05：「加上」改的是使用者的 iplot.py；換上去之前失敗（磁碟滿了），原來的檔一個位元組都沒變、沒有暫存檔留下。
+    成功時權限不變。"""
+    snippet = load("snippet")
+    path = tmp_path / "iplot.py"
+    path.write_text('"""x"""\nprint(1)\n', encoding="utf-8")
+    path.chmod(0o750)
+    before = path.read_bytes()
+
+    def full(*a, **k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    with monkeypatch.context() as m:
+        m.setattr(os, "replace", full)
+        with pytest.raises(OSError):
+            snippet.add(path, 5)
+    assert path.read_bytes() == before and sorted(p.name for p in tmp_path.iterdir() if p.name != ".history") == ["iplot.py"]
+    assert snippet.add(path, 5) is True
+    assert snippet.has(path.read_text(encoding="utf-8")) and path.stat().st_mode & 0o777 == 0o750
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name != ".history") == ["iplot.py"]
