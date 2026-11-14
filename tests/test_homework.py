@@ -430,7 +430,7 @@ def test_launch_without_hk_file_only_logs(tmp_path, load):
     old_hk(tmp_path / "外面")
     hk.launch(app, tmp_path / "外面", popen=popen)
     assert popen.calls == []
-    assert app.logs[-1] == "找不到課程資料夾（上層沒有 hk_tk.py）"
+    assert app.logs[-1] == "找不到課程資料夾（上層沒有 hk_tk.py）。把這份作業放回課程資料夾（有 hk_tk.py 的那一個）裡，再按一次"
 
 
 # ── Task 3：gather 與匯入老師的作業包 ──

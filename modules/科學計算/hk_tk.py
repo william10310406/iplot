@@ -115,7 +115,7 @@ def launch(app, folder: Path, popen=None) -> None:
         return
     course = course_root(folder)
     if course is None:
-        app.log("找不到課程資料夾（上層沒有 hk_tk.py）")
+        app.log("找不到課程資料夾（上層沒有 hk_tk.py）。把這份作業放回課程資料夾（有 hk_tk.py 的那一個）裡，再按一次")
         return
     python = venv_python(course)
     if python is None:
