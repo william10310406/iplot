@@ -1437,3 +1437,10 @@ def test_text_that_cannot_be_encoded_is_a_plain_sentence_not_python_english(load
     got = a.save("2026-10-14", {"行程": "壞\ud800字"})
     assert got == {"error": "這段文字裡有存不進去的字元，請改掉它再存"}
     assert a.day("2026-10-14")["行程"] == "原來的"
+
+
+def test_page_never_shows_the_raw_exception_text_in_the_status_bar():
+    """體驗 6-03：呼叫 Python 出了沒接住的例外，狀態列說固定的一句中文，原文只進 console。"""
+    html_text = page_html()
+    assert "say(String(e" not in html_text
+    assert "console.error(e)" in html_text and "剛才的動作沒做成。再做一次；還是不行就關掉行事曆再打開。" in html_text

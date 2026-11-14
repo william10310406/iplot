@@ -111,7 +111,7 @@ const call = (name, ...args) => {
   const p = last.then(() => window.pywebview.api[name](...args));
   last = p.catch(() => null);
   return p.then((r) => { if (r && r.error) say(r.error, true); return r || {}; },
-                (e) => { say(String(e && e.message || e), true); return { error: String(e) }; });
+                (e) => { console.error(e); say("剛才的動作沒做成。再做一次；還是不行就關掉行事曆再打開。", true); return { error: String(e) }; });
 };
 const say = (text, bad) => { $("status").textContent = text || ""; $("status").className = bad ? "bad" : ""; };
 
