@@ -346,17 +346,32 @@ async function publish() {
   if (!(await saveDay())) return;
   const s = await call("settings");
   if (s.error) return;
-  if (!s.public_days) {  // 沒有公開的日子：回「還沒有打開「公開」的日子」，或拿掉了上一次的 發佈/ 並說一句
-    const r = await call("publish");
-    if (r.note) say(r.note);
+  if (!s.public_days && !s.has_publish) {  // 沒有公開的日子、也沒有 發佈/ 可拿掉：回「還沒有打開「公開」的日子」
+    await call("publish");
     return;
   }
-  $("askText").textContent = "打開『公開』的有 " + s.public_days + " 天。要產生發佈用的資料夾嗎？這一步不會上傳任何東西；發佈/ 裡原有的檔會換成新產生的，自己放進去的檔會被刪掉。";
+  if (!s.public_days) {  // 沒有公開的日子了、上一次產生的 發佈/ 還在：先問，再拿掉（直接刪除）
+    ask("沒有打開『公開』的日子了。要把上一次產生的 發佈/ 整個拿掉嗎？這會直接刪除，不進垃圾桶，不能復原；已經上傳到網路上的不會因此拿掉。", "拿掉", "unpublish");
+    return;
+  }
+  ask("打開『公開』的有 " + s.public_days + " 天。要產生發佈用的資料夾嗎？這一步不會上傳任何東西；發佈/ 裡原有的檔會換成新產生的，自己放進去的檔會被刪掉。", "產生", "publish");
+}
+
+let askAction = "publish";
+function ask(text, yes, action) {
+  $("askText").textContent = text;
+  $("askYes").textContent = yes;
+  askAction = action;
   $("ask").hidden = false;
 }
 
 async function confirmPublish() {
   $("ask").hidden = true;
+  if (askAction === "unpublish") {
+    const gone = await call("publish");
+    if (gone.note) say(gone.note);
+    return;
+  }
   say("產生中…");
   const r = await call("publish");
   if (r.error) return;

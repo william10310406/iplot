@@ -215,7 +215,9 @@ class Api:
 
     def _settings_now(self) -> dict:
         root = self._root()
-        return {"folder": str(root), "public_days": len(diary.all_days(root, public_only=True))}
+        out = root / pages.PUBLISH  # has_publish：上一次產生的 發佈/ 還在，頁面要先問才拿掉（體驗 6-06）
+        return {"folder": str(root), "public_days": len(diary.all_days(root, public_only=True)),
+                "has_publish": out.exists() or out.is_symlink()}
 
     def _scan(self, panel: bool) -> list:
         """最上層（與 ROOTS）現在的模組，每次重掃（設計第 15 節第 7 條）；不含作業系統與行事曆自己。"""

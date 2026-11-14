@@ -1107,7 +1107,7 @@ def test_change_folder_releases_the_lock_while_the_dialog_is_open(load, tmp_path
     assert time.perf_counter() - start < 0.5
     answer.set()
     t.join(3)
-    assert box == [{"folder": str((tmp_path / "新").resolve()), "public_days": 0}]
+    assert box == [{"folder": str((tmp_path / "新").resolve()), "public_days": 0, "has_publish": False}]
     assert (tmp_path / "資料/2026/10/14/行程.txt").exists() and a.settings()["folder"] == str((tmp_path / "新").resolve())
 
 
@@ -1217,7 +1217,7 @@ def test_launch_runs_run_py_without_the_env_and_only_for_known_names(load, home,
 
 def test_settings_change_folder_and_reveal(load, tmp_path):
     a = api(load, tmp_path)
-    assert a.settings() == {"folder": str((tmp_path / "資料").resolve()), "public_days": 0}
+    assert a.settings() == {"folder": str((tmp_path / "資料").resolve()), "public_days": 0, "has_publish": False}
     assert a.change_folder() == a.settings() and not (tmp_path / "設定.json").exists()   # 按了取消
     a._app.folder_answer = tmp_path / "新"
     assert a.change_folder()["folder"] == str((tmp_path / "新").resolve())
@@ -1403,8 +1403,8 @@ def test_unpublish_only_removes_the_publish_folder_itself(load, tmp_path):
 def test_page_html_shows_the_note_when_publishing_with_nothing_public():
     """公開的日子是 0 天時頁面照樣叫 publish：拿掉了舊的 發佈/ 就把那一句顯示在狀態列（不是錯誤的紅字）。"""
     html_text = page_html()
-    branch = html_text[html_text.index("if (!s.public_days)"):][:300]
-    assert 'call("publish")' in branch and "say(r.note)" in branch
+    branch = html_text[html_text.index("async function confirmPublish"):][:400]
+    assert 'call("publish")' in branch and "say(gone.note)" in branch
 
 
 @pytest.mark.parametrize("code, plain", [(errno.ENOSPC, "磁碟滿了"), (errno.EACCES, "沒有權限"), (errno.EPERM, "沒有權限"),
@@ -1456,3 +1456,21 @@ def test_publish_confirmation_says_nothing_is_uploaded_and_what_happens_to_the_f
     """體驗 6-05：確認框說明這一步做什麼（只產生資料夾、不上傳；發佈/ 裡原有的檔會換掉或刪掉）。"""
     html_text = page_html()
     assert "這一步不會上傳任何東西" in html_text and "自己放進去的檔會被刪掉" in html_text
+
+
+def test_settings_says_whether_a_publish_folder_is_there(load, tmp_path):
+    a = api(load, tmp_path)
+    assert a.settings()["has_publish"] is False
+    (tmp_path / "資料" / "發佈").mkdir(parents=True)
+    assert a.settings()["has_publish"] is True
+
+
+def test_removing_the_publish_folder_asks_first_and_the_button_says_what_it_does():
+    """體驗 6-06：公開的日子是 0 天、發佈/ 還在時，不再不問就刪；確認框說明是直接刪除、不能復原，按鈕是「拿掉」。"""
+    html_text = page_html()
+    start = html_text.index("async function publish()")
+    body = html_text[start:html_text.index("async function confirmPublish")]
+    assert "!s.public_days && !s.has_publish" in body and '"拿掉", "unpublish"' in body
+    assert "直接刪除，不進垃圾桶，不能復原" in body
+    confirm = html_text[html_text.index("async function confirmPublish"):][:260]
+    assert confirm.index('askAction === "unpublish"') < confirm.index('call("publish")')
