@@ -1428,3 +1428,12 @@ def test_os_errors_become_a_plain_reason_in_chinese(load, tmp_path, code, plain)
     (make / "iplot.py").write_text("def run(app):\n    pass\n")
     got = a2.launch("甲")
     assert got["error"].startswith("打不開「甲」：") and plain in got["error"] and os.strerror(code) not in got["error"]
+
+
+def test_text_that_cannot_be_encoded_is_a_plain_sentence_not_python_english(load, tmp_path):
+    """體驗 6-02：存不了的字元（UnicodeError 也是 ValueError）不貼 Python 的英文原文；原來的檔案完好。"""
+    a = api(load, tmp_path)
+    a.save("2026-10-14", {"行程": "原來的"})
+    got = a.save("2026-10-14", {"行程": "壞\ud800字"})
+    assert got == {"error": "這段文字裡有存不進去的字元，請改掉它再存"}
+    assert a.day("2026-10-14")["行程"] == "原來的"

@@ -59,6 +59,7 @@ OPENED = "打開行事曆"
 ALREADY = "行事曆已經開著"
 ALREADY_BEHIND = "行事曆已經開著（在 Dock 上找月曆的圖示）"
 CANNOT_WRITE = "存不進去：{why}。字還在，等一下會再試"
+BAD_CHARS = "這段文字裡有存不進去的字元，請改掉它再存"
 UNREADABLE = "讀不到這個檔（不是 UTF-8），沒有覆寫它：{path}"
 NOT_FOUND = "找不到「{name}」（可能被改名或刪掉了）"
 CANNOT_LAUNCH = "打不開「{name}」：{why}。到 iPLoT 的面板直接雙擊它試試"
@@ -182,6 +183,8 @@ def _guarded(method):
         with self._lock:
             try:
                 return method(self, *args)
+            except UnicodeError:  # 也是 ValueError，要排在前面：存不了的字元，不貼 Python 的英文原文（體驗 6-02）
+                return {"error": BAD_CHARS}
             except ValueError as exc:
                 return {"error": str(exc)}
             except OSError as exc:
