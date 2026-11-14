@@ -151,7 +151,7 @@ def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
                       else core.press(info, quiet=True))
             if result.ok:
                 outcome, code = "ok", OK
-            elif result.error is None:  # 工作坊裝來的模組，第一次問的時候按了取消
+            elif result.error is None or result.error.kind == "InputCancelled":  # 第一次問的時候、或模組的提問框按了取消
                 outcome = "cancelled"
         popup.done(outcome, time.perf_counter() - start, back=back)
         with contextlib.suppress(Exception):  # 同步出錯不能讓模組的結果變成錯的；它自己的問題寫在 .sync-error

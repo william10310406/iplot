@@ -1696,3 +1696,21 @@ def test_add_goes_through_a_temp_file_so_a_failed_write_leaves_the_module_intact
     assert snippet.add(path, 5) is True
     assert snippet.has(path.read_text(encoding="utf-8")) and path.stat().st_mode & 0o777 == 0o750
     assert sorted(p.name for p in tmp_path.iterdir() if p.name != ".history") == ["iplot.py"]
+
+
+def test_cancelling_a_question_in_the_popup_is_one_neutral_line_not_an_error(entry, home, load, monkeypatch):
+    """體驗 7-06：從捷徑打開的模組，在提問框按取消：小視窗一行「模組『X』已取消」，不是紅色的錯誤列、「出錯了」；
+    結束碼仍是 1（取消執行）。模組自己丟的 EOFError 照舊是錯誤。"""
+    make_module(home / "modules", "問", "def run(app):\n    input('年齡')\n")
+    monkeypatch.setattr(load("popup").Popup, "ask", lambda self, prompt, default="": None)
+    assert entry.go(["問"]) == 1
+    w = entry.wv.windows[0]
+    assert ["模組『問』已取消"] in w.calls("log") and not w.calls("report") and w.calls("done")[0][0] == "cancelled"
+    assert not any("EOFError" in str(c) or "InputCancelled" in str(c) for c in w.calls("log"))
+
+
+def test_a_modules_own_eoferror_in_the_popup_is_still_an_error(entry, home):
+    make_module(home / "modules", "自己丟", "def run(app):\n    raise EOFError('自己丟的')\n")
+    assert entry.go(["自己丟"]) == 1
+    w = entry.wv.windows[0]
+    assert w.calls("report")[0][0]["kind"] == "EOFError" and w.calls("done")[0][0] == "error"
