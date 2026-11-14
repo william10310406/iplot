@@ -1892,3 +1892,18 @@ def test_batch_collects_a_folder_of_student_files(tmp_path, load):
     assert students_in(out) == ["李大華", "王小明"]
     assert (out / "王小明" / "t2026fscSpace" / "HK1.txt").read_bytes() == HK1
     assert said[-1].startswith("收了 2 份進 HK1（新 2、覆蓋 0）；多交的 1 個檔沒收（王小明：HK1_threebody_backup.txt）")
+
+
+def test_a_venv_that_cannot_be_built_says_what_to_check(tmp_path, load, monkeypatch):
+    """體驗 8f-01：建不了課程的 .venv，說原因（代碼）與下一步；叫不起 Python 也是同一種句子，不是 OSError 的英文。"""
+    hk = load("hk_tk")
+    monkeypatch.delenv("HK_NO_INSTALL")
+    with pytest.raises(RuntimeError, match=r"建不了課程的 v2.*代碼 1.*確認這個 Python 有 venv 功能、磁碟還有空間，再按一次"):
+        hk.ensure_venv(tmp_path / "v2", lambda s: None, popen=FakePopen(fail=lambda argv: True))
+
+    def gone(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    with pytest.raises(RuntimeError) as err:
+        hk.ensure_venv(tmp_path / "v3", lambda s: None, popen=gone)
+    assert "找不到 Python" in str(err.value) and "No such" not in str(err.value) and "再按一次" in str(err.value)
