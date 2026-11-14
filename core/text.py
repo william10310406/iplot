@@ -78,7 +78,8 @@ T: dict[str, str] = {
     "os_EROFS": "這個位置是唯讀的",
     "os_ENOTDIR": "路徑裡有一段不是資料夾",
     "os_ENAMETOOLONG": "名稱太長",
-    "os_other": "系統沒辦法做這件事",
+    "os_ENOENT": "找不到檔案或資料夾",
+    "os_other": "系統拒絕了這個動作，可以再試一次；還是不行就看 logs/iplot.log",
     "no_system": "沒有『{module}』模組，無法執行 {name}。要有這個功能，在 modules/ 新增一個叫『{module}』的模組"
                  "並定義 {name}(app, …)；見 docs/07_接口與邊界.md",
 }

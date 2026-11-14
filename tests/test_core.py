@@ -362,7 +362,8 @@ def test_marker_that_cannot_be_removed_does_not_block_the_module(home, view, mon
 
 
 @pytest.mark.parametrize("code, words", [(errno.EACCES, "權限"), (errno.EPERM, "權限"), (errno.ENOSPC, "滿了"),
-                                         (errno.EROFS, "唯讀"), (errno.ENOTDIR, "不是資料夾"), (errno.EIO, "沒辦法")])
+                                         (errno.EROFS, "唯讀"), (errno.ENOTDIR, "不是資料夾"), (errno.ENOENT, "找不到"),
+                                         (errno.EIO, "再試一次")])
 def test_failed_create_gives_a_plain_reason_not_the_python_text(home, view, monkeypatch, code, words):
     """體驗 2-02：建不了模組時，原因是中文，不出現 Errno 與英文原文。"""
     c = started(home, view)
@@ -401,3 +402,20 @@ def test_the_foreign_module_question_says_what_running_means():
     """體驗 2-05：第一次執行外來的模組前，問題說清楚「執行」是什麼意思，不只是「要執行嗎？」。"""
     text = T["confirm_foreign"].format(title="外來的")
     assert "外來的" in text and "電腦上執行" in text and "讀寫" in text and text.endswith("要執行嗎？")
+
+
+def test_an_unknown_reason_says_what_to_do_and_the_original_goes_to_the_log(home, view, monkeypatch):
+    """審查 S4：認不得的原因，句子說「系統拒絕了」「可以再試」「還是不行看 logs/iplot.log」；errno 與英文原文真的寫在那個檔裡。"""
+    from core.text import T
+
+    assert "系統拒絕" in T["os_other"] and "再試一次" in T["os_other"] and "logs/iplot.log" in T["os_other"]
+    c = started(home, view)
+
+    def boom(parent, name):
+        raise OSError(errno.EIO, os.strerror(errno.EIO), str(parent / name))
+
+    monkeypatch.setattr("core.core.new_module", boom)
+    assert c.create(home / "modules", "A") is None
+    log = (home / "logs" / "iplot.log").read_text(encoding="utf-8")
+    assert "Input/output error" in log and "Errno 5" in log and "A" in log
+    assert os.strerror(errno.EIO) not in view.logs[-1]

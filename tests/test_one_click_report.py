@@ -581,9 +581,9 @@ def test_reporter_version_is_0_2_0(load):
 
 def test_core_logic_is_untouched_by_m9():
     """D150：這一版不動核心邏輯（core/ 除了 text.py），只動 ui/、main.py 與模組；核心邏輯的行數不變（501）。
-    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505；2-10（新增模組先寫暫存檔再改名）加 5 行，是 510。"""
+    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505；2-10（新增模組先寫暫存檔再改名）加 5 行，是 510；審查 S4（OSError 的原文寫進 logs/iplot.log）加 6 行，是 516。"""
     from test_budget import core_logic
-    assert sum(core_logic().values()) == 510
+    assert sum(core_logic().values()) == 516
 
 
 
