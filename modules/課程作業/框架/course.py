@@ -256,9 +256,13 @@ def ensure_venv(venv_dir: Path, say, popen=subprocess.Popen, python: str = sys.e
     if os.environ.get(NO_INSTALL):
         raise RuntimeError(f"{NO_INSTALL}：不建 .venv")
     say(f"在{'重建' if clear else '建'} {venv_dir.parent.name}/{venv_dir.name} …")
-    code = popen([str(python), "-m", "venv", *(["--clear"] if clear else []), str(venv_dir)]).wait()
+    try:
+        code = popen([str(python), "-m", "venv", *(["--clear"] if clear else []), str(venv_dir)]).wait()
+    except OSError:
+        code = "找不到 Python"
     if code != 0:
-        raise RuntimeError(f"建不了 {venv_dir}：代碼 {code}")
+        raise RuntimeError(f"建不了 {venv_dir}（{'代碼 ' if isinstance(code, int) else ''}{code}）。"
+                           "確認這個 Python 有 venv 功能、磁碟還有空間，再按一次")
     return exe
 
 

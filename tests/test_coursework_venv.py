@@ -435,3 +435,25 @@ def test_a_real_venv_without_pyvenv_cfg_is_broken_not_the_computers_python(cours
     (venv / "pyvenv.cfg").unlink()
     with pytest.raises(course_mod.BrokenVenv):
         course_mod.installed(python)
+
+
+def test_a_venv_that_cannot_be_built_says_what_to_check(course_mod, tmp_path, monkeypatch):
+    """體驗 8g-02：建不了課的 .venv，說代碼與下一步；叫不起 Python 也是同一種句子，不是 OSError 的英文。"""
+    monkeypatch.delenv("CW_NO_INSTALL", raising=False)
+
+    class Fail:
+        def __init__(self, argv, **kw):
+            pass
+
+        def wait(self):
+            return 1
+
+    with pytest.raises(RuntimeError, match=r"建不了 .*v2（代碼 1）。確認這個 Python 有 venv 功能、磁碟還有空間，再按一次"):
+        course_mod.ensure_venv(tmp_path / "v2", lambda s: None, popen=Fail)
+
+    def gone(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    with pytest.raises(RuntimeError) as err:
+        course_mod.ensure_venv(tmp_path / "v3", lambda s: None, popen=gone)
+    assert "找不到 Python" in str(err.value) and "No such" not in str(err.value) and "再按一次" in str(err.value)
