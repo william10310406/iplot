@@ -131,10 +131,13 @@ class Api:
         self._app.reveal(self._folder / shortcut.FOLDER)
 
     def copy(self, text: str) -> bool:
-        """「複製」：把指令放進剪貼簿（macOS 的 pbcopy）；別的系統回 False，頁面說一句「請自己選取複製」。"""
+        """「複製」：把指令放進剪貼簿（macOS 的 pbcopy）；別的系統、或叫不起來回 False，頁面說一句「請自己選取複製」。"""
         if sys.platform != "darwin":
             return False
-        subprocess.run(["pbcopy"], input=str(text).encode(), check=False)
+        try:
+            subprocess.run(["pbcopy"], input=str(text).encode(), check=False)
+        except OSError:  # 叫不起來：頁面說「請自己選取上面那一行複製」，不是按了沒反應（體驗 7-03）
+            return False
         return True
 
     def resync(self) -> dict:

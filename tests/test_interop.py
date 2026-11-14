@@ -1653,3 +1653,17 @@ def test_an_unexpected_crash_is_logged_and_said_in_one_sentence(entry, home, mon
     assert entry.alerts == [("互通", run.CRASHED)] and "logs/iplot.log" in run.CRASHED
     assert "RuntimeError: 壞掉了 secret-detail" in (home / "logs" / "iplot.log").read_text(encoding="utf-8")
     assert "RuntimeError" not in run.CRASHED and "secret-detail" not in entry.alerts[0][1]
+
+
+def test_copy_that_cannot_start_pbcopy_answers_false_not_an_exception(load, home, monkeypatch):
+    """體驗 7-03：pbcopy 叫不起來時回 False，頁面才說「請自己選取上面那一行複製」。"""
+    from conftest import FakeApp
+    interop = make_module(home / "modules", "互通")
+    api = load_button().Api(FakeApp(home), home, DEFAULT_CONFIG, "/py", interop)
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def gone(*a, **k):
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory", "pbcopy")
+
+    monkeypatch.setattr(subprocess, "run", gone)
+    assert api.copy("指令") is False
