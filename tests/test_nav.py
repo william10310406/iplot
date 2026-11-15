@@ -268,11 +268,14 @@ const run = (cells, meta, twice) => {
   const walk = (n) => [n, ...n.children.flatMap(walk)];
   const buttons = bar ? walk(bar.shadow).filter((n) => n.on.click) : [];
   buttons.forEach((b) => b.on.click());
-  return {count: body.children.length, mode: bar && bar.mode, style: bar && bar.style.cssText,
+  const seps = bar ? walk(bar.shadow).filter((n) => n.tag === "i").length : 0;
+  return {count: body.children.length, mode: bar && bar.mode, style: bar && bar.style.cssText, seps,
           texts: buttons.map((b) => b.textContent), titles: buttons.map((b) => b.title), calls};
 };
 const cells = JSON.parse(process.argv[2]);
-console.log(JSON.stringify({plain: run(cells, false, false), off: run(cells, true, false), twice: run(cells, false, true)}));
+console.log(JSON.stringify({plain: run(cells, false, false), off: run(cells, true, false), twice: run(cells, false, true),
+  separators: run(cells, false, false).seps, without_panel_separators: run(cells.slice(1), false, false).seps,
+  empty: run([], false, false)}));
 """
 
 
@@ -288,6 +291,8 @@ def test_nav_js_draws_one_closed_shadow_bar_with_text_only_and_calls_the_index(h
         assert part in plain["style"]
     assert plain["texts"] == ["主控面板", "↑ 上", "📄 <b>x</b>"] and plain["titles"] == ["", "說明", ""]
     assert plain["calls"] == [0, 1, 2]
+    assert got["separators"] == 2  # 主控面板 | 父層 | 子模組：兩條，最前面沒有
+    assert got["without_panel_separators"] == 1 and got["empty"]["count"] == 0  # 沒有任何格子就不畫
     assert got["off"]["count"] == 0  # <meta name="iplot-nav" content="off">
     assert got["twice"]["count"] == 1  # 同一頁載入兩次也只有一排
 

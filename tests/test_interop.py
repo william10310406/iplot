@@ -28,7 +28,7 @@ from conftest import make_module, until
 from core.types import DEFAULT_CONFIG
 
 INTEROP = Path(__file__).resolve().parents[1] / "modules" / "互通"
-NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run")
+NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run", "nav")
 # 「沒被重寫」的記號：先把 mtime 設成這個整秒的舊時間（2001-09-09），之後看它還在不在。
 # 不用 1 奈秒：NTFS 的時間精度是 100 奈秒，1 奈秒會被存成 0；整秒每個檔案系統都存得下。
 OLD_NS = 1_000_000_000 * 10**9
@@ -233,7 +233,7 @@ def test_own_version(load, tmp_path):
     assert boot.own_version(tmp_path) == "?"
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.2.0] - 2026-10-08\n\nx\n\n## [0.1.0]\n",
                                            encoding="utf-8")
-    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.2.1"
+    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.3.0"
 
 
 def test_boot_and_run_read_on_python_3_8():
@@ -1309,6 +1309,47 @@ def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
     t.join(3)
 
 
+def test_a_popup_page_gets_the_nav_bar_while_a_module_runs_and_no_other_page_is_open(popup, home):
+    """D154：模組執行中開的頁面有導覽列；已經有一頁開著，新的一頁沒有；不在模組執行中開的（直接呼叫）也沒有。"""
+    from core import scan
+    make_module(home / "modules", "X")
+    make_module(home / "modules", "主控面板")
+    p, wv = popup.p, popup.wv
+    p.core.rescan()
+    t0, _ = in_thread(lambda: p.page("無", "<p>0</p>", None))
+    until(lambda: len(wv.windows) == 1)
+    assert wv.windows[0].exposed == {}
+    wv.windows[0].fire("closed")
+    t0.join(3)
+    root = (home / "modules").resolve()
+    p.core.running.append(scan.module_info(root / "X", root, "here"))
+    t1, _ = in_thread(lambda: p.page("一", "<p>1</p>", None))
+    until(lambda: len(wv.windows) == 2 and wv.windows[1].exposed)
+    assert list(wv.windows[1].exposed) == ["_iplot_nav"]
+    t2, _ = in_thread(lambda: p.page("二", "<p>2</p>", None))
+    until(lambda: len(wv.windows) == 3)
+    wv.windows[2].fire("loaded")
+    assert wv.windows[2].exposed == {} and wv.windows[2].js == [] and wv.windows[0].shown is False
+    wv.windows[2].fire("closed")
+    t2.join(3)
+    wv.windows[1].fire("closed")
+    t1.join(3)
+    assert p._pages == []
+
+
+def test_a_popup_page_does_not_show_the_popup_even_with_a_nav_bar(popup, home):
+    from core import scan
+    make_module(home / "modules", "X")
+    p = popup.p
+    root = (home / "modules").resolve()
+    p.core.running.append(scan.module_info(root / "X", root, "here"))
+    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
+    until(lambda: len(popup.wv.windows) == 2)
+    assert popup.wv.windows[0].shown is False
+    popup.wv.windows[1].fire("closed")
+    t.join(3)
+
+
 def test_a_foreign_app_with_a_wanted_name_is_left_alone(load, tmp_path):
     """別人放在 捷徑/ 裡、剛好跟模組同名的 .app（沒有 IPLoTInterop）：不刪、不蓋，說一句。"""
     sc, base, a = load("shortcut"), tmp_path / "捷徑", make_module(tmp_path, "a")
@@ -1748,3 +1789,251 @@ def test_a_modules_own_eoferror_in_the_popup_is_still_an_error(entry, home):
     assert entry.go(["自己丟"]) == 1
     w = entry.wv.windows[0]
     assert w.calls("report")[0][0]["kind"] == "EOFError" and w.calls("done")[0][0] == "error"
+
+
+# ── 導覽列（D154）：互通自己的 nav.py、nav.js ──
+
+UI_NAV_JS = Path(__file__).resolve().parents[1] / "ui" / "nav.js"
+NAV_JS_SHA256 = "27466bf9857847e17a7ff2e288a49c73d1e3b35790e2f67369005868faaf14d7"
+
+
+def test_the_two_nav_js_files_are_byte_for_byte_the_same_and_pinned():
+    """ui/nav.js 與互通的 nav.js 是同一份（互通不 import ui/，D80，所以各放一份）：一字不差，而且釘住——
+    要改就兩份一起改，連這個 sha256 一起換（跟 snippet.TEXT 的做法一樣）。"""
+    import hashlib
+    mine, theirs = (INTEROP / "nav.js").read_bytes(), UI_NAV_JS.read_bytes()
+    assert mine == theirs
+    assert hashlib.sha256(mine).hexdigest() == NAV_JS_SHA256
+
+
+def nav_tree(home):
+    """課程（子模組：作業一〔底下有 G〕、作業二）、主控面板、孤。"""
+    top = make_module(home / "modules", "課程", '"""說明"""\nTITLE = "課程作業"\n')
+    one = make_module(top, "一", 'ICON = "📄"\nTITLE = "作業一"\n')
+    make_module(top, "二", 'TITLE = "作業二"\n')
+    make_module(one, "G")
+    make_module(home / "modules", "主控面板")
+    make_module(home / "modules", "孤")
+
+
+def nav_for(load, home, *names, log=None, popen=None, environ=None):
+    """owner（用 top 底下的名字路徑指）正在跑、開了一個頁面視窗：回 (Nav, 視窗, Core)。"""
+    from conftest import FakeView, FakeWindow
+
+    from core import scan
+    from core.core import Core
+    from core.types import DEFAULT_CONFIG
+
+    core = Core(home, DEFAULT_CONFIG, FakeView())
+    core.rescan()
+    root = (home / "modules").resolve()
+    info = scan.module_info(root.joinpath(*names), root, "here" if len(names) == 1 else "child")
+    core.running.append(info)
+    window = FakeWindow("頁", {})
+    kw = {"popen": popen} if popen else {}
+    if environ is not None:
+        kw["environ"] = environ
+    return load("nav").Nav(window, core, log or (lambda text: None), **kw), window, core
+
+
+def test_nav_cells_have_the_panel_the_parent_and_the_children(load, home):
+    nav_tree(home)
+    bar, _, _ = nav_for(load, home, "課程", "一")
+    assert bar.cells == [{"k": "panel", "t": "主控面板", "i": "", "d": ""},
+                         {"k": "parent", "t": "↑ 課程作業", "i": "", "d": "說明"},
+                         {"k": "child", "t": "G", "i": "G", "d": ""}]
+    assert [t.name for t in bar.targets] == ["主控面板", "課程", "G"]
+
+
+def test_nav_panel_cell_only_when_the_top_level_has_exactly_one_and_it_is_not_the_page_itself(load, home):
+    nav_tree(home)
+    assert [c["k"] for c in nav_for(load, home, "孤")[0].cells] == ["panel"]
+    assert nav_for(load, home, "主控面板")[0].cells == []  # 主控面板自己：沒有父層、沒有子模組、不指回自己
+    make_module(home / "modules" / "課程", "主控面板")  # 底下另一個同名的不算：只看最上層
+    assert [c["k"] for c in nav_for(load, home, "孤")[0].cells] == ["panel"]
+    shutil.rmtree(home / "modules" / "主控面板")
+    assert nav_for(load, home, "孤")[0].cells == []
+
+
+def test_nav_has_no_panel_cell_when_the_top_level_has_two(load, home):
+    nav_tree(home)
+    (home / "modules" / "主控面板").rename(home / "modules" / "P1")
+    make_module(home / "modules", "P1b")
+    assert nav_for(load, home, "孤")[0].cells == []
+
+
+def test_nav_injects_after_load_and_exposes_only_iplot_nav(load, home):
+    nav_tree(home)
+    bar, window, _ = nav_for(load, home, "課程")
+    assert list(window.exposed) == ["_iplot_nav"] and window.js == []
+    window.fire("loaded")
+    assert window.js == [f"({load('nav').source()})({json.dumps(bar.cells)})"]
+
+
+@pytest.mark.parametrize("bad", ["1", 1.0, True, None, -1, 9, [0]])
+def test_nav_iplot_nav_only_accepts_an_index_on_the_bar(load, home, bad):
+    nav_tree(home)
+    calls = []
+    bar, window, _ = nav_for(load, home, "課程", popen=lambda *a, **k: calls.append(a))
+    window.exposed["_iplot_nav"](bad)
+    assert calls == [] and not window.destroyed and bar.choice is None
+
+
+def test_nav_jump_starts_a_new_process_with_run_py_and_then_closes_the_page(load, home, monkeypatch):
+    nav_tree(home)
+    calls = []
+    env = {"IPLOT_CALENDAR": "1", "A": "b"}
+    bar, window, _ = nav_for(load, home, "課程", popen=lambda *a, **k: calls.append((a, k)) or window_state(window, calls),
+                             environ=env)
+    window.exposed["_iplot_nav"](2)  # 0 主控面板、1 作業一、2 作業二
+    [((argv,), kw)] = calls
+    assert argv == [sys.executable, str(INTEROP / "run.py"), str((home / "modules" / "課程" / "二").resolve())]
+    assert kw["env"] == {"A": "b"} and kw["start_new_session"] is True
+    assert kw["stdin"] == kw["stdout"] == kw["stderr"] == subprocess.DEVNULL
+    assert window.destroyed and bar.choice == 2 and env == {"IPLOT_CALENDAR": "1", "A": "b"}
+
+
+def window_state(window, calls):
+    """開新程序的當下，原本那一頁還沒關：開成功才關。"""
+    assert not window.destroyed
+    return object()
+
+
+def test_nav_jump_to_the_panel_starts_the_panel_module(load, home):
+    nav_tree(home)
+    calls = []
+    bar, window, _ = nav_for(load, home, "孤", popen=lambda *a, **k: calls.append(a))
+    window.exposed["_iplot_nav"](0)
+    assert calls == [([sys.executable, str(INTEROP / "run.py"), str((home / "modules" / "主控面板").resolve())],)]
+
+
+def test_nav_jump_that_cannot_start_says_so_and_keeps_the_page(load, home):
+    nav_tree(home)
+    said = []
+
+    def broken(*a, **k):
+        raise OSError(errno.ENOENT, "No such file")
+
+    bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=broken)
+    window.exposed["_iplot_nav"](1)
+    assert not window.destroyed and bar.choice is None
+    assert said == ["打不開『作業一』：找不到檔案或資料夾。再按一次；還是不行就從 iPLoT 的面板打開它"]
+
+
+def test_nav_jump_to_a_module_that_is_gone_says_so_and_keeps_the_page(load, home):
+    nav_tree(home)
+    said, calls = [], []
+    bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=lambda *a, **k: calls.append(a))
+    shutil.rmtree(home / "modules" / "課程" / "一")
+    window.exposed["_iplot_nav"](1)
+    assert calls == [] and not window.destroyed and said == ["找不到模組『作業一』，可能已經被移除了"]
+
+
+def test_track_records_the_running_modules_on_a_core_without_running(load, home):
+    """核心 0.5、0.6 沒有 Core.running：互通自己記（包住 press，app.run、app.open 最後都走它）；有的話什麼都不改。"""
+    nav = load("nav")
+    new = types.SimpleNamespace(running=[], press=lambda info: "orig")
+    pressed = new.press
+    nav.track(new)
+    assert new.press is pressed and new.running == []
+    seen = []
+
+    class Old:
+        def press(self, info, handler="run", args=(), quiet=False):
+            seen.append(list(self.running))
+            if info == "outer":
+                self.press("inner")
+            return (handler, args, quiet)
+
+    old = Old()
+    nav.track(old)
+    assert old.press("outer", "h", (1,), True) == ("h", (1,), True)
+    assert seen == [["outer"], ["outer", "inner"]] and old.running == []
+
+
+def test_track_pops_even_when_press_raises(load):
+    nav = load("nav")
+
+    class Old:
+        def press(self, info):
+            raise ValueError("x")
+
+    old = Old()
+    nav.track(old)
+    with pytest.raises(ValueError):
+        old.press("a")
+    assert old.running == []
+
+
+def test_parent_of_falls_back_to_the_same_algorithm_on_a_core_without_it(load, home, monkeypatch):
+    from core import scan
+    nav_tree(home)
+    root = (home / "modules").resolve()
+    roots = scan.roots_from_config(home, ("modules",))
+    child = scan.module_info(root / "課程" / "一", root, "child")
+    want = scan.parent_of(child, roots)
+    monkeypatch.delattr(scan, "parent_of")
+    got = load("nav").parent_of(child, roots)
+    assert (got.name, got.folder, got.level, got.root) == (want.name, want.folder, want.level, want.root)
+    assert load("nav").parent_of(got, roots) is None
+    plain = root / "普通"
+    make_module(plain, "B")
+    assert load("nav").parent_of(scan.module_info(plain / "B", root, "child"), roots) is None
+
+
+OLD_CORE_SCRIPT = r"""
+import json, sys
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+import nav
+from core.core import Core, load_config
+
+class Window:
+    def __init__(self):
+        self.events = type("E", (), {"loaded": type("L", (), {"__iadd__": lambda s, f: s})()})()
+    def expose(self, *f): pass
+    def evaluate_js(self, s): pass
+    def destroy(self): pass
+
+out = []
+class View:
+    def show(self, scope): pass
+    def log(self, text): out.append(text)
+    def report(self, error): out.append("ERR " + error.message)
+    def ask(self, prompt, default=""): return None
+    def confirm(self, prompt): return False
+    def page(self, title, html, api): out.append(json.dumps(nav.Nav(Window(), core, print).cells))
+    def choose_files(self): return []
+    def choose_folder(self): return None
+
+view = View()
+core = Core(__import__("pathlib").Path(sys.argv[3]), load_config(__import__("pathlib").Path(sys.argv[3]) / "config.py")[0], view)
+nav.track(core)
+core.rescan()
+[p] = [m for m in core.all_modules() if m.name == "P"]
+core.press(p)
+print(json.dumps(out))
+"""
+
+
+@pytest.mark.parametrize("version", ["v0.5.0", "v0.6.0"])
+def test_nav_works_on_a_real_old_core(load, home, tmp_path, version):
+    """D117 的做法：從 git 取出真的舊核心來驗；沒有那個 tag（淺 clone）就跳過。"""
+    import io
+    import tarfile
+    root = Path(__file__).resolve().parents[1]
+    archive = subprocess.run(["git", "archive", version, "core"], cwd=root, capture_output=True)
+    if archive.returncode != 0:
+        pytest.skip(f"沒有 {version} 這個 tag")
+    old = tmp_path / "old"
+    old.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+        tar.extractall(old)
+    top = make_module(home / "modules", "P", 'def run(app):\n    app.page("t", "<p>x</p>")\n    app.log("done")\n')
+    make_module(top, "K", 'TITLE = "孩子"\n')
+    make_module(home / "modules", "主控面板")
+    got = subprocess.run([sys.executable, "-I", "-c", OLD_CORE_SCRIPT, str(old), str(INTEROP), str(home)],
+                         capture_output=True, text=True, cwd=tmp_path)
+    assert got.returncode == 0, got.stderr
+    cells, *rest = json.loads(got.stdout.splitlines()[-1])
+    assert [c["k"] for c in json.loads(cells)] == ["panel", "child"] and json.loads(cells)[1]["t"] == "孩子"
+    assert "done" in rest  # 模組在 app.page 之後照常跑完

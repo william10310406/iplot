@@ -2,7 +2,7 @@
 // 格子是 {k: "panel" | "parent" | "child", t: 字, i: 圖示的字, d: 滑鼠停著的說明}。
 // 「互通」自己帶一份 nav.js，跟這一份一字不差（tests/test_nav.py）。所有字都用 textContent 放，名稱裡有 < 也只是字。
 (cells) => {
-  if (!document.body || document.querySelector("iplot-nav") || document.querySelector('meta[name="iplot-nav"][content="off"]')) return;
+  if (!cells.length || !document.body || document.querySelector("iplot-nav") || document.querySelector('meta[name="iplot-nav"][content="off"]')) return;
   const bar = document.createElement("iplot-nav");
   bar.style.cssText = "all: initial; display: block; flex: none; position: sticky; top: 0; z-index: 2147483647";
   const root = bar.attachShadow({mode: "closed"});
@@ -20,10 +20,8 @@
       .parent { color: #ff8a80; }
     }`;
   const row = document.createElement("div");
-  let last = "panel";
   cells.forEach((cell, n) => {
-    if (cell.k !== last) row.append(document.createElement("i"));
-    last = cell.k;
+    if (n && cells[n - 1].k !== cell.k) row.append(document.createElement("i"));
     const button = document.createElement("button");
     button.className = cell.k;
     button.title = cell.d;
