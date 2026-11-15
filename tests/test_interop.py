@@ -816,6 +816,35 @@ def test_why_not_names_the_reason(load, home, tmp_path):
     assert got == {"A": None, "B": "工作坊裝來的", "工作坊": "隨附模組", "E": "在 ROOTS 另外加的資料夾裡"}
 
 
+def test_why_not_walks_up_to_the_root_for_origin(load, home):
+    """工作坊裝來的模組底下的子模組、孫模組也是「工作坊裝來的」：加上那一小段會讓上層變成「已修改」（D77）。"""
+    from core import scan
+    sync = load("sync")
+    top = make_module(home / "modules", "P")
+    (top / ".origin").write_text("{}", encoding="utf-8")
+    kid = make_module(top, "C")
+    grandkid = make_module(kid, "G")
+    free = make_module(home / "modules", "F")
+    own = make_module(free, "K")
+    config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules",))
+    roots = scan.roots_from_config(home, config.roots)
+    got = {" › ".join(t): sync.why_not(i, roots) for i, t in sync.modules(home, config)}
+    assert got == {"P": "工作坊裝來的", "P › C": "工作坊裝來的", "P › C › G": "工作坊裝來的", "F": None, "F › K": None}
+    assert kid.is_dir() and grandkid.is_dir() and own.is_dir()
+
+
+def test_status_lists_descendants_of_workshop_modules_as_not_added(load, home, tmp_path):
+    top = make_module(home / "modules", "P")
+    (top / ".origin").write_text("{}", encoding="utf-8")
+    make_module(make_module(top, "C"), "G")
+    interop = make_module(home / "modules", "互通")
+    config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules",))
+    got = load_button().status(home, config, "/py", interop)
+    assert {s["name"]: s["reason"] for s in got["skipped"]} == {
+        "P": "工作坊裝來的", "P › C": "工作坊裝來的", "P › C › G": "工作坊裝來的"}
+    assert [c["name"] for c in got["candidates"]] == ["互通"]  # 自己不是工作坊裝來的：照舊可以加上
+
+
 # ── run：面板外的入口 ──
 
 @pytest.fixture
