@@ -35,7 +35,7 @@ class Nav:
         self.cells += [{"k": "child", "t": m.title, "i": m.icon or "", "d": m.description} for m in kids]
 
         def _iplot_nav(i: int) -> None:
-            if type(i) is int and 0 <= i < len(self.targets):  # 只認編號，不認 True、"1"、1.0
+            if self.choice is None and type(i) is int and 0 <= i < len(self.targets):  # 只認編號，不認 True、"1"、1.0；連按兩下第一次算數
                 self.choice = i
                 window.destroy()
 

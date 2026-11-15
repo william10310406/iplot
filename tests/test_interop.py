@@ -1920,6 +1920,27 @@ def test_nav_jump_that_cannot_start_says_so_and_keeps_the_page(load, home):
     assert said == ["打不開『作業一』：找不到檔案或資料夾。再按一次；還是不行就從 iPLoT 的面板打開它"]
 
 
+def test_nav_jump_without_run_py_says_so_and_keeps_the_page(load, home, monkeypatch, tmp_path):
+    """Popen 只在 Python 執行檔本身起不來時才丟 OSError；run.py 不在的話不會，所以先確認它在（審查）。"""
+    nav_tree(home)
+    said, calls = [], []
+    bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(load("nav"), "RUN", tmp_path / "沒有.py")
+    window.exposed["_iplot_nav"](1)
+    assert calls == [] and not window.destroyed and bar.choice is None
+    assert said == ["打不開『作業一』：找不到 run.py。再按一次；還是不行就從 iPLoT 的面板打開它"]
+
+
+def test_nav_jump_twice_starts_only_one_process(load, home):
+    """連按兩下（pywebview 每個呼叫各開一條執行緒）：只開一個程序，第一次按的那一格算數。"""
+    nav_tree(home)
+    calls = []
+    bar, window, _ = nav_for(load, home, "課程", popen=lambda *a, **k: calls.append(a))
+    window.exposed["_iplot_nav"](1)
+    window.exposed["_iplot_nav"](2)
+    assert len(calls) == 1 and bar.choice == 1
+
+
 def test_nav_jump_to_a_module_that_is_gone_says_so_and_keeps_the_page(load, home):
     nav_tree(home)
     said, calls = [], []
@@ -2011,7 +2032,8 @@ nav.track(core)
 core.rescan()
 [p] = [m for m in core.all_modules() if m.name == "P"]
 core.press(p)
-print(json.dumps(out))
+import core as _core
+print(json.dumps(out + ["ver " + _core.__version__]))
 """
 
 
@@ -2035,5 +2057,6 @@ def test_nav_works_on_a_real_old_core(load, home, tmp_path, version):
                          capture_output=True, text=True, cwd=tmp_path)
     assert got.returncode == 0, got.stderr
     cells, *rest = json.loads(got.stdout.splitlines()[-1])
+    assert f"ver {version[1:4]}" in " ".join(rest), rest  # 真的載到舊核心，不是 sys.path 上的新核心
     assert [c["k"] for c in json.loads(cells)] == ["panel", "child"] and json.loads(cells)[1]["t"] == "孩子" and json.loads(cells)[1]["i"] == ""
     assert "done" in rest  # 模組在 app.page 之後照常跑完

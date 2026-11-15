@@ -102,6 +102,15 @@ def test_iplot_nav_only_accepts_an_index_on_the_bar(home, bad):
     assert not window.destroyed and bar.choice is None
 
 
+def test_choosing_twice_keeps_the_first_choice(home):
+    tree(home)
+    window = FakeWindow("頁", {})
+    bar = nav.Nav(window, core_with(home, info_of(home, "課程")))
+    window.exposed["_iplot_nav"](1)
+    window.exposed["_iplot_nav"](2)
+    assert bar.choice == 1
+
+
 def test_choosing_closes_the_page_and_remembers_which(home):
     tree(home)
     window = FakeWindow("頁", {})
@@ -259,7 +268,7 @@ const make = (tag) => ({tag, style: {}, children: [], on: {}, textContent: "",
 const run = (cells, meta, twice) => {
   const body = make("body"), calls = [];
   global.document = {body, createElement: make,
-    querySelector: (s) => s.startsWith("meta") ? (meta ? {} : null) : body.children.find((c) => c.tag === "iplot-nav") || null};
+    querySelector: (s) => s.startsWith("meta") ? (meta && s === 'meta[name="iplot-nav"][content="off"]' ? {} : null) : body.children.find((c) => c.tag === "iplot-nav") || null};
   global.window = {pywebview: {api: {_iplot_nav: (i) => calls.push(i)}}};
   const fn = eval(fs.readFileSync(process.argv[1], "utf8"));
   fn(cells);

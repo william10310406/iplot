@@ -17,6 +17,7 @@ JS = Path(__file__).with_name("nav.js")
 RUN = Path(__file__).with_name("run.py")
 PANEL = "主控面板"
 PARENT = "↑ {title}"
+NO_RUN = "找不到 run.py"
 NOT_OPENED = "打不開『{title}』：{reason}。再按一次；還是不行就從 iPLoT 的面板打開它"
 GONE = "找不到模組『{title}』，可能已經被移除了"
 ENV = "IPLOT_CALENDAR"  # 行事曆自己另開的程序的記號：不留給再開出去的程序
@@ -71,18 +72,21 @@ class Nav:
         self.choice = None
 
         def _iplot_nav(i: int) -> None:
-            if type(i) is not int or not 0 <= i < len(self.targets):  # 只認編號，不認 True、"1"、1.0
+            if self.choice is not None or type(i) is not int or not 0 <= i < len(self.targets):  # 只認編號，不認 True、"1"、1.0
                 return
             target = self.targets[i]
             if not scan.is_module(target.folder):
                 return log(GONE.format(title=target.title))
+            if not RUN.is_file():  # Popen 只在 Python 執行檔本身起不來時才丟 OSError：run.py 不在要先自己看
+                return log(NOT_OPENED.format(title=target.title, reason=NO_RUN))
+            self.choice = i  # 先記下：連按兩下時，後面那一下進來就看到了
             try:
                 popen([sys.executable, str(RUN), str(target.folder)], env={k: v for k, v in environ.items() if k != ENV},
                       start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                       stderr=subprocess.DEVNULL)
             except OSError as exc:
+                self.choice = None
                 return log(NOT_OPENED.format(title=target.title, reason=plain(exc)))
-            self.choice = i
             window.destroy()  # 新的程序開起來了才關這一頁
 
         window.expose(_iplot_nav)
