@@ -171,14 +171,17 @@ def test_ensure_python_ok_puts_home_and_lib_first(load, tmp_path):
     assert env == {}  # 換過、成功了：之後這個程序開的程式不再帶著這個記號
 
 
-def test_check_version(load):
+def test_check_version_only_sets_a_floor(load):
+    """只擋下限：核心 ≥ 0.5 而且 api_version ≥ 3 就放行，核心一升次版本捷徑不會被擋（D151）。"""
     b = load("boot")
-    for found in ("0.5.0", "0.5.2", "0.6.0", "0.6.3"):  # 0.5 與 0.6 都認：先換互通、後按「更新」也行（D117）
-        assert b.check_version(found, 3, "0.2.0") is None, found
-    for found in ("0.4.9", "0.7.0"):
-        assert b.check_version(found, 3, "0.2.0") == (f"互通 0.2.0 支援 iPLoT 0.5、0.6，這台是 {found}。"
-                                                      "iPLoT 比較舊就按「更新」，比較新就到工作坊看看互通有沒有新版。")
-    assert b.check_version("0.6.0", 2, "0.2.0") is not None
+    for found in ("0.5.0", "0.5.2", "0.6.0", "0.6.3", "0.7.0", "0.10.0", "1.0.0"):
+        assert b.check_version(found, 3, "0.3.0") is None, found
+    assert b.check_version("0.7.0", 4, "0.3.0") is None
+    for found in ("0.4.9", "0.1.0"):
+        assert b.check_version(found, 3, "0.3.0") == (f"互通 0.3.0 需要 iPLoT 0.5 以上，這台是 {found}。"
+                                                      "iPLoT 太舊，按「更新」。")
+    assert b.check_version("0.6.0", 2, "0.3.0") is not None
+    assert b.check_version("看不懂", 3, "0.3.0") is not None  # 讀不出版本：沒辦法確認就說一句
 
 
 def test_alert_passes_text_as_arguments(load, capsys):
