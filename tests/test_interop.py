@@ -1841,7 +1841,7 @@ def test_nav_cells_have_the_panel_the_parent_and_the_children(load, home):
     bar, _, _ = nav_for(load, home, "課程", "一")
     assert bar.cells == [{"k": "panel", "t": "主控面板", "i": "", "d": ""},
                          {"k": "parent", "t": "↑ 課程作業", "i": "", "d": "說明"},
-                         {"k": "child", "t": "G", "i": "G", "d": ""}]
+                         {"k": "child", "t": "G", "i": "", "d": ""}]
     assert [t.name for t in bar.targets] == ["主控面板", "課程", "G"]
 
 
@@ -2035,5 +2035,5 @@ def test_nav_works_on_a_real_old_core(load, home, tmp_path, version):
                          capture_output=True, text=True, cwd=tmp_path)
     assert got.returncode == 0, got.stderr
     cells, *rest = json.loads(got.stdout.splitlines()[-1])
-    assert [c["k"] for c in json.loads(cells)] == ["panel", "child"] and json.loads(cells)[1]["t"] == "孩子"
+    assert [c["k"] for c in json.loads(cells)] == ["panel", "child"] and json.loads(cells)[1]["t"] == "孩子" and json.loads(cells)[1]["i"] == ""
     assert "done" in rest  # 模組在 app.page 之後照常跑完

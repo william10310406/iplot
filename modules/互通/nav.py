@@ -65,7 +65,7 @@ class Nav:
         found = [("panel", tops[0], PANEL, "", "")] if len(tops) == 1 and owner.name != PANEL else []
         if up:
             found.append(("parent", up, PARENT.format(title=up.title), "", up.description))
-        found += [("child", m, m.title, m.icon or m.title[:1], m.description) for m in kids]
+        found += [("child", m, m.title, m.icon or "", m.description) for m in kids]
         self.targets = [target for _, target, *_ in found]
         self.cells = [{"k": k, "t": t, "i": i, "d": d} for k, _, t, i, d in found]
         self.choice = None

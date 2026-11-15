@@ -48,7 +48,7 @@ def test_cells_for_a_top_level_module_are_the_panel_then_its_children(home):
     tree(home)
     bar = nav.Nav(FakeWindow("頁", {}), core_with(home, info_of(home, "課程")))
     assert bar.cells == [PANEL, {"k": "child", "t": "第一份", "i": "📄", "d": "說明一"},
-                         {"k": "child", "t": "第二份", "i": "第", "d": ""}]
+                         {"k": "child", "t": "第二份", "i": "", "d": ""}]
     assert [t and t.name for t in bar.targets] == [None, "HK1", "HK2"]
 
 
@@ -56,7 +56,7 @@ def test_cells_for_a_child_add_the_parent_in_the_middle(home):
     tree(home)
     bar = nav.Nav(FakeWindow("頁", {}), core_with(home, info_of(home, "課程", "HK1")))
     assert bar.cells == [PANEL, {"k": "parent", "t": "↑ 課程作業", "i": "", "d": "作業"},
-                         {"k": "child", "t": "G", "i": "G", "d": ""}]
+                         {"k": "child", "t": "G", "i": "", "d": ""}]
     assert [t and t.name for t in bar.targets] == [None, "課程", "G"]
 
 
@@ -301,3 +301,23 @@ def test_nav_js_has_no_globals_and_no_inner_html():
     text = (UI / "nav.js").read_text(encoding="utf-8")
     assert text.lstrip().startswith(("//", "(")) and "innerHTML" not in text and "outerHTML" not in text
     assert "document.write" not in text and "eval(" not in text
+
+
+def test_a_module_made_with_the_plus_button_gets_the_bar_after_one_app_page_line(panel, home):
+    """＋ 新建的模組（範本只有 app.log）加一行 app.page 就有導覽列：模組什麼都不用多寫（D153，範本不改）。"""
+    bridge = panel.window.kw["js_api"]
+    bridge.rescan()
+    panel.wait()
+    [root] = [g["root"] for g in panel.window.calls("show")[-1][0]["groups"] if g["level"] == "here"]
+    bridge.create(root, "新的")
+    panel.wait()
+    folder = (home / "modules" / "新的").resolve()
+    source = (folder / "iplot.py").read_text(encoding="utf-8")
+    assert "iplot-nav" not in source and "_iplot_nav" not in source  # 範本沒有導覽列的任何東西
+    (folder / "iplot.py").write_text(source + '    app.page("新的", "<p>hi</p>")\n', encoding="utf-8")
+    page = open_page(panel, folder)
+    assert list(page.exposed) == ["_iplot_nav"]
+    page.fire("loaded")
+    assert json.loads(page.js[-1].removeprefix(f"({nav.source()})(").removesuffix(")")) == [PANEL]
+    page.fire("closed")
+    panel.wait()

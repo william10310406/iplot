@@ -32,7 +32,7 @@ class Nav:
         self.cells = [{"k": "panel", "t": T["nav_panel"], "i": "", "d": ""}]
         if up:
             self.cells.append({"k": "parent", "t": T["nav_parent"].format(title=up.title), "i": "", "d": up.description})
-        self.cells += [{"k": "child", "t": m.title, "i": m.icon or m.title[:1], "d": m.description} for m in kids]
+        self.cells += [{"k": "child", "t": m.title, "i": m.icon or "", "d": m.description} for m in kids]
 
         def _iplot_nav(i: int) -> None:
             if type(i) is int and 0 <= i < len(self.targets):  # 只認編號，不認 True、"1"、1.0
