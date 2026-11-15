@@ -82,6 +82,34 @@ def test_run_by_name_ambiguous_raises(home, view):
     assert str(here.resolve()) in str(ei.value) and str(parent.resolve()) in str(ei.value)
 
 
+def test_running_is_the_stack_of_modules_being_pressed(home, view):
+    """D152：正在執行的模組，最裡面的在最後；app.page 被呼叫時 running[-1] 就是開頁面的那一個。"""
+    make_module(home / "modules", "A", "def run(app):\n    app.log('A:%s' % [m.name for m in app._core.running])\n"
+                                       "    app.run('B')\n    app.log('A後:%s' % [m.name for m in app._core.running])\n")
+    make_module(home / "modules", "B", "def run(app):\n    app.log('B:%s' % [m.name for m in app._core.running])\n")
+    c = started(home, view)
+    assert c.running == []
+    c.press(find(c, "A"))
+    assert [t for t in view.logs if t[:2] in ("A:", "B:", "A後")] == ["A:['A']", "B:['A', 'B']", "A後:['A']"]
+    assert c.running == []
+
+
+def test_running_is_empty_again_after_an_error(home, view):
+    make_module(home / "modules", "A", "def run(app):\n    1/0\n")
+    c = started(home, view)
+    c.press(find(c, "A"))
+    assert c.running == [] and view.reports
+
+
+def test_rescan_waits_for_the_outermost_module_to_finish(home, view):
+    make_module(home / "modules", "A", "def run(app):\n    app.run('B')\n    app.log('A還在跑')\n")
+    make_module(home / "modules", "B", "def run(app):\n    app.rescan()\n")
+    c = started(home, view)
+    view.events.clear()
+    c.press(find(c, "A"))
+    assert [e[0] for e in view.events].count("show") == 1 and view.events[-1][0] == "show"
+
+
 def test_rescan_deferred_while_busy(home, view):
     make_module(home / "modules", "A", "def run(app):\n    app.rescan()\n    app.log('after')\n")
     c = started(home, view)

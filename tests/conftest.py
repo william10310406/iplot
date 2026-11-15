@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from core import scan
 from core.scan import module_info
 from core.types import DEFAULT_CONFIG
 
@@ -124,6 +125,9 @@ class FakeCore:
 
     def all_modules(self):
         return ()
+
+    def roots(self):
+        return scan.roots_from_config(self.home, self.config.roots)
 
     def run_by_name(self, name):
         self.calls.append(("run_by_name", name))

@@ -66,7 +66,7 @@ class Core:
         self.scope = Scope(("iPLoT",), ())
         self.memories: dict[Path, dict] = {}
         self._stack: list[ModuleInfo] = []
-        self._depth, self._pending = 0, False
+        self.running, self._pending = [], False  # running：正在執行的模組（ModuleInfo），最裡面的在最後；app.page 被呼叫時 running[-1] 就是開頁面的那一個
 
     def roots(self) -> list[Root]:
         """要掃的根目錄；安全模式只掃 modules。"""
@@ -74,7 +74,7 @@ class Core:
 
     def rescan(self) -> None:
         """重掃目前範圍並重畫；模組執行中只先記著，等執行結束才做。"""
-        if self._depth:
+        if self.running:
             self._pending = True
             return
         gone = [i for i, m in enumerate(self._stack) if not scan.is_module(m.folder)]
@@ -113,7 +113,7 @@ class Core:
             return Result(False, None, 0.0, "")
         with contextlib.suppress(OSError):  # 拿不掉（唯讀）：照常執行，只是下次還會再問
             marker.unlink(missing_ok=True)
-        self._depth += 1
+        self.running.append(info)
         try:
             try:
                 history.snapshot(info.file, self.config.history_keep)
@@ -128,8 +128,8 @@ class Core:
                 self.view.log(T["done"].format(title=info.title, seconds=result.duration))
             return result
         finally:
-            self._depth -= 1
-            if not self._depth and self._pending:
+            self.running.pop()
+            if not self.running and self._pending:
                 self._pending = False
                 self.rescan()
 

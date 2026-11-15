@@ -12,6 +12,7 @@ from core.scan import (
     home_path,
     is_module,
     module_info,
+    parent_of,
     roots_from_config,
 )
 from core.text import T
@@ -183,3 +184,51 @@ def test_missing_and_unreadable_roots_say_what_to_do(home):
     assert str(gone) in missing.note and "ROOTS" in missing.note and "還在" in missing.note
     assert str(f) in unreadable.note and "ROOTS" in unreadable.note and "權限" in unreadable.note
     assert "隱私權與安全性" in unreadable.note
+
+
+# ── parent_of：父層是資料夾上一層的模組，不越過根目錄（D152）──
+
+def test_parent_of_a_top_level_module_is_none(home):
+    a = module_info(make_module(home / "modules", "A"), (home / "modules").resolve(), "here")
+    assert parent_of(a, [here(home)]) is None
+
+
+def test_parent_of_a_child_is_the_module_above_with_the_roots_level(home):
+    make_module(make_module(home / "modules", "A"), "C")
+    root = (home / "modules").resolve()
+    [c] = find_children(root / "A", root)
+    up = parent_of(c, roots_from_config(home, ("modules", "..")))
+    assert (up.name, up.folder, up.root, up.level) == ("A", root / "A", root, "here")
+
+
+def test_parent_of_a_grandchild_has_level_child(home):
+    make_module(make_module(make_module(home / "modules", "A"), "C"), "G")
+    root = (home / "modules").resolve()
+    [c] = find_children(root / "A", root)
+    [g] = find_children(c.folder, root)
+    up = parent_of(g, roots_from_config(home, ("modules",)))
+    assert (up.name, up.level, up.root) == ("C", "child", root)
+    assert parent_of(up, roots_from_config(home, ("modules",))).level == "here"
+
+
+def test_parent_of_takes_the_level_of_an_extra_root(home, tmp_path):
+    extra = (tmp_path / "extra").resolve()
+    make_module(make_module(extra, "X"), "Y")
+    [y] = find_children(extra / "X", extra)
+    up = parent_of(y, roots_from_config(home, (str(extra),)))
+    assert (up.name, up.level) == ("X", "extra")
+
+
+def test_parent_of_is_none_when_the_folder_above_is_not_a_module(home):
+    plain = (home / "modules").resolve() / "普通"
+    make_module(plain, "B")
+    b = module_info(plain / "B", (home / "modules").resolve(), "child")
+    assert parent_of(b, [here(home)]) is None
+
+
+def test_parent_of_is_none_when_the_folder_above_is_a_symlink(home):
+    root = (home / "modules").resolve()
+    make_module(make_module(root, "A"), "C")
+    (root / "L").symlink_to(root / "A")
+    c = module_info(root / "L" / "C", root, "child")
+    assert parent_of(c, [here(home)]) is None

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import __version__
+from . import __version__, scan
 from .types import Config, ModuleInfo, Result
 
 if TYPE_CHECKING:
@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 
 class App:
     """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version 並寫進 CHANGELOG
-    （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page）。version 是核心的版本字串。"""
+    （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page；4 加了 parent、children）。version 是核心的版本字串。"""
 
-    api_version: int = 3
+    api_version: int = 4
     version: str = __version__
 
     def __init__(self, core: Core, info: ModuleInfo) -> None:
@@ -37,6 +37,16 @@ class App:
     def modules(self) -> tuple[ModuleInfo, ...]:
         """目前範圍內所有模組的唯讀清單。"""
         return self._core.all_modules()
+
+    @property
+    def parent(self) -> ModuleInfo | None:
+        """這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 app.run。"""
+        return scan.parent_of(self._info, self._core.roots())
+
+    @property
+    def children(self) -> tuple[ModuleInfo, ...]:
+        """這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 app.run。"""
+        return tuple(scan.find_children(self._info.folder, self._info.root))
 
     @property
     def config(self) -> Config:

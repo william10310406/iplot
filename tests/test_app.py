@@ -2,6 +2,8 @@ import dataclasses
 import re
 from pathlib import Path
 
+from conftest import make_module
+
 from core.app import App
 
 CJK = re.compile(r"[一-鿿]")
@@ -60,8 +62,39 @@ def test_ask_and_choose_delegate(fake_core, info):
     assert app.choose_files() == [Path("/f")] and app.choose_folder() == Path("/d")
 
 
-def test_api_version_is_3(fake_core, info):
-    assert App(fake_core, info).api_version == 3
+def test_api_version_is_4(fake_core, info):
+    """3 加了 config、version、page；4 加了 parent、children（D152）。"""
+    assert App(fake_core, info).api_version == 4
+
+
+def test_children_are_the_modules_one_level_down(fake_core, info):
+    make_module(make_module(info.folder, "子二"), "孫")
+    make_module(info.folder, "子一")
+    kids = App(fake_core, info).children
+    assert [(k.name, k.level, k.root, k.has_children) for k in kids] == [
+        ("子一", "child", info.root, False), ("子二", "child", info.root, True)]
+    assert isinstance(kids, tuple)
+
+
+def test_children_are_read_from_disk_every_time(fake_core, info):
+    app = App(fake_core, info)
+    assert app.children == ()
+    make_module(info.folder, "新")
+    assert [k.name for k in app.children] == ["新"]
+
+
+def test_parent_is_none_at_the_top_and_the_module_above_otherwise(fake_core, info):
+    assert App(fake_core, info).parent is None
+    [kid] = (make_module(info.folder, "子"), App(fake_core, info).children)[1]
+    up = App(fake_core, kid).parent
+    assert (up.name, up.folder, up.level) == ("A", info.folder, "here")
+
+
+def test_children_and_parent_can_be_handed_to_run(fake_core, info):
+    make_module(info.folder, "子")
+    [kid] = App(fake_core, info).children
+    assert App(fake_core, info).run(kid) == "result"
+    assert fake_core.calls == [("run_by_name", kid)]
 
 
 def test_config_and_version(fake_core, info):
