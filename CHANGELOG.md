@@ -40,7 +40,7 @@
 - `docs/plans/2026-11-15-模組導覽列-設計.md`：研究與設計，三個選項（這一版做的是 B）。
 
 ### 維護
-- 測試 2452 → 2527 個：`tests/test_nav.py`（導覽列；有 node 時用假的 DOM 跑 `ui/nav.js`）、`tests/test_interop.py`（互通那一側，含用真的 `v0.5.0`、`v0.6.0` 核心驗後備；兩個 `nav.js` 一字不差並用 sha256 釘住）、`tests/test_scan.py`、`tests/test_app.py`、`tests/test_core.py`、`tests/test_interfaces.py`。
+- 測試 2452 → 2528 個：`tests/test_nav.py`（導覽列；有 node 時用假的 DOM 跑 `ui/nav.js`）、`tests/test_interop.py`（互通那一側，含用真的 `v0.5.0`、`v0.6.0` 核心驗後備；兩個 `nav.js` 一字不差並用 sha256 釘住）、`tests/test_scan.py`、`tests/test_app.py`、`tests/test_core.py`、`tests/test_interfaces.py`。
 
 ### 已知狀況
 - **沒有做人工驗收**：真的視窗裡的樣子（淺色與深色、橫向 flex 的頁面、兩排並存）、跳到父層與子模組與主控面板、從捷徑打開的頁面往下跳，都只用假的視窗與假的 DOM 測過。0.7.0 發版前要在 Mac 上照 `docs/plans/2026-11-15-模組導覽列-人工驗收.md` 按一遍。
