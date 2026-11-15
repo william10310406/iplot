@@ -125,6 +125,16 @@ def test_0_6_3_notes_are_for_users_not_for_the_publisher():
     assert notes.index("先按「取消」") < notes.index("再回來按「更新」")
 
 
-def test_docs_08_repeats_the_0_6_3_notes():
-    doc = (ROOT / "docs" / "08_操作說明-0.6.3.md").read_text(encoding="utf-8")
-    assert _notes("0.6.3") in doc
+def test_0_7_0_notes_say_the_order_and_that_nothing_was_checked_by_hand():
+    """按「更新」顯示的就是這一段：第一句是先換互通與行事曆（順序反了互通會擋下來），最後說明沒有人工驗收、怎麼回報。"""
+    notes = _notes("0.7.0")
+    assert "\n" not in notes and "`" not in notes
+    assert notes.startswith("先到「工作坊」把「互通」更新到 0.3.0、「行事曆」更新到 0.1.3，再按「更新」；順序反了的話")
+    assert "到工作坊更新互通就好。" in notes.split("這一版有頁面的模組")[0]
+    assert notes.endswith("這一版的導覽列沒有人工驗收過，碰到問題請用「回報與討論」回報。")
+    assert "還在 0.5.x 的人請先按「取消」" in notes
+
+
+def test_docs_08_repeats_the_0_7_0_notes():
+    doc = (ROOT / "docs" / "08_操作說明-0.7.0.md").read_text(encoding="utf-8")
+    assert _notes("0.7.0") in doc
