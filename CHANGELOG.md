@@ -11,7 +11,7 @@
 **D80 的第五個例外（D152、D153）**：核心邏輯加 `app.parent`、`app.children`、`core.scan.parent_of`、`Core.running`；`ui/` 加導覽列（新檔 `ui/nav.py`、`ui/nav.js`，`ui/web.py` 的 `page`）；`core/text.py` 加三個字串。原因：導覽列要知道「這一頁是哪個模組開的、父層、子模組」，這些只有核心知道，而且是通用的接口，不是為某一個模組開的洞。`app.api_version` 3 → 4，只加不減，照 3 寫的模組不用改。核心邏輯的有效行上限由 516 調到 530（量到 528），`ui/web.py` 的上限由 230 調到 235（量到 233）。
 
 ### 新增
-- 模組導覽列（D153）：`app.page` 開出來的頁面，載入後最上面多一排——「主控面板」、「↑ 父層的名稱」、這個模組的子模組（圖示或名稱第一個字，加名稱；滑鼠停著顯示說明）。按一格就關掉這一頁、再跑那個模組，跟在面板上雙擊一樣：面板裡排在這次執行之後；「主控面板」那一格只關掉這一頁。面板不跟著換層。
+- 模組導覽列（D153）：`app.page` 開出來的頁面，載入後最上面多一排——「主控面板」、「↑ 父層的名稱」、這個模組的子模組（有 `ICON` 的前面放圖示，再來是名稱；滑鼠停著顯示說明）。按一格就關掉這一頁、再跑那個模組，跟在面板上雙擊一樣：面板裡排在這次執行之後；「主控面板」那一格只關掉這一頁。面板不跟著換層。
 - 不要這一排：在自己的 HTML 的 `<head>` 放 `<meta name="iplot-nav" content="off">`。已經有一頁開著時再開的頁面沒有導覽列；安全模式與備用面板沒有頁面，也沒有導覽列。
 - `app.parent`（`ModuleInfo | None`）、`app.children`（`tuple[ModuleInfo, ...]`）（D152，`api_version` 4）：拿到的 `ModuleInfo` 直接交給 `app.run`，哪一層都叫得到。`app.run("名稱")` 找名字的規則不變（D83）。
 - `core.scan.parent_of(info, roots)`、`Core.running`（正在執行的模組，最裡面的在最後；`Core._depth` 換成它，行數不變）：列進 `docs/07` 第 13 節「工作坊模組可以依賴的核心介面」，到 1.0.0 之前只加不改。
@@ -39,7 +39,7 @@
 - `docs/plans/2026-11-15-模組導覽列-設計.md`：研究與設計，三個選項（這一版做的是 B）。
 
 ### 維護
-- 測試 2452 → 2523 個：`tests/test_nav.py`（導覽列；有 node 時用假的 DOM 跑 `ui/nav.js`）、`tests/test_interop.py`（互通那一側，含用真的 `v0.5.0`、`v0.6.0` 核心驗後備；兩個 `nav.js` 一字不差並用 sha256 釘住）、`tests/test_scan.py`、`tests/test_app.py`、`tests/test_core.py`、`tests/test_interfaces.py`。
+- 測試 2452 → 2524 個：`tests/test_nav.py`（導覽列；有 node 時用假的 DOM 跑 `ui/nav.js`）、`tests/test_interop.py`（互通那一側，含用真的 `v0.5.0`、`v0.6.0` 核心驗後備；兩個 `nav.js` 一字不差並用 sha256 釘住）、`tests/test_scan.py`、`tests/test_app.py`、`tests/test_core.py`、`tests/test_interfaces.py`。
 
 ### 已知狀況
 - **沒有做人工驗收**：真的視窗裡的樣子（淺色與深色、橫向 flex 的頁面、兩排並存）、跳到父層與子模組與主控面板、從捷徑打開的頁面往下跳，都只用假的視窗與假的 DOM 測過。0.7.0 發版前要在 Mac 上照 `docs/plans/2026-11-15-模組導覽列-人工驗收.md` 按一遍。
