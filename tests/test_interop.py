@@ -1801,7 +1801,8 @@ def test_the_two_nav_js_files_are_byte_for_byte_the_same_and_pinned():
     """ui/nav.js 與互通的 nav.js 是同一份（互通不 import ui/，D80，所以各放一份）：一字不差，而且釘住——
     要改就兩份一起改，連這個 sha256 一起換（跟 snippet.TEXT 的做法一樣）。"""
     import hashlib
-    mine, theirs = (INTEROP / "nav.js").read_bytes(), UI_NAV_JS.read_bytes()
+    # Windows 的 git 可能把換行換成 CRLF 再檢出：比的是內容，不是那一個位元組
+    mine, theirs = ((f.read_bytes().replace(b"\r\n", b"\n")) for f in (INTEROP / "nav.js", UI_NAV_JS))
     assert mine == theirs
     assert hashlib.sha256(mine).hexdigest() == NAV_JS_SHA256
 

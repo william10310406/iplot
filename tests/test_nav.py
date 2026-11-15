@@ -292,7 +292,7 @@ console.log(JSON.stringify({plain: run(cells, false, false), off: run(cells, tru
 def test_nav_js_draws_one_closed_shadow_bar_with_text_only_and_calls_the_index(home):
     cells = [PANEL, {"k": "parent", "t": "↑ 上", "i": "", "d": "說明"}, {"k": "child", "t": "<b>x</b>", "i": "📄", "d": ""}]
     out = subprocess.run([NODE, "-e", HARNESS, str(UI / "nav.js"), json.dumps(cells)],
-                         capture_output=True, text=True, check=True).stdout
+                         capture_output=True, text=True, encoding="utf-8", check=True).stdout
     got = json.loads(out)
     plain = got["plain"]
     assert plain["count"] == 1 and plain["mode"] == "closed"
