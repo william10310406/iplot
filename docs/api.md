@@ -1,6 +1,6 @@
 # `app`：模組看得到的全部
 
-- `api_version = 3`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改。
+- `api_version = 4`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改。
 - 每次執行都新建一個 `App` 傳給 `run(app)`（或 `on_files(app, paths)`）；`module` 與 `memory` 在建立時綁好。執行一次＝在面板上雙擊模組的圖示，或右鍵選「執行」；tkinter 面板是單擊按鈕。tkinter 面板在兩種時候出現：安全模式（`python3 main.py --safe`，只掃 `modules/`），以及網頁面板開不起來時的備用面板（照常掃上一層與 `ROOTS`，不是安全模式，D75）；下面說「tkinter 面板」就是指這兩種。下面說的「按下」都是指執行這一次。
 - `def run(app)` 可省略：沒有 `run` 時最外層程式碼就是按下的動作，不用 `app` 也能寫模組（見最後一節）。
 - 本表整理自 `core/app.py` 的 docstring；兩邊不一致時以 `core/app.py` 為準。
@@ -10,8 +10,10 @@
 | 身分 | `app.module` → `ModuleInfo`（唯讀） | 正在執行的模組的資訊：name、title、folder、file 等（見附錄 B 的 ModuleInfo）。 |
 | 身分 | `app.home` → `Path`（唯讀） | iPLoT 程式資料夾。 |
 | 身分 | `app.modules` → `tuple[ModuleInfo, ...]`（唯讀） | 目前範圍內所有模組的唯讀清單。 |
+| 身分 | `app.parent` → `ModuleInfo | None`（唯讀） | 這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 `app.run`。 |
+| 身分 | `app.children` → `tuple[ModuleInfo, ...]`（唯讀） | 這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 `app.run`。 |
 | 身分 | `app.config` → `Config`（唯讀） | config.py 讀出來的設定（唯讀）：roots、editor、history_keep、update_url、workshop_url。 |
-| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.6.0"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
+| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.7.0"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
 | 狀態 | `app.memory` → `dict`（唯讀） | 這個模組自己的 dict，iPLoT 開著期間保留；跨次啟動要留的請寫成檔案放 module.folder。 |
 | 動作 | `app.log(text: str)` → `None` | 寫一行到面板下方的訊息區。 |
 | 動作 | `app.open(path: Path)` → `None` | 打開：資料夾用檔案總管、檔案用預設程式。由 modules/作業系統 執行。 |
@@ -44,6 +46,8 @@
 - 從「工作坊」裝進來的模組，第一次執行前會先問一次（D59、D73）。工作坊安裝、更新或覆蓋一個模組時，在放程式之前先在它的資料夾裡放一個空檔案 `.unconfirmed`；包裡與磁碟上（這個模組的資料夾底下）每一個有 `iplot.py` 的資料夾都放一個，所以進到下一層執行子模組，一樣會先問。磁碟上的也算：新的包只帶了下一層模組旁邊的 `helper.py`、沒帶它的 `iplot.py` 時，那個上一版裝的、已經確認過的資料夾也重新放標記，執行它一樣先問。裝到一半出錯、又沒能放回原樣時，留下來的每個有 `iplot.py` 的資料夾也都放（裡面可能有新下載的程式）。資料夾裡有這個檔的模組，執行之前先跳「確定／取消」：「『<顯示名稱>』是從外面裝進來的，第一次執行前確認：它是會在這台電腦上執行的程式，能讀寫你的檔案。要執行嗎？」。按取消：不執行、不存快照，訊息區記一行「已取消執行『<顯示名稱>』」，標記留著，下次還會問。按確定：拿掉標記、照常執行，之後不再問；標記拿不掉（例如資料夾是唯讀的）也照常執行，只是下次還會再問。這是核心在執行之前做的，模組自己不用寫任何東西；用 `app.run` 執行這樣的模組一樣會先問，按取消時拿到的 `Result` 是 `ok=False`、`error=None`。工作坊不覆蓋「作業系統」「更新」「工作坊」這三個 iPLoT 自己要用的隨附模組（清單上那一列沒有按鈕），所以「作業系統」不會因為工作坊帶上這個標記；它們要換新版，是自己把新的資料夾複製進 `modules/`。「作業系統」的資料夾裡真的有這個檔的話（例如從別處複製進來的資料夾裡本來就帶著一個），在確認之前，每次 `app.open`、`edit`、`reveal`、`terminal`、`trash` 都會先問，按取消就不做、回 `None`。核心只看這個檔在不在，不讀它的內容：不是經過工作坊、自己把別人的資料夾複製進來的模組沒有這個檔，不會問。
 - `exit()` / `sys.exit(0)` / `quit()` 是正常結束；代碼非零（`exit(1)`、`sys.exit("壞了")`）才算錯誤，面板顯示「模組以 exit(1) 結束」。兩種都不會關掉 iPLoT。
 - `app.module` 是 `ModuleInfo`：`name`（資料夾名稱）、`title`（`TITLE` 或 name）、`description`（docstring 第一段）、`folder`、`file`、`root`、`level`、`has_run`、`accepts_files`、`has_children`、`error`、`icon`（`ICON` 寫的字串，沒寫是 `None`）、`icon_file`（圖示檔的路徑，沒有是 `None`）。
+- `app.parent`、`app.children`（D152，核心 0.7.0）給的是 `ModuleInfo`，直接交給 `app.run` 就能叫到那一個，哪一層都叫得到：`app.run(app.parent)`、`app.run(next(m for m in app.children if m.name == "子"))`。`app.run("名稱")` 還是只找面板目前這一層與最上層，不找下一層（D83）。父層的定義：資料夾上一層是模組（符號連結不算）、而且不是根目錄；中間隔著一個不是模組的資料夾，就沒有父層。
+- **有頁面的模組有一排「模組導覽列」**（D153，核心 0.7.0；互通 0.3.0 起面板外也有）：`app.page` 開出來的頁面，載入後最上面多一排——主控面板、「↑ 父層名稱」、這個模組的子模組——按一下就關掉這一頁、再跑那個模組。模組什麼都不用寫。已經有一頁開著時再開的頁面沒有；`body` 是橫向的 flex 或 grid 的頁面、或自己已經有一排模組列的頁面，在 `<head>` 放 `<meta name="iplot-nav" content="off">` 就不會有。它在頁面最前面多一個 `<iplot-nav>` 元素（內容在 closed 的 Shadow DOM 裡），`pywebview.api` 多一個 `_iplot_nav`。tkinter 面板沒有頁面，也沒有導覽列。
 - 圖示的來源依序是（D65）：模組資料夾裡的 `icon.png` 或 `icon.svg`（檔名要一字不差，`Icon.png` 不算；兩個都有用 png；1 MB 以內）→ `iplot.py` 頂層的 `ICON = "🧩"`（一個 emoji；跟 `TITLE` 一樣只認寫死的字串，不執行模組就讀得到）→ 都沒有就用顯示名稱的第一個字，底色由資料夾名稱算出來，同一個模組每次都一樣。圖檔超過 1 MB 或讀不到時當作沒有圖檔（有 `ICON` 就用 `ICON`），訊息區記一行。圖示只在網頁面板顯示，tkinter 面板沒有圖示。
 
 ## 最小的模組

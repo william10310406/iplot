@@ -26,7 +26,7 @@ def params(fn):
 
 def test_version_and_api_version():
     assert isinstance(core.__version__, str) and core.__version__.startswith("0.")
-    assert App.api_version >= 3
+    assert App.api_version >= 4
 
 
 @pytest.mark.parametrize(("fn", "expected"), [
@@ -43,6 +43,7 @@ def test_version_and_api_version():
     (scan.find_children, [("folder", EMPTY), ("root", EMPTY)]),
     (scan.roots_from_config, [("home", EMPTY), ("roots", EMPTY)]),
     (scan.is_module, [("folder", EMPTY)]),
+    (scan.parent_of, [("info", EMPTY), ("roots", EMPTY)]),
     (scan.home_path, [("s", EMPTY)]),
     (history.snapshot, [("file", EMPTY), ("keep", EMPTY)]),
     (errors.describe, [("error", EMPTY)]),
@@ -59,6 +60,7 @@ def test_core_attributes(home, view):
     c = Core(home, load_config(home / "config.py")[0], view)
     assert (c.home, c.config.roots) == (home, ("modules", ".."))
     assert isinstance(c.scope, Scope)
+    assert c.running == []  # 正在執行的模組（D152）
 
 
 def test_view_has_the_eight_methods():

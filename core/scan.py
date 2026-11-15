@@ -95,3 +95,12 @@ def find_children(folder: Path, root: Path) -> list[ModuleInfo]:
     with contextlib.suppress(OSError):
         return [module_info(f, root, "child") for f in _module_folders(folder)]
     return []
+
+
+def parent_of(info: ModuleInfo, roots: list[Root]) -> ModuleInfo | None:
+    """info 的父層：資料夾上一層是模組、而且不是根目錄；沒有就回 None。level 跟面板進到那一層時一樣。"""
+    up = info.folder.parent
+    if up == info.root or not is_module(up):
+        return None
+    top = up.parent == info.root
+    return module_info(up, info.root, next((r.level for r in roots if top and r.path == info.root), "child"))

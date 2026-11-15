@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from core import scan
 from core.scan import module_info
 from core.types import DEFAULT_CONFIG
 
@@ -125,6 +126,9 @@ class FakeCore:
     def all_modules(self):
         return ()
 
+    def roots(self):
+        return scan.roots_from_config(self.home, self.config.roots)
+
     def run_by_name(self, name):
         self.calls.append(("run_by_name", name))
         return "result"
@@ -155,6 +159,7 @@ class FakeWindow:
         self.title, self.kw = title, kw
         self.js, self.dialogs, self.dialog_result, self.js_error = [], [], None, None
         self.shown, self.destroyed = False, False  # show()／hide()／destroy() 只記狀態
+        self.exposed = {}  # expose() 加的函式：名字（__name__）→ 函式
         self.events = types.SimpleNamespace(loaded=FakeEvent(), closing=FakeEvent(), closed=FakeEvent())
 
     def show(self):
@@ -165,6 +170,10 @@ class FakeWindow:
 
     def destroy(self):
         self.destroyed = True
+
+    def expose(self, *functions):
+        for fn in functions:
+            self.exposed[fn.__name__] = fn
 
     def evaluate_js(self, script):
         if self.js_error and script.startswith(self.js_error):  # 模擬頁面那一頭的 JS 丟例外

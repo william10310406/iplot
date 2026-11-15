@@ -19,7 +19,7 @@ from core.errors import describe
 from core.scan import is_module, module_info
 from core.text import REPORT_MODULE, T
 from core.types import ErrorInfo, ModuleInfo, Scope
-from ui import errlog
+from ui import errlog, nav
 
 MAX_ICON = 1024 * 1024  # 圖示檔的上限：1 MB（D65）
 MIME = {".png": "image/png", ".svg": "image/svg+xml"}
@@ -169,6 +169,7 @@ class WebPanel:
         self._ids = itertools.count(1)
         self._waiting: dict[int, tuple[threading.Event, list]] = {}  # 等回答的對話框
         self._closed = False
+        self._pages: list = []  # 開著的頁面視窗（app.page）；已經有一頁開著，新的一頁不畫導覽列
         self._warned: set[Path] = set()
         self.recent, self.offer = errlog.Recent(), errlog.Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
 
@@ -323,11 +324,18 @@ class WebPanel:
         return self._dialog("confirm", prompt) is True
 
     def page(self, title: str, html: str, api: object | None) -> None:
-        """開第二個視窗顯示一頁 HTML（app.page），那個視窗關掉才回傳；api 的公開方法給那一頁的 JS 呼叫。"""
+        """開第二個視窗顯示一頁 HTML（app.page），那個視窗關掉才回傳；api 的公開方法給那一頁的 JS 呼叫。
+        在模組執行中開的、而且沒有別的頁面開著，就多一排導覽列（D153）；按了跳到別的模組，排在這次執行之後做。"""
         window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
-        done = threading.Event()
+        done, bar = threading.Event(), None
+        if self.core.running and not self._pages:
+            bar = nav.Nav(window, self.core)
+        self._pages.append(window)
         window.events.closed += done.set
         done.wait()
+        self._pages.remove(window)
+        if bar:
+            self.submit(lambda: bar.jump(self.press))
 
     def choose_files(self) -> list[Path]:
         """原生的檔案選擇視窗（D67）；按取消回空清單。"""

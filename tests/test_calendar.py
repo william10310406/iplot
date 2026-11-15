@@ -1253,6 +1253,17 @@ def test_page_html_is_self_contained_and_never_uses_inner_html():
     assert "prefers-color-scheme: dark" in html_text and "pywebviewready" in html_text and 'charset="utf-8"' in html_text
 
 
+def test_page_html_turns_off_the_module_nav_bar_because_it_has_its_own():
+    """D154：行事曆自己有模組列（D93：列最上層全部，用途跟導覽列不同），關掉互通 0.3.0 與 iPLoT 0.7.0 加的那一排。"""
+    head = page_html().split("</head>")[0]
+    assert head.count('<meta name="iplot-nav" content="off">') == 1
+
+
+def test_calendar_changelog_top_section_is_0_1_3():
+    top = re.search(r"^## \[(\d+(?:\.\d+)*)\]", (CALENDAR / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
+    assert top.group(1) == "0.1.3"
+
+
 def test_page_html_calls_exactly_the_api_methods():
     html_text = page_html()
     assert set(re.findall(r'call\("(\w+)"', html_text)) == FIFTEEN
