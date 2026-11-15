@@ -57,6 +57,9 @@ T: dict[str, str] = {
     "refresh_failed": "介面的套件這次沒有換成新的：{message}\n先用現有的開；有網路之後重新啟動 iPLoT 會再試一次。",
     "confirm_foreign": "『{title}』是從外面裝進來的，第一次執行前確認：它是會在這台電腦上執行的程式，能讀寫你的檔案。要執行嗎？",
     "cancelled": "已取消執行『{title}』",
+    "nav_panel": "主控面板",
+    "nav_parent": "↑ {title}",
+    "nav_gone": "找不到模組『{title}』，可能已經被移除了",
     "page_unsupported": "這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用",
     "running": "執行中：{title}…",
     "tk_in_web": "這個面板裡的模組不能開 tkinter 的視窗（turtle、tkinter 的對話框都算）。"
