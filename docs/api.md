@@ -13,7 +13,7 @@
 | 身分 | `app.parent` → `ModuleInfo | None`（唯讀） | 這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 `app.run`。 |
 | 身分 | `app.children` → `tuple[ModuleInfo, ...]`（唯讀） | 這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 `app.run`。 |
 | 身分 | `app.config` → `Config`（唯讀） | config.py 讀出來的設定（唯讀）：roots、editor、history_keep、update_url、workshop_url。 |
-| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.7.1"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
+| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.7.2"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
 | 狀態 | `app.memory` → `dict`（唯讀） | 這個模組自己的 dict，iPLoT 開著期間保留；跨次啟動要留的請寫成檔案放 module.folder。 |
 | 動作 | `app.log(text: str)` → `None` | 寫一行到面板下方的訊息區。 |
 | 動作 | `app.open(path: Path)` → `None` | 打開：資料夾用檔案總管、檔案用預設程式。由 modules/作業系統 執行。 |

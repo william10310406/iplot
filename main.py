@@ -9,6 +9,7 @@ core 與 ui 的 import 都放在函式裡、版本檢查之後：它們用了 3.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -106,6 +107,22 @@ def refresh(home: Path, config: Config) -> str | None:
     return T["refresh_failed"].format(message=failure)
 
 
+def bundle_news(home: Path, version: str) -> str | None:
+    """「更新」之後的第一次啟動：隨附模組跟著換成這一版的（D156）。回要寫進訊息區的話；沒事、或出了意外都不擋啟動。"""
+    from core import bundled
+
+    try:
+        return "\n".join(bundled.sync(home, version)) or None
+    except Exception:  # noqa: BLE001  這一步不能讓 iPLoT 開不起來；細節進 logs/iplot.log
+        import traceback
+
+        with contextlib.suppress(OSError):
+            (home / "logs").mkdir(exist_ok=True)
+            with (home / "logs" / "iplot.log").open("a", encoding="utf-8", errors="replace") as f:
+                f.write(f"{traceback.format_exc()}\n")
+        return None
+
+
 def bootstrap(home: Path, config: Config, err: ErrorInfo | None, reason: str, rebooted: bool) -> None:
     """網頁面板開不起來（reason）：用 pip 把介面裝進 lib/，裝好就重啟自己（乾淨的程序）。
     這個平台裝不了、pip 失敗、或剛裝完重啟還是開不起來（rebooted），就說明原因、退到 tkinter 面板（不是安全模式）。
@@ -146,10 +163,11 @@ def main() -> None:
     sys.path.insert(1, str(home / "lib"))  # iPLoT 自己裝的套件：排在程式自己的資料夾後面、系統的套件前面
     rebooted = os.environ.pop("IPLOT_BOOT", None) == "1"  # 這次啟動是不是剛裝完 lib/ 重啟的那一次
     config, err = load_config(home / "config.py")
+    news = bundle_news(home, __version__)
     if "--safe" in sys.argv[1:]:
-        return tk_or_exit(home, config, err, True)
+        return tk_or_exit(home, config, err, True, news)
     try:
-        run_web(home, config, err, __version__, refresh(home, config))
+        run_web(home, config, err, __version__, "\n".join(filter(None, [news, refresh(home, config)])) or None)
     except ImportError as exc:
         bootstrap(home, config, err, str(exc), rebooted)
 
