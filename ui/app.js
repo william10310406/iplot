@@ -147,7 +147,10 @@ function menuFor(m) {
     [T.menu_reveal, () => api().action("reveal", m.id)],
     [T.menu_terminal, () => api().action("terminal", m.id)],
     null,
-    [T.menu_add_child, () => askName().then((name) => { if (name !== null) api().add_child(m.id, name); })]);
+    [T.menu_add_child, () => askName().then((name) => { if (name !== null) api().add_child(m.id, name); })],
+    null,
+    [T.menu_rename, () => askName(T.ask_rename.replace("{name}", m.name), m.name).then((name) => { if (name !== null) api().rename(m.id, name); })],
+    [T.menu_remove, () => api().remove(m.id)]);
   return items;
 }
 
@@ -226,7 +229,7 @@ function dialog(kind, title, initial = "", check = () => "") {
 const RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 const badName = (n) => !n.trim() || n.startsWith(".") || /[. ]$/.test(n) || /[\\/:*?"<>|\u0000-\u001f]/.test(n)
   || RESERVED.test(n.split(".")[0]);
-const askName = () => dialog("ask", T.ask_name, "", (n) => (badName(n) ? T.bad_name : ""));
+const askName = (title = T.ask_name, initial = "") => dialog("ask", title, initial, (n) => (badName(n) ? T.bad_name : ""));
 
 // ── 訊息區：一行一條，自動捲到底 ──
 

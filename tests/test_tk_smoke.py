@@ -251,7 +251,7 @@ def lone_module(home, panel, monkeypatch, answer=None):
 def add_child(panel, text):
     """按某一列右鍵選單的第四項。先確認它在：索引超出範圍時 Tk 可能改按最後一項（在終端機打開）。"""
     menu, labels = row_menu(panel, text)
-    assert labels[3:] == ["在這裡新增下一層模組…"]
+    assert labels[3] == "在這裡新增下一層模組…"
     menu.invoke(3)
     panel.root.update()
 
@@ -259,8 +259,8 @@ def add_child(panel, text):
 def test_right_click_menu_has_add_child(home, panel, monkeypatch):
     lone_module(home, panel, monkeypatch)
     _, labels = row_menu(panel, "A")
-    assert labels == ["打開程式碼", "在資料夾中顯示", "在終端機打開", "在這裡新增下一層模組…"]
-    assert labels[3] == T["menu_add_child"]
+    assert labels == ["打開程式碼", "在資料夾中顯示", "在終端機打開", "在這裡新增下一層模組…", "改名…", "移到垃圾桶…"]
+    assert labels[3:] == [T["menu_add_child"], T["menu_rename"], T["menu_remove"]]
 
 
 def test_add_child_creates_under_module_and_shows_arrow(home, panel, monkeypatch):
@@ -270,7 +270,7 @@ def test_add_child_creates_under_module_and_shows_arrow(home, panel, monkeypatch
     child = home / "modules" / "A" / "子" / "iplot.py"
     assert child.is_file()
     assert seen == [("edit", child, core.config.editor, None)]  # 建好照舊交給編輯器
-    assert row_menu(panel, "A")[1][3:] == [T["menu_add_child"]]  # 有了子模組，這一項還在
+    assert row_menu(panel, "A")[1][3] == T["menu_add_child"]  # 有了子模組，這一項還在
     button(panel.body, "▸").invoke()
     panel.root.update()
     assert [b.cget("text") for b in widgets(panel.crumbs, tkinter.Button)] == ["iPLoT", "A"]
@@ -283,6 +283,32 @@ def test_add_child_bad_name_does_not_create(home, panel, monkeypatch):
     assert [p.name for p in (home / "modules" / "A").rglob("*")] == ["iplot.py"]
     assert T["bad_name"] in messages(panel)
     assert seen == []
+
+
+def test_right_click_rename_asks_with_the_old_name_and_renames_the_folder(home, panel, monkeypatch):
+    core, _ = lone_module(home, panel, monkeypatch, answer="新名字")
+    asked = []
+    monkeypatch.setattr(panel, "ask", lambda prompt, default="": asked.append((prompt, default)) or "新名字")
+    menu, labels = row_menu(panel, "A")
+    menu.invoke(labels.index(T["menu_rename"]))
+    panel.root.update()
+    assert asked == [(T["ask_rename"].format(name="A"), "A")]
+    assert (home / "modules" / "新名字" / "iplot.py").is_file() and not (home / "modules" / "A").exists()
+    assert button(panel.body, "新名字")
+
+
+def test_right_click_remove_confirms_then_hands_the_folder_to_the_trash_action(home, panel, monkeypatch):
+    core, seen = lone_module(home, panel, monkeypatch)
+    prompts = []
+    monkeypatch.setattr(panel, "confirm", lambda prompt: prompts.append(prompt) or False)
+    menu, labels = row_menu(panel, "A")
+    menu.invoke(labels.index(T["menu_remove"]))
+    panel.root.update()
+    assert len(prompts) == 1 and (home / "modules" / "A").is_dir() and seen == []  # 按取消：什麼都不動
+    monkeypatch.setattr(panel, "confirm", lambda prompt: True)
+    menu.invoke(labels.index(T["menu_remove"]))
+    panel.root.update()
+    assert seen == [("trash", (home / "modules" / "A").resolve())]  # 真正搬走的是「作業系統」模組；這裡只記下交給它的路徑
 
 
 def test_confirm_uses_messagebox(panel, monkeypatch):

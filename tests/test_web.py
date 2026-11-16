@@ -337,8 +337,8 @@ def test_bridge_exposes_only_its_methods(bridge):
     這是整潔，不是安全邊界——pywebview 用名字一路 getattr，知道名字的頁面程式碼叫得到底線後面的東西；
     真正的邊界是頁面零外部資源、模組的輸出一律當文字（tests/test_boundaries.py）。"""
     public = {n for n in dir(bridge) if not n.startswith("_")}
-    assert public == {"state", "press", "enter", "back", "create", "add_child", "action", "open_error",
-                      "report_error", "rescan", "answer"}
+    assert public == {"state", "press", "enter", "back", "create", "add_child", "rename", "remove", "action",
+                      "open_error", "report_error", "rescan", "answer"}
     assert all(callable(getattr(bridge, n)) for n in public)
 
 
@@ -425,6 +425,44 @@ def test_add_child_creates_under_module(panel, bridge, home, monkeypatch):
     panel.wait()
     assert (folder / "子" / "iplot.py").is_file()
     assert modules(panel.window.calls("show")[-1][0])["A"]["has_children"] is True
+
+
+def test_rename_renames_a_shown_module_and_redraws(panel, bridge, home):
+    folder = make_module(home / "modules", "A").resolve()
+    rescan(panel)
+    bridge.rename(str(folder), "新")
+    panel.wait()
+    assert (home / "modules" / "新" / "iplot.py").is_file() and not folder.exists()
+    assert "新" in modules(panel.window.calls("show")[-1][0]) and "A" not in modules(panel.window.calls("show")[-1][0])
+
+
+def test_rename_ignores_things_not_on_the_panel_and_non_text_names(panel, bridge, home, tmp_path):
+    folder = make_module(home / "modules", "A").resolve()
+    outside = make_module(tmp_path / "elsewhere", "X").resolve()
+    rescan(panel)
+    bridge.rename(str(outside), "Y")
+    bridge.rename(str(folder), None)
+    panel.wait()
+    assert outside.is_dir() and folder.is_dir()
+
+
+def test_remove_asks_through_the_panel_dialog_and_cancel_moves_nothing(panel, bridge, window, home):
+    folder = make_module(home / "modules", "A").resolve()
+    rescan(panel)
+    bridge.remove(str(folder))  # 立刻回來；工作執行緒卡在對話框，等頁面回答
+    ask_id, prompt = pending(window, "confirm")
+    assert "A" in prompt and "垃圾桶" in prompt
+    bridge.answer(ask_id, None)
+    panel.wait()
+    assert folder.is_dir()
+
+
+def test_remove_of_a_bundled_module_says_why_without_asking(panel, bridge, window, home):
+    folder = make_module(home / "modules", "開工").resolve()
+    rescan(panel)
+    bridge.remove(str(folder))
+    panel.wait()
+    assert window.calls("log")[-1] == [T["protected_bundled"].format(name="開工")] and folder.is_dir()
 
 
 # 回報與「打開檔案」
