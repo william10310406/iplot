@@ -22,7 +22,7 @@ Windows：雙擊 `iPLoT.bat` 會找真的 Python；沒有的時候用中文說�
 
 ### 已知狀況
 - **缺 Python 時的自動安裝（winget）沒有真的跑過**，待實機驗證。
-- 只認 python.org 傳統的安裝位置與 py 啟動器。Python install manager 裝在 `%LOCALAPPDATA%\Python\pythoncore-*` 的找不到；走 PATH 上的 `python` 也找不到，因為它的 `python.exe` 在 WindowsApps。
+- 只另外掃 python.org 傳統的安裝位置。Python install manager（python.org 3.14 起的新安裝方式）裝的 Python，`py` 在 PATH 上的話，仍然可以經由 `py -3` 找到；bat 只是不另外掃 `%LOCALAPPDATA%\Python\pythoncore-*`，而 PATH 上 WindowsApps 裡的 `python.exe` 一律跳過。
 
 ## [0.7.0] - 2026-11-16
 
