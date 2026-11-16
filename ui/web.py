@@ -122,6 +122,14 @@ class Bridge:
         """在模組底下新增下一層模組。"""
         self._on(id, lambda core, info: core.create(info.folder, name))
 
+    def rename(self, id: str, name: str) -> None:
+        """右鍵「改名…」：模組的資料夾改名；隨附的、從工作坊裝來的、撞名的，訊息區說一句，什麼都不動（D155）。"""
+        self._on(id, lambda core, info: core.rename(info, name if isinstance(name, str) else ""))
+
+    def remove(self, id: str) -> None:
+        """右鍵「移到垃圾桶…」：先問一次才把模組的資料夾移到系統垃圾桶，不直接刪除（D155）。"""
+        self._on(id, lambda core, info: core.remove(info))
+
     def action(self, name: str, id: str) -> None:
         """右鍵選單的 edit／reveal／terminal，交給「作業系統」模組做。"""
         if name == "edit":

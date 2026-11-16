@@ -91,9 +91,15 @@ def test_mac_edit_folder_falls_back_to_open(launches, tmp_path):
     assert launches == [(["open", str(tmp_path)], {})]
 
 
+def _no_system_trash(*_):
+    raise OSError("沒有系統的垃圾桶函式")
+
+
 def test_mac_trash_moves_and_suffixes(tmp_path, monkeypatch):
+    """系統的做法走不通時退回直接搬進 ~/.Trash。這裡一律用假的 home 與假的系統函式：測試絕不碰真的垃圾桶。"""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     m = backend("mac")
+    monkeypatch.setattr(m, "_system_trash", _no_system_trash)
     a = tmp_path / "x"
     a.write_text("1")
     dest1 = m.trash(None, a)
@@ -102,6 +108,40 @@ def test_mac_trash_moves_and_suffixes(tmp_path, monkeypatch):
     dest2 = m.trash(None, b)
     assert (dest1, dest2) == (tmp_path / ".Trash" / "x", tmp_path / ".Trash" / "x 2")
     assert dest2.read_text() == "2" and not (tmp_path / "x").exists()
+
+
+def test_mac_trash_prefers_the_system_way_and_does_not_touch_home_trash(tmp_path, monkeypatch):
+    """先走系統的做法（Finder 同一條路，垃圾桶裡可以「放回」）；它成功了，就不再自己搬進 ~/.Trash。"""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    m, seen = backend("mac"), []
+    monkeypatch.setattr(m, "_system_trash", lambda path: seen.append(path) or tmp_path / "somewhere" / "x")
+    target = tmp_path / "x"
+    target.write_text("1")
+    assert m.trash(None, target) == tmp_path / "somewhere" / "x"
+    assert seen == [target] and target.exists() and not (tmp_path / ".Trash").exists()
+
+
+def test_mac_trash_falls_back_when_the_system_way_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    m = backend("mac")
+    monkeypatch.setattr(m, "_system_trash", _no_system_trash)
+    target = tmp_path / "x"
+    target.mkdir()
+    (target / "iplot.py").write_text("1")
+    assert m.trash(None, target) == tmp_path / ".Trash" / "x"
+    assert (tmp_path / ".Trash" / "x" / "iplot.py").read_text() == "1" and not target.exists()
+
+
+def test_mac_trash_never_deletes_when_both_ways_fail(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    m = backend("mac")
+    monkeypatch.setattr(m, "_system_trash", _no_system_trash)
+    monkeypatch.setattr(m.shutil, "move", lambda *_: (_ for _ in ()).throw(PermissionError("no")))
+    target = tmp_path / "x"
+    target.write_text("keep")
+    with pytest.raises(PermissionError):
+        m.trash(None, target)
+    assert target.read_text() == "keep"
 
 
 def test_win_argv(launches, monkeypatch):

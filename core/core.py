@@ -7,7 +7,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import history, runner, scan
+from . import history, modify, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
 from .errors import from_exception, reason
@@ -169,6 +169,45 @@ class Core:
         self.rescan()
         self.action("edit", folder / "iplot.py", self.config.editor, None)
         return folder
+
+    def rename(self, info: ModuleInfo, new: str) -> Path | None:
+        """模組的資料夾改名（模組的名字就是資料夾的名字）：只動使用者自己新增的；名稱不對、撞名、不能動或改不了時
+        寫進訊息區、回 None。資料夾裡的東西（.history、設定、子模組）跟著走；從別處用名字呼叫它的模組要自己跟著改。"""
+        if why := modify.refusal(info, self.home, True):
+            return self.view.log(why)
+        try:
+            folder = modify.target(info, new)
+            if folder is None:
+                return None
+            info.folder.rename(folder)
+        except BadName:
+            return self.view.log(T["bad_name"])
+        except FileExistsError:
+            return self.view.log(T["name_taken"].format(name=new.strip()))
+        except OSError as exc:
+            return self.view.log(T["rename_failed"].format(name=info.name, message=self._why(exc)))
+        self.memories.pop(info.folder, None)
+        self.rescan()
+        self.view.log(T["renamed"].format(old=info.name, new=folder.name))
+        return folder
+
+    def remove(self, info: ModuleInfo) -> bool:
+        """把模組的資料夾移到系統垃圾桶（永遠不直接刪除，可以放回）：先問一次，取消就什麼都不動；
+        不能動（隨附的、父層的一部分）、沒移成時寫進訊息區、回 False。"""
+        if why := modify.refusal(info, self.home, False):
+            self.view.log(why)
+            return False
+        ask = T["confirm_remove"].format(title=info.title, folder=info.folder)
+        if not self.view.confirm(ask + (T["confirm_remove_workshop"] if (info.folder / ".origin").is_file() else "")):
+            return False
+        self.action("trash", info.folder)
+        if gone := not info.folder.exists():
+            self.memories.pop(info.folder, None)
+            self.view.log(T["removed"].format(title=info.title))
+        else:
+            self.view.log(T["remove_failed"].format(title=info.title))
+        self.rescan()
+        return gone
 
     def _why(self, exc: OSError) -> str:
         """OSError 的中文原因；errno 與英文原文寫進 logs/iplot.log，事後才查得到（審查 S4）。"""
