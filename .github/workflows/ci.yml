@@ -32,6 +32,8 @@ jobs:
           mkdir "%LOCALAPPDATA%"
           cmd /d /c "set "PATH=%SystemRoot%\System32" && call iPLoT.bat --check > "%RUNNER_TEMP%\bat-check.txt" 2>&1 < nul"
           > "%RUNNER_TEMP%\bat-check-rc.txt" echo %errorlevel%
+          rem echo 不會把 errorlevel 歸零；預期的 1 已經記在檔案裡，交給下一步判斷
+          exit /b 0
       - name: 檢查 --check 的結果
         if: runner.os == 'Windows'
         shell: pwsh
