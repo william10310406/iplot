@@ -1,5 +1,5 @@
 """更新 iPLoT 的核心：只換 core/、ui/、main.py、requirements/ 四樣，換之前先備份到 .backup/。
-自己的模組、config.py、custom.css 都不會被動到。更新來源寫在 config.py 的 UPDATE_URL。
+自己的模組、config.py、custom.css 都不會被動到；隨附的模組在重新啟動時由核心（core/bundled.py）換成新版，只換沒改過的。更新來源寫在 config.py 的 UPDATE_URL。
 
 做法都在旁邊的 update.py；這個檔只負責問、說、串起來。按了才會連網，不會自己去檢查有沒有新版。"""
 import http.client
@@ -24,7 +24,7 @@ def run(app):
             return app.log(f"已是最新（{app.version}）")
         if not app.confirm(f"有新版 {latest}（現在是 {on_disk}）：\n{info.get('notes', '')}\n\n"
                            "更新會換掉 iPLoT 的核心（core/、ui/、main.py、requirements/），舊版先備份在 .backup/；"
-                           "你的模組和設定不動。換完要執行「重新啟動」才會用新版。\n要更新嗎？"):
+                           "你的模組和設定不動；隨附的模組在重新啟動時一起換成新版（你改過的、從工作坊裝的不換）。換完要執行「重新啟動」才會用新版。\n要更新嗎？"):
             return app.log("已取消更新")
         package = update.download(zip_url, app.home / ".backup" / f"download-{latest}.zip", sha256)
     except http.client.InvalidURL:  # 它的原文是英文的網址規則，不給人看

@@ -36,6 +36,9 @@ T: dict[str, str] = {
     "confirm_remove": "要把『{title}』移到垃圾桶嗎？\n整個資料夾（{folder}）都會移走，裡面的檔案也是。"
                       "要找回來，到垃圾桶（Windows 是資源回收筒）裡找，可以放回原來的位置。",
     "confirm_remove_workshop": "\n它是從工作坊裝來的，之後想再用，也可以到工作坊重新安裝。",
+    "bundled_updated": "隨附模組已換成這一版的：{names}。換下來的舊檔案備份在 {backup}",
+    "bundled_modified": "隨附模組『{name}』的程式你改過，這次沒有換，你的版本照舊留著。新版在 {package} 裡的 modules/{name}/：想用新版，把它複製過去（你改過的先自己留一份）",
+    "bundled_failed": "隨附模組『{name}』沒換成新版：{message}。已經放回原來的檔案，下次啟動會再試一次",
     "removed": "已把『{title}』移到垃圾桶。要找回來，到垃圾桶（Windows 是資源回收筒）裡找",
     "remove_failed": "沒有把『{title}』移到垃圾桶，它還在原來的地方。確認它沒有被別的程式開著，再試一次",
     "open_file": "打開檔案",
