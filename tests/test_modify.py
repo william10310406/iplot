@@ -254,11 +254,12 @@ def test_remove_a_submodule_only_moves_that_submodule(home, view, os_module):
 
 def test_bundled_names_match_what_the_core_package_ships():
     """BUNDLED ＝ git 追蹤的 modules/ 底下、沒有被 .gitattributes 標 export-ignore 的資料夾（核心的包帶的那些）。"""
-    git = subprocess.run(["git", "ls-files", "modules"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    # -z：路徑不加引號、不轉成 \\344\\270… 的八進位（預設的 core.quotepath 會這樣轉非 ASCII 的名字）
+    git = subprocess.run(["git", "ls-files", "-z", "modules"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     if git.returncode:
         pytest.skip("不是 git 的工作目錄")
     ignored = [line.split()[0].rstrip("/") for line in (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
                if line.strip() and not line.startswith("#") and line.split()[-1] == "export-ignore"]
-    tracked = {line.split("/")[1] for line in git.stdout.splitlines() if "/" in line}
+    tracked = {line.split("/")[1] for line in git.stdout.split("\0") if "/" in line}
     shipped = {name for name in tracked if not any(fnmatch.fnmatch(f"modules/{name}", pat.rstrip("/")) for pat in ignored)}
     assert shipped == set(BUNDLED), f"核心的包帶的是 {sorted(shipped)}；core/text.py 的 BUNDLED 是 {sorted(BUNDLED)}"
