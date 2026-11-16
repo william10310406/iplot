@@ -174,7 +174,9 @@ def open_page(panel, folder):
     panel.wait()
     panel.window.kw["js_api"].press(str(folder.resolve()))
     until(lambda: len(panel.webview.windows) == count + 1)
-    return panel.webview.windows[-1]
+    page = panel.webview.windows[-1]
+    until(lambda: page in panel._pages)  # 導覽列在登記之前就裝好了：不等的話，視窗剛建好、expose 還沒做
+    return page
 
 
 def test_a_module_page_gets_the_bar_and_jumping_runs_the_child_after_the_module_finishes(panel, home):
