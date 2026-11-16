@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+Windows：雙擊 `iPLoT.bat` 會找真的 Python；沒有的時候用中文說明，問要不要自動安裝。
+
+### 變更
+- `iPLoT.bat` 改寫。舊的只看「`where py` 找得到就 `py -3`，不然 `python`」：在沒裝過 Python 的 Windows 11 上，`python` 會跑到 WindowsApps 裡的 Microsoft Store 捷徑，什麼都沒印就結束，視窗閃一下就關。
+- 新的依序試 `py -3`、PATH 上的 `python`（WindowsApps 裡的一律跳過）、`%LOCALAPPDATA%\Programs\Python\Python3*\python.exe`（取版本最高的）。標準是「能執行，並印出版本 ≥ 3.10」。
+- 找不到時用中文說明。有 winget 就問要不要自動安裝（Y/N），裝的是 `winget install -e --id Python.Python.3.13 --scope user --accept-package-agreements --accept-source-agreements`；裝完用完整路徑再找一次，找到就接著啟動 iPLoT。沒有 winget、選 N、或裝不起來：印出 https://www.python.org/downloads/ ，提醒安裝時勾「tcl/tk」和「Add python.exe to PATH」，視窗停住。
+- `main.py` 回傳碼不是 0 才停住讓人看訊息；正常結束直接關。
+- `iPLoT.bat --check`：只偵測，印 `PYTHON=…` 與一句中文結果。找到 exit 0；找不到 exit 1，另外印 `WINGET=found` 或 `WINGET=none`。不安裝、不啟動、不停住。
+- 字碼頁：在字碼頁 950 的新視窗（等於雙擊）裡，bat 跑到一半才 `chcp 65001`，cmd 會讀錯位置，把中文行切斷當指令執行。所以 bat 一開頭先切到 65001，用新的 cmd 重新執行自己（之後整份都以 UTF-8 讀），結束時換回原本的字碼頁。`:main` 之前的部分只用 ASCII。
+- `.gitattributes` 加 `*.bat text eol=crlf`：`iPLoT.bat` 是 UTF-8 無 BOM、CRLF，在哪個系統 checkout 都是 CRLF。
+- 在 Windows 11 繁中實機（沒有 Python、有 winget）上用假的 `python.exe` 測過：WindowsApps 跳過、PATH 優先、LOCALAPPDATA 取最高版、3.9 被拒、路徑含中文／空白／括號／`&`、參數照傳、回傳碼 0 不停、非 0 停住、選 N、沒有 winget、全新 950 視窗、結束後字碼頁回到 950。
+- README 的 Windows 安裝與啟動兩條照著改。
+
+### 維護
+- CI 的 Windows job 加兩項檢查：有 Python 時 `iPLoT.bat --check` 要 exit 0；PATH 只剩 System32、`LOCALAPPDATA` 指到空資料夾時要 exit 1、印出 `PYTHON=none` 與「找不到 Python」，而且不卡住（stdin 接 `nul`，限時 2 分鐘）。
+
+### 已知狀況
+- **缺 Python 時的自動安裝（winget）沒有真的跑過**，待實機驗證。
+- 只認 python.org 傳統的安裝位置與 py 啟動器。Python install manager 裝在 `%LOCALAPPDATA%\Python\pythoncore-*` 的找不到；走 PATH 上的 `python` 也找不到，因為它的 `python.exe` 在 WindowsApps。
+
 ## [0.7.0] - 2026-11-16
 
 先到「工作坊」把「互通」更新到 0.3.0、「行事曆」更新到 0.1.3，再按「更新」；順序反了的話，捷徑與面板外的執行會被舊的互通擋下，到工作坊更新互通就好。這一版有頁面的模組（開自己的一頁畫面的，例如工作坊）頁面最上面多一排導覽列：主控面板、父層模組、這個模組底下的子模組，按一下就跳過去；新模組、舊模組都自動有，模組不用改。更新完執行「重新啟動」。還在 0.5.x 的人請先按「取消」，到「工作坊」把「互通」按「覆蓋」或「更新」，再回來按「更新」。這一版的導覽列沒有人工驗收過，碰到問題請用「回報與討論」回報。

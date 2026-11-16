@@ -18,6 +18,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: iPLoT.bat --check（有 Python）
+        if: runner.os == 'Windows'
+        shell: cmd
+        timeout-minutes: 2
+        run: call iPLoT.bat --check < nul
+      - name: iPLoT.bat --check（PATH 只剩 System32，沒有 Python）
+        if: runner.os == 'Windows'
+        shell: cmd
+        timeout-minutes: 2
+        run: |
+          set "LOCALAPPDATA=%RUNNER_TEMP%\no-python"
+          mkdir "%LOCALAPPDATA%"
+          cmd /d /c "set "PATH=%SystemRoot%\System32" && call iPLoT.bat --check > "%RUNNER_TEMP%\bat-check.txt" 2>&1 < nul"
+          > "%RUNNER_TEMP%\bat-check-rc.txt" echo %errorlevel%
+      - name: 檢查 --check 的結果
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $text = Get-Content "$env:RUNNER_TEMP\bat-check.txt" -Encoding utf8 -Raw
+          $rc = (Get-Content "$env:RUNNER_TEMP\bat-check-rc.txt").Trim()
+          Write-Output $text
+          Write-Output "exit=$rc"
+          if ($rc -ne '1') { throw "預期回傳碼 1，實際 $rc" }
+          if ($text -notmatch 'PYTHON=none') { throw '沒有 PYTHON=none' }
+          if (-not $text.Contains('找不到 Python')) { throw '沒有「找不到 Python」' }
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
       - run: pip install -r requirements-dev.txt

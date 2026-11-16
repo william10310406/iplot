@@ -19,3 +19,6 @@ docs/日誌/ export-ignore
 docs/11_* export-ignore
 docs/想法清單.md export-ignore
 modules/Lean/ export-ignore
+
+# iPLoT.bat 是 UTF-8 無 BOM、CRLF；在哪個系統 checkout 都要是 CRLF（cmd 讀 LF 的 bat 會跳錯行）。
+*.bat text eol=crlf
