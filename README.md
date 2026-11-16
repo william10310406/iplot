@@ -8,7 +8,7 @@
 
 1. 裝 Python 3.10 以上，要含 pip：
    - macOS：Python 3.10 以上、有 pip 就可以，不必是 python.org 的（Homebrew 的照理也行，但沒有實測過）。[python.org 的安裝檔](https://www.python.org/downloads/)最省事：它內含 tkinter，安全模式和備用面板要用。開發和實測用的是 python.org 的 3.14。
-   - Windows：可以先不裝。雙擊 `iPLoT.bat` 時沒有 Python，它會問要不要自動安裝（用 winget 裝 python.org 的 Python 3.13，內含 tkinter）。自己裝的話用 [python.org 的安裝檔](https://www.python.org/downloads/)，安裝時勾選「tcl/tk」（安全模式和備用面板要用）和「Add python.exe to PATH」。網頁面板另外需要 Microsoft Edge WebView2 Runtime（Windows 11 內建）。**缺 Python 的流程待實機驗證。**
+   - Windows：可以先不裝。雙擊 `iPLoT.bat` 時沒有 Python，它會問要不要自動安裝（用 winget 裝 python.org 的 Python 3.13，內含 tkinter）。自己裝的話用 [python.org 的安裝檔](https://www.python.org/downloads/)，安裝時勾選「tcl/tk」（安全模式和備用面板要用）和「Add python.exe to PATH」。網頁面板另外需要 Microsoft Edge WebView2 Runtime（Windows 11 內建）。自動安裝的 Python 在 `%LOCALAPPDATA%\Programs\Python\Python313\`，要移除用 `winget uninstall Python.Python.3.13`。2026-11-16 在 Windows 11 繁中上驗過：沒有 Python 的乾淨電腦，雙擊 `iPLoT.bat` → 按 Y → 自動安裝 Python → 啟動面板。
    - Linux：這一版沒有網頁面板，開的是 tkinter 面板。發行版的 Python 加上 `python3-tk` 套件（Debian／Ubuntu：`sudo apt install python3-tk`）。
 2. 到 [https://william10310406.github.io/iplot-workshop/](https://william10310406.github.io/iplot-workshop/) 下載 `iPLoT-vX.Y.Z.zip`（那一頁也列了工作坊裡的模組），解壓縮，資料夾放哪裡都可以（例如 `~/iPLoT`）。
 3. 啟動：
@@ -17,9 +17,9 @@
      - macOS 14 以前：不要直接雙擊；在 `iPLoT.command` 上按右鍵（或 Control＋按），選「打開」，對話框裡再按「打開」。
      - 不想走上面的步驟：在終端機執行 `xattr -dr com.apple.quarantine ~/iPLoT`（把路徑換成自己放 iPLoT 的資料夾），之後直接雙擊。
      - 這兩種 macOS 的畫面都沒有親眼看過，按鈕的字可能因系統版本不同。
-   - Windows：雙擊 `iPLoT.bat`。沒有 Python 時，它會說明並問要不要自動安裝；沒有 winget 或不裝，就給下載網址。用 Windows 的「解壓縮全部」會多一層同名資料夾（例如 `iPLoT-v0.7.0\iPLoT-v0.7.0\`），`iPLoT.bat` 在裡面那一層。iPLoT 出錯結束時，視窗會停住讓人看訊息。`iPLoT.bat --check` 只偵測，印出找到哪個 Python，不安裝也不啟動。**缺 Python 的流程待實機驗證。**
+   - Windows：雙擊 `iPLoT.bat`。沒有 Python 時，它會說明並問要不要自動安裝；沒有 winget 或不裝，就給下載網址。用 Windows 的「解壓縮全部」會多一層同名資料夾（例如 `iPLoT-v0.7.0\iPLoT-v0.7.0\`），`iPLoT.bat` 在裡面那一層。iPLoT 出錯結束時，視窗會停住讓人看訊息。`iPLoT.bat --check` 只偵測，印出找到哪個 Python，不安裝也不啟動。2026-11-16 在 Windows 11 繁中上驗過：沒有 Python 的乾淨電腦，雙擊 `iPLoT.bat` → 按 Y → 自動安裝 Python → 啟動面板。
    - Linux：執行 `./iPLoT.sh` 或 `python3 main.py`。終端機先說一句網頁面板還不支援 Linux，接著開備用的 tkinter 面板，照常掃上一層與 `ROOTS`；加 `--safe` 才是安全模式，只掃 `modules/`（見下一節）。**只由測試驗過參數，沒有在真的 Linux 桌面上跑過。**
-4. 第一次啟動會自動安裝介面（Linux 沒有這一步），要網路：終端機顯示「第一次啟動：正在安裝介面（需要網路，約 40 MB）…」和 pip 的進度，套件裝進 iPLoT 資料夾裡的 `lib/`，裝完視窗自己出現。在開發用的 Mac 上，乾淨下載花了 1 分 46 秒（看網路速度），`lib/` 裝完 36 MB。之後每次啟動直接開視窗，不用網路（例外：按「更新」換了版本、新版要的套件跟舊版不一樣時，下一次啟動會重裝一次，見「更新與工作坊」）。沒有網路或裝不起來時，終端機會說原因，並自動改開備用的 tkinter 面板——不是安全模式，見下一節；有網路後重新啟動 iPLoT 就會再裝一次。
+4. 第一次啟動會自動安裝介面（Linux 沒有這一步），要網路：終端機顯示「第一次啟動：正在安裝介面（需要網路，約 40 MB）…」和 pip 的進度，套件裝進 iPLoT 資料夾裡的 `lib/`，裝完視窗自己出現。`lib/` 的大小看平台：macOS 約 36–40 MB（在開發用的 Mac 上，乾淨下載花了 1 分 46 秒，看網路速度，裝完 36 MB）；Windows 約 6 MB（實測 winget 裝 Python 約半分鐘、pip 裝介面約十秒，看網路）。之後每次啟動直接開視窗，不用網路（例外：按「更新」換了版本、新版要的套件跟舊版不一樣時，下一次啟動會重裝一次，見「更新與工作坊」）。沒有網路或裝不起來時，終端機會說原因，並自動改開備用的 tkinter 面板——不是安全模式，見下一節；有網路後重新啟動 iPLoT 就會再裝一次。
 
 三個系統的差別都在 `modules/作業系統/` 這一個模組裡（打開檔案、開終端機、垃圾桶各系統的做法，以及第一次啟動要裝哪一份、缺什麼）；現況與怎麼驗見 [docs/07_接口與邊界.md](docs/07_接口與邊界.md) 第 9 節。
 

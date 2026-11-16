@@ -21,7 +21,7 @@ Windows：雙擊 `iPLoT.bat` 會找真的 Python；沒有的時候用中文說�
 - CI 的 Windows job 加兩項檢查：有 Python 時 `iPLoT.bat --check` 要 exit 0；PATH 只剩 System32、`LOCALAPPDATA` 指到空資料夾時要 exit 1、印出 `PYTHON=none` 與「找不到 Python」，而且不卡住（stdin 接 `nul`，限時 2 分鐘）。
 
 ### 已知狀況
-- **缺 Python 時的自動安裝（winget）沒有真的跑過**，待實機驗證。
+- 缺 Python 時的自動安裝（winget）已經在實機上驗過：2026-11-16 在 Windows 11 繁中上，沒有 Python 的乾淨電腦，雙擊 `iPLoT.bat` → 按 Y → 自動安裝 Python 3.13（約 25 秒）→ 接著裝介面（約 10 秒，`lib\` 約 5.8 MB）→ 啟動面板；第二次雙擊直接開面板；在 PATH 沒更新的舊視窗裡 `--check` 用完整路徑找到 Python313；`main.py --safe` 的 tkinter 面板能開。
 - 只另外掃 python.org 傳統的安裝位置。Python install manager（python.org 3.14 起的新安裝方式）裝的 Python，`py` 在 PATH 上的話，仍然可以經由 `py -3` 找到；bat 只是不另外掃 `%LOCALAPPDATA%\Python\pythoncore-*`，而 PATH 上 WindowsApps 裡的 `python.exe` 一律跳過。
 
 ## [0.7.0] - 2026-11-16
