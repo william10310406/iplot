@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.7.0")
+    assert core.__version__.startswith("0.7.2")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
@@ -135,6 +135,25 @@ def test_0_7_0_notes_say_the_order_and_that_nothing_was_checked_by_hand():
     assert "還在 0.5.x 的人請先按「取消」" in notes
 
 
-def test_docs_08_repeats_the_0_7_0_notes():
-    doc = (ROOT / "docs" / "08_操作說明-0.7.0.md").read_text(encoding="utf-8")
-    assert _notes("0.7.0") in doc
+def test_0_7_1_notes_still_say_what_the_new_menu_does():
+    notes = _notes("0.7.1")
+    for part in ("「改名…」或「移到垃圾桶…」", "不會直接刪掉", "已經是 0.7.0 的人：按「確定」"):
+        assert part in notes, part
+
+
+def test_0_7_2_notes_are_for_users_and_say_what_is_and_is_not_replaced():
+    """「更新」的確認框裡就是這一段：三到五行、沒有反引號、沒有寫給發佈者的提醒；說隨附模組一起換、哪些不動、改過的怎麼辦。"""
+    notes = _notes("0.7.2")
+    assert 3 <= len(notes.splitlines()) <= 5
+    assert "`" not in notes
+    for part in ("隨附的模組換成新版", "重新啟動", "你自己做的模組、從工作坊裝的模組、模組裡留下的資料都不會動", "被你改過，就不會換",
+                 "「放回」", "「互通」更新到 0.3.0、「行事曆」更新到 0.1.3", "還在 0.5.x 的人請先按「取消」"):
+        assert part in notes, part
+    for banned in ("按送出前", "直接告訴我", "人名或學號"):
+        assert banned not in notes
+    assert notes.index("先按「取消」") < notes.index("再回來按「更新」")
+
+
+def test_docs_08_repeats_the_0_7_2_notes():
+    doc = (ROOT / "docs" / "08_操作說明-0.7.2.md").read_text(encoding="utf-8")
+    assert _notes("0.7.2") in doc

@@ -106,6 +106,8 @@ class Panel:
         menu.add_command(label=T["menu_terminal"],
                          command=lambda: self.core.action("terminal", info.folder))
         menu.add_command(label=T["menu_add_child"], command=lambda: self._create(info.folder))
+        menu.add_command(label=T["menu_rename"], command=lambda: self._rename(info))
+        menu.add_command(label=T["menu_remove"], command=lambda: self.core.remove(info))
 
         def popup(event: tk.Event) -> str:
             menu.tk_popup(event.x_root, event.y_root)
@@ -118,6 +120,11 @@ class Panel:
         name = self.ask(T["ask_name"])
         if name is not None:
             self.core.create(parent, name)
+
+    def _rename(self, info: ModuleInfo) -> None:
+        name = self.ask(T["ask_rename"].format(name=info.name), info.name)
+        if name is not None:
+            self.core.rename(info, name)
 
     def log(self, text: str) -> None:
         """訊息區末尾加一行。"""

@@ -1,4 +1,4 @@
-"""macOS：全部用 open 指令；垃圾桶是 ~/.Trash。"""
+"""macOS：打開、編輯、顯示、終端機都用 open 指令；垃圾桶走系統的做法（Finder 同一條路），不行才直接搬進 ~/.Trash。"""
 import shutil
 import subprocess
 from pathlib import Path
@@ -66,13 +66,51 @@ def webview_ready(app):
     return None
 
 
+def _system_trash(path):
+    """跟 Finder 的「移到垃圾桶」同一條路（NSFileManager 的 trashItemAtURL）：垃圾桶裡可以按「放回」，
+    外接硬碟上的東西進那顆硬碟自己的垃圾桶，不用跨碟複製。用 ctypes 呼叫 Objective-C，不裝任何套件。回傳搬到哪裡。"""
+    import ctypes
+    import ctypes.util
+
+    objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+    ctypes.cdll.LoadLibrary(ctypes.util.find_library("Foundation"))
+    objc.objc_getClass.restype = objc.sel_registerName.restype = ctypes.c_void_p
+    objc.objc_getClass.argtypes = objc.sel_registerName.argtypes = [ctypes.c_char_p]
+    ptr = ctypes.c_void_p
+
+    def send(obj, sel, *args, types=(), result=ptr):
+        objc.objc_msgSend.restype, objc.objc_msgSend.argtypes = result, [ptr, ptr, *types]
+        return objc.objc_msgSend(obj, objc.sel_registerName(sel), *args)
+
+    def string(obj):
+        return ctypes.cast(send(obj, b"UTF8String"), ctypes.c_char_p).value.decode("utf-8")
+
+    pool = send(send(objc.objc_getClass(b"NSAutoreleasePool"), b"alloc"), b"init")
+    try:
+        text = send(objc.objc_getClass(b"NSString"), b"stringWithUTF8String:", str(path).encode("utf-8"), types=[ctypes.c_char_p])
+        url = send(objc.objc_getClass(b"NSURL"), b"fileURLWithPath:", text, types=[ptr])
+        manager = send(objc.objc_getClass(b"NSFileManager"), b"defaultManager")
+        moved, error = ptr(), ptr()
+        ok = send(manager, b"trashItemAtURL:resultingItemURL:error:", url, ctypes.byref(moved), ctypes.byref(error),
+                  types=[ptr, ptr, ptr], result=ctypes.c_bool)
+        if not ok:
+            raise OSError(string(send(error, b"localizedDescription")) if error.value else "trashItemAtURL")
+        return Path(string(send(moved, b"path")))
+    finally:
+        send(pool, b"drain")
+
+
 def trash(app, path):
-    """搬到 ~/.Trash（同名就加「 2」「 3」…），回傳搬到哪裡。永遠不刪除。"""
-    folder, name = Path.home() / ".Trash", Path(path).name
-    folder.mkdir(exist_ok=True)
-    dest, n = folder / name, 1
-    while dest.exists():
-        n += 1
-        dest = folder / f"{name} {n}"
-    shutil.move(str(path), str(dest))
-    return dest
+    """搬到垃圾桶，回傳搬到哪裡。永遠不刪除。先走系統的做法（可以在垃圾桶裡按「放回」）；
+    那條路走不通（找不到系統的函式庫等）就退回直接搬進 ~/.Trash（同名加「 2」「 3」…），這樣只能手動拖回來。"""
+    try:
+        return _system_trash(path)
+    except Exception:  # noqa: BLE001  ctypes 找不到函式庫、系統拒絕都退回舊做法；兩條路都不通時，下面那一條丟出它的錯
+        folder, name = Path.home() / ".Trash", Path(path).name
+        folder.mkdir(exist_ok=True)
+        dest, n = folder / name, 1
+        while dest.exists():
+            n += 1
+            dest = folder / f"{name} {n}"
+        shutil.move(str(path), str(dest))
+        return dest

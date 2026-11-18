@@ -1,4 +1,4 @@
-"""行數預算（規格「全域限制」、D68）：核心邏輯 ≤ 530 有效行（2026-10-07 由 500 調到 505，D83；2026-11-14 體驗打磨 2-10 調到 510；2026-11-15 導覽列 516 → 530，D152）；UI 的各檔各有上限（`UI_BUDGETS`）。
+"""行數預算（規格「全域限制」、D68）：核心邏輯 ≤ 700 有效行（2026-10-07 由 500 調到 505，D83；2026-11-14 體驗打磨 2-10 調到 510；2026-11-15 導覽列 516 → 530，D152；2026-11-16 面板上的改名與移到垃圾桶 → 595，D155；隨附模組跟著更新 → 700，D156）；UI 的各檔各有上限（`UI_BUDGETS`）。
 
 有效行（Python）＝非空白、非純註解、非 docstring 所在的行。
 有效行（HTML／CSS／JS）＝非空白、非整行註解（//、/* … */、<!-- … -->）的行。"""
@@ -16,7 +16,7 @@ SKIP = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokeni
         tokenize.ENCODING, tokenize.ENDMARKER}
 # ui/web.py：2026-10-05 由 200 調到 220（M3 的 page 5 行，日後關閉前確認 8 行）；2026-11-07 由 220 調到 230
 # （M9 自動問「要回報嗎？」，D150）；2026-11-15 由 230 調到 235（導覽列，D153）。ui/errlog.py 是 M9 新加的，兩個面板與 main.py 共用
-UI_BUDGETS = {"ui/web.py": 235, "ui/tk.py": 180, "ui/install.py": 80, "ui/errlog.py": 80, "ui/nav.py": 60, "ui/nav.js": 60,
+UI_BUDGETS = {"ui/web.py": 240, "ui/tk.py": 180, "ui/install.py": 80, "ui/errlog.py": 80, "ui/nav.py": 60, "ui/nav.js": 60,
               "ui/index.html": 120, "ui/app.js": 400, "ui/style.css": 300}
 BLOCKS = (("/*", "*/"), ("<!--", "-->"))
 
@@ -78,7 +78,7 @@ def test_web_lines_definition(tmp_path):
     assert web_lines(f) == 4  # * { }、a { }、d { }、<p>
 
 
-CORE_LIMIT = 530  # 導覽列的基礎 516 → 530（D152）； 體驗打磨 2-10：505 → 510；審查 S4：510 → 516（清單檔「裁決紀錄」）
+CORE_LIMIT = 700  # 隨附模組跟著更新 595 → 700（D156，量到 695）；面板上的改名與移到垃圾桶 530 → 595（D155，量到 591）；導覽列的基礎 516 → 530（D152）； 體驗打磨 2-10：505 → 510；審查 S4：510 → 516（清單檔「裁決紀錄」）
 
 
 def test_core_logic_within_limit():
