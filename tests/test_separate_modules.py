@@ -68,6 +68,7 @@ def run_workshop(app, monkeypatch, listing, popen=None):
     monkeypatch.setattr(sys, "dont_write_bytecode", True)
     monkeypatch.delitem(sys.modules, "workshop", raising=False)
     monkeypatch.setitem(sys.modules, "ui.web", WEB["ui.web"])
+    monkeypatch.delitem(sys.modules, "ui.tk", raising=False)  # 別的測試 import 過 tkinter 面板的話，會被當成 tkinter 面板
     if popen is not None:
         monkeypatch.setattr(subprocess, "Popen", popen)
     ns = runpy.run_path(str(folder / "iplot.py"))

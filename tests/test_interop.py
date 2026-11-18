@@ -1058,6 +1058,7 @@ def test_button_remembers_python_syncs_and_opens_the_page(load, home, monkeypatc
     app.reveal = revealed.append
     monkeypatch.setattr(sys, "platform", "linux")  # 這個測試不做捷徑
     monkeypatch.delitem(sys.modules, "ui.web", raising=False)  # 面板外（另開的程序）：頁面就在這裡開（separate.py）
+    monkeypatch.delitem(sys.modules, "ui.tk", raising=False)  # 別的測試 import 過 tkinter 面板的話，會被當成 tkinter 面板
     monkeypatch.setattr(atexit, "register", lambda fn: None)
     app.module = module_info(copy, home / "modules", "here")
     result = run_module(app.module, app)
