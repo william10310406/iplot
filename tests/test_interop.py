@@ -3,6 +3,7 @@
 會開程式的呼叫一律換成記錄，要寫的資料夾一律在 tmp_path。"""
 
 import ast
+import atexit
 import dataclasses
 import errno
 import getpass
@@ -1056,9 +1057,13 @@ def test_button_remembers_python_syncs_and_opens_the_page(load, home, monkeypatc
     app, revealed = FakeApp(home), []
     app.reveal = revealed.append
     monkeypatch.setattr(sys, "platform", "linux")  # 這個測試不做捷徑
-    result = run_module(module_info(copy, home / "modules", "here"), app)
+    monkeypatch.delitem(sys.modules, "ui.web", raising=False)  # 面板外（另開的程序）：頁面就在這裡開（separate.py）
+    monkeypatch.setattr(atexit, "register", lambda fn: None)
+    app.module = module_info(copy, home / "modules", "here")
+    result = run_module(app.module, app)
     assert result.ok, result.error
     assert app.pages[0][0] == "互通" and (copy / ".python").read_text(encoding="utf-8") == sys.executable
+    assert (copy / ".pid").read_text(encoding="utf-8") == str(os.getpid())  # 同一個只開一個
     assert plain.read_text(encoding="utf-8") == '"""a"""\ndef run(app):\n    pass\n'  # 按「互通」不改模組（D87）
     assert (copy / "iplot.py").read_bytes() == mine and not (copy / ".patched").exists()
     after = {n: (INTEROP / n).stat().st_mtime_ns if (INTEROP / n).exists() else None for n in (".python", ".patched")}
