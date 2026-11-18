@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.7.2")
+    assert core.__version__.startswith("0.7.3")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
@@ -154,6 +154,18 @@ def test_0_7_2_notes_are_for_users_and_say_what_is_and_is_not_replaced():
     assert notes.index("先按「取消」") < notes.index("再回來按「更新」")
 
 
-def test_docs_08_repeats_the_0_7_2_notes():
-    doc = (ROOT / "docs" / "08_操作說明-0.7.2.md").read_text(encoding="utf-8")
-    assert _notes("0.7.2") in doc
+def test_0_7_3_notes_are_for_users_and_say_pages_open_in_their_own_window():
+    """「更新」的確認框：三到五行、沒有反引號；說有頁面的模組另開、已經開著會叫到前面、互通要 0.4.0、舊版的順序。"""
+    notes = _notes("0.7.3")
+    assert 3 <= len(notes.splitlines()) <= 5
+    assert "`" not in notes
+    for part in ("在自己的視窗裡開", "不用等它關掉", "叫到最前面", "重新啟動", "互通要 0.4.0", "已經是 0.7.x 的人直接按「確定」",
+                 "還在 0.5.x 的人請先按「取消」"):
+        assert part in notes, part
+    for banned in ("按送出前", "直接告訴我", "人名或學號"):
+        assert banned not in notes
+
+
+def test_docs_08_repeats_the_0_7_3_notes():
+    doc = (ROOT / "docs" / "08_操作說明-0.7.3.md").read_text(encoding="utf-8")
+    assert _notes("0.7.3") in doc
