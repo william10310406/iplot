@@ -13,7 +13,7 @@
 | 身分 | `app.parent` → `ModuleInfo | None`（唯讀） | 這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 `app.run`。 |
 | 身分 | `app.children` → `tuple[ModuleInfo, ...]`（唯讀） | 這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 `app.run`。 |
 | 身分 | `app.config` → `Config`（唯讀） | config.py 讀出來的設定（唯讀）：roots、editor、history_keep、update_url、workshop_url。 |
-| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.7.2"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
+| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.7.3"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
 | 狀態 | `app.memory` → `dict`（唯讀） | 這個模組自己的 dict，iPLoT 開著期間保留；跨次啟動要留的請寫成檔案放 module.folder。 |
 | 動作 | `app.log(text: str)` → `None` | 寫一行到面板下方的訊息區。 |
 | 動作 | `app.open(path: Path)` → `None` | 打開：資料夾用檔案總管、檔案用預設程式。由 modules/作業系統 執行。 |
@@ -49,6 +49,33 @@
 - `app.parent`、`app.children`（D152，核心 0.7.0）給的是 `ModuleInfo`，直接交給 `app.run` 就能叫到那一個，哪一層都叫得到：`app.run(app.parent)`、`app.run(next(m for m in app.children if m.name == "子"))`。`app.run("名稱")` 還是只找面板目前這一層與最上層，不找下一層（D83）。父層的定義：資料夾上一層是模組（符號連結不算）、而且不是根目錄；中間隔著一個不是模組的資料夾，就沒有父層。
 - **有頁面的模組有一排「模組導覽列」**（D153，核心 0.7.0；互通 0.3.0 起面板外也有）：`app.page` 開出來的頁面，載入後最上面多一排——主控面板、「↑ 父層名稱」、這個模組的子模組——按一下就關掉這一頁、再跑那個模組。模組什麼都不用寫。已經有一頁開著時再開的頁面沒有；`body` 是橫向的 flex 或 grid 的頁面、或自己已經有一排模組列的頁面，在 `<head>` 放 `<meta name="iplot-nav" content="off">` 就不會有。它在頁面最前面多一個 `<iplot-nav>` 元素（內容在 closed 的 Shadow DOM 裡），`pywebview.api` 多一個 `_iplot_nav`。tkinter 面板沒有頁面，也沒有導覽列。
 - 圖示的來源依序是（D65）：模組資料夾裡的 `icon.png` 或 `icon.svg`（檔名要一字不差，`Icon.png` 不算；兩個都有用 png；1 MB 以內）→ `iplot.py` 頂層的 `ICON = "🧩"`（一個 emoji；跟 `TITLE` 一樣只認寫死的字串，不執行模組就讀得到）→ 都沒有就用顯示名稱的第一個字，底色由資料夾名稱算出來，同一個模組每次都一樣。圖檔超過 1 MB 或讀不到時當作沒有圖檔（有 `ICON` 就用 `ICON`），訊息區記一行。圖示只在網頁面板顯示，tkinter 面板沒有圖示。
+
+## 有頁面的模組：在另開的視窗裡開
+
+`app.page` 等到視窗關掉才回來，而網頁面板一次只跑一個模組：頁面開著的期間，面板上按別的模組都會排隊，關掉之後才一次跑出來。要避開，就讓頁面在另一個程序裡開（「互通」0.4.0 的 `separate.py`，D157）：在 `run` 裡、`app.page` 之前加兩行，再把下面的 `_separate` 整段貼到檔尾。
+
+```python
+import importlib.util
+from pathlib import Path
+
+
+def run(app):
+    if not _separate(app):
+        return
+    app.page("我的頁面", "<h1>hi</h1>")
+
+
+def _separate(app) -> bool:
+    path = Path(app.home) / "modules" / "互通" / "separate.py"
+    if not path.is_file():
+        return True
+    spec = importlib.util.spec_from_file_location("iplot_interop_separate", path)
+    separate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(separate)
+    return separate.here(app)
+```
+
+`separate.here(app)` 在網頁面板裡會經「互通」的 `run.py` 另開一個程序、回 `False`（這裡就結束）；在那個另開的程序裡回 `True`，照常開頁面。同一個模組已經開著時，把它叫到最前面、回 `False`。沒有「互通」、tkinter 面板、另開失敗時回 `True`，跟以前一樣在原地開。另開的程序裡 `app` 是互通的（對話框與訊息在小視窗），`app.rescan()` 重掃的是那個程序；面板在視窗回到前面時自己會重掃。模組資料夾裡會有一個 `.pid`（開著的那段時間），上傳之前不用管它：發佈工具只收 git 追蹤的檔。
 
 ## 最小的模組
 
