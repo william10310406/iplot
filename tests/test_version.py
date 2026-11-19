@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.7.3")
+    assert core.__version__.startswith("0.7.4")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
@@ -166,6 +166,16 @@ def test_0_7_3_notes_are_for_users_and_say_pages_open_in_their_own_window():
         assert banned not in notes
 
 
-def test_docs_08_repeats_the_0_7_3_notes():
-    doc = (ROOT / "docs" / "08_操作說明-0.7.3.md").read_text(encoding="utf-8")
-    assert _notes("0.7.3") in doc
+def test_0_7_4_notes_say_only_the_workshop_updates_itself():
+    """「更新」的確認框：三到五行、沒有反引號；工作坊自己更新、其他模組不會、0.5.x 也按確定再到工作坊換互通（D158）。"""
+    notes = _notes("0.7.4")
+    assert 3 <= len(notes.splitlines()) <= 5
+    assert "`" not in notes
+    for part in ("任何一版都打得開", "自己更新自己", "其他模組不會自動更新", "重新啟動", "0.6.x、0.7.x 的人直接按「確定」",
+                 "還在 0.5.x 的人也按「確定」", "把「互通」按「更新」或「覆蓋」"):
+        assert part in notes, part
+
+
+def test_docs_08_repeats_the_0_7_4_notes():
+    doc = (ROOT / "docs" / "08_操作說明-0.7.4.md").read_text(encoding="utf-8")
+    assert _notes("0.7.4") in doc
