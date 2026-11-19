@@ -230,7 +230,8 @@ def test_real_0_7_1_install_upgrades_to_this_trees_files_and_keeps_data(tmp_path
     (home / "modules").mkdir(parents=True)
     raw = subprocess.run(["git", "archive", "v0.7.1", "modules"], cwd=ROOT, capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
-        tar.extractall(home, filter="data")
+        # filter 是 3.10.12 才有的（CI 的 Windows 是 3.10.11）；包是自己的 git archive，沒有它也安全
+        tar.extractall(home, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     data = {"行事曆/設定.json": '{"資料夾": "/x"}'.encode(), "互通/捷徑/a.txt": b"s", "作業系統/.history/h.py": b"h"}
     for rel, content in data.items():
         (home / "modules" / rel).parent.mkdir(parents=True, exist_ok=True)

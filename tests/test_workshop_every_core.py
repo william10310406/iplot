@@ -64,7 +64,7 @@ core = Core(home, Config(roots=("modules",), editor=None, history_keep=3, worksh
 core.rescan()
 [info] = [m for m in core.all_modules() if m.folder.name == "工作坊"]
 core.press(info)
-print(json.dumps(seen, ensure_ascii=False))
+print(json.dumps(seen))  # 只印 ASCII：Windows 的管線是 cp1252，印中文會崩潰
 '''
 
 
