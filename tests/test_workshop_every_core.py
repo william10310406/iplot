@@ -85,7 +85,9 @@ def newer_workshop():
     """現在的工作坊，CHANGELOG 最上面多一節 9.9.9，iplot.py 多一行看得出是新版的記號。"""
     files = {p.relative_to(WORKSHOP).as_posix(): p.read_bytes() for p in WORKSHOP.rglob("*")
              if p.is_file() and "__pycache__" not in p.parts}
-    changelog = files["CHANGELOG.md"].decode("utf-8").replace("## [Unreleased]\n", "## [Unreleased]\n\n## [9.9.9] - 2099-01-01\n\n測試。\n", 1)
+    # Windows 的 checkout 是 CRLF：用 re 找「## [Unreleased]」那一行，不管行尾
+    changelog = re.sub(r"^## \[Unreleased\]\r?$", "## [Unreleased]\n\n## [9.9.9] - 2099-01-01\n\n測試。\n",
+                       files["CHANGELOG.md"].decode("utf-8"), count=1, flags=re.M)
     files["CHANGELOG.md"] = changelog.encode("utf-8")
     files["iplot.py"] = files["iplot.py"] + b'\nNEW_VERSION_MARK = "9.9.9"\n'
     return files
