@@ -15,6 +15,8 @@ jobs:
         python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 要所有 tag：tests/test_workshop_every_core.py 拿每一版核心跑工作坊；tools/bundled_hashes.py 也要
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
