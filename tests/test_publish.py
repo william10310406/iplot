@@ -511,7 +511,10 @@ EXPORT_IGNORE = ["tests/", "docs/plans/", "docs/original/", "docs/00_*", "docs/0
 def test_gitattributes_lists_exactly_the_design_paths():
     """設計第 9.1 節：核心的包不帶的東西，一樣不多、一樣不少。"""
     lines = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
-    assert [x for x in lines if x.strip() and not x.startswith("#")] == [f"{p} export-ignore" for p in EXPORT_IGNORE]
+    rules = [x for x in lines if x.strip() and not x.startswith("#")]
+    assert [x for x in rules if x.endswith(" export-ignore")] == [f"{p} export-ignore" for p in EXPORT_IGNORE]
+    # 其他的只有行尾規則：iPLoT.bat 在哪個系統 checkout 都是 CRLF
+    assert [x for x in rules if not x.endswith(" export-ignore")] == ["*.bat text eol=crlf"]
 
 
 def test_real_gitattributes_keeps_the_ignored_paths_out_of_the_core_zip(publish, repo):

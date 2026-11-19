@@ -20,6 +20,50 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: iPLoT.bat --check（有 Python）
+        if: runner.os == 'Windows'
+        shell: cmd
+        timeout-minutes: 2
+        run: |
+          call iPLoT.bat --check > "%RUNNER_TEMP%\bat-check-py.txt" 2>&1 < nul
+          set "RC=%errorlevel%"
+          > "%RUNNER_TEMP%\bat-check-py-rc.txt" echo %RC%
+          type "%RUNNER_TEMP%\bat-check-py.txt"
+          echo exit=%RC%
+          rem 找到 Python 要 exit 0；不是 0 就讓這一步失敗
+          exit /b %RC%
+      - name: --check（有 Python）寫進 summary
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          $out = Get-Content "$env:RUNNER_TEMP\bat-check-py.txt" -Encoding utf8 -Raw
+          $rc = (Get-Content "$env:RUNNER_TEMP\bat-check-py-rc.txt").Trim()
+          $fence = '```'
+          Add-Content -Encoding utf8 -Path $env:GITHUB_STEP_SUMMARY -Value @('### --check（有 Python）', '', $fence, "$out".TrimEnd(), "exit=$rc", $fence, '')
+      - name: iPLoT.bat --check（PATH 只剩 System32，沒有 Python）
+        if: runner.os == 'Windows'
+        shell: cmd
+        timeout-minutes: 2
+        run: |
+          set "LOCALAPPDATA=%RUNNER_TEMP%\no-python"
+          mkdir "%LOCALAPPDATA%"
+          cmd /d /c "set "PATH=%SystemRoot%\System32" && call iPLoT.bat --check > "%RUNNER_TEMP%\bat-check.txt" 2>&1 < nul"
+          > "%RUNNER_TEMP%\bat-check-rc.txt" echo %errorlevel%
+          rem echo 不會把 errorlevel 歸零；預期的 1 已經記在檔案裡，交給下一步判斷
+          exit /b 0
+      - name: 檢查 --check 的結果
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $text = Get-Content "$env:RUNNER_TEMP\bat-check.txt" -Encoding utf8 -Raw
+          $rc = (Get-Content "$env:RUNNER_TEMP\bat-check-rc.txt").Trim()
+          Write-Output $text
+          Write-Output "exit=$rc"
+          $fence = '```'
+          Add-Content -Encoding utf8 -Path $env:GITHUB_STEP_SUMMARY -Value @('### --check（PATH 只剩 System32）', '', $fence, "$text".TrimEnd(), "exit=$rc", $fence, '')
+          if ($rc -ne '1') { throw "預期回傳碼 1，實際 $rc" }
+          if ($text -notmatch 'PYTHON=none') { throw '沒有 PYTHON=none' }
+          if (-not $text.Contains('找不到 Python')) { throw '沒有「找不到 Python」' }
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
       - run: pip install -r requirements-dev.txt
