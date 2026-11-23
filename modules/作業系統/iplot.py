@@ -14,6 +14,9 @@ ICON = "🖥️"
 open, edit, reveal = backend.open, backend.edit, backend.reveal
 terminal, trash = backend.terminal, backend.trash
 requirements, webview_ready = backend.requirements, backend.webview_ready  # 第一次啟動的安裝會問這兩個
+# iPLoT 0.8 起核心照這張表找做這些事的模組（D159），不再靠「作業系統」這個名字；更舊的核心不看它
+PROVIDES = {"os.open": "open", "os.edit": "edit", "os.reveal": "reveal", "os.terminal": "terminal", "os.trash": "trash",
+            "os.requirements": "requirements", "os.webview_ready": "webview_ready"}
 
 
 def run(app):

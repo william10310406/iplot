@@ -337,7 +337,7 @@ def test_bridge_exposes_only_its_methods(bridge):
     這是整潔，不是安全邊界——pywebview 用名字一路 getattr，知道名字的頁面程式碼叫得到底線後面的東西；
     真正的邊界是頁面零外部資源、模組的輸出一律當文字（tests/test_boundaries.py）。"""
     public = {n for n in dir(bridge) if not n.startswith("_")}
-    assert public == {"state", "press", "enter", "back", "create", "add_child", "rename", "remove", "action",
+    assert public == {"state", "press", "enter", "back", "create", "add_child", "menu", "menu_pick", "action",
                       "open_error", "report_error", "rescan", "answer"}
     assert all(callable(getattr(bridge, n)) for n in public)
 
@@ -427,42 +427,79 @@ def test_add_child_creates_under_module(panel, bridge, home, monkeypatch):
     assert modules(panel.window.calls("show")[-1][0])["A"]["has_children"] is True
 
 
-def test_rename_renames_a_shown_module_and_redraws(panel, bridge, home):
+TIDY = Path(__file__).resolve().parents[1] / "modules" / "整理"
+
+
+def with_tidy(home):
+    """「整理」的拷貝放在 iPLoT 的上一層（ROOTS 的 ".."）：面板問 menu.module 找得到它。"""
+    shutil.copytree(TIDY, home.parent / "整理")
+
+
+def test_right_click_asks_the_providers_for_their_items(panel, bridge, window, home):
+    with_tidy(home)
     folder = make_module(home / "modules", "A").resolve()
     rescan(panel)
-    bridge.rename(str(folder), "新")
+    bridge.menu(str(folder))
+    panel.wait()
+    assert window.calls("menu")[-1] == [str(folder), ["改名…", "移到垃圾桶…"]]
+
+
+def test_without_a_provider_the_menu_gets_no_extra_items(panel, bridge, window, home):
+    folder = make_module(home / "modules", "A").resolve()
+    rescan(panel)
+    bridge.menu(str(folder))
+    panel.wait()
+    assert window.calls("menu")[-1] == [str(folder), []]
+
+
+def test_a_provider_returning_junk_adds_nothing_and_breaks_nothing(panel, bridge, window, home):
+    make_module(home.parent, "亂", 'PROVIDES = {"menu.module": "items"}\n\ndef items(app, info):\n'
+                '    return ["x", ("a",), (1, "b"), ("好", "ok")]\n')
+    folder = make_module(home / "modules", "A").resolve()
+    rescan(panel)
+    bridge.menu(str(folder))
+    panel.wait()
+    assert window.calls("menu")[-1] == [str(folder), ["好"]]
+
+
+def test_picking_rename_asks_for_the_name_and_renames_the_folder(panel, bridge, window, home):
+    with_tidy(home)
+    folder = make_module(home / "modules", "A").resolve()
+    rescan(panel)
+    bridge.menu(str(folder))
+    panel.wait()
+    bridge.menu_pick(0)
+    ask_id, prompt, default = pending(window, "ask")
+    assert "A" in prompt and default == "A"
+    bridge.answer(ask_id, "新")
     panel.wait()
     assert (home / "modules" / "新" / "iplot.py").is_file() and not folder.exists()
     assert "新" in modules(panel.window.calls("show")[-1][0]) and "A" not in modules(panel.window.calls("show")[-1][0])
 
 
-def test_rename_ignores_things_not_on_the_panel_and_non_text_names(panel, bridge, home, tmp_path):
-    folder = make_module(home / "modules", "A").resolve()
+def test_menu_ignores_things_not_on_the_panel_and_bad_picks(panel, bridge, window, home, tmp_path):
+    with_tidy(home)
     outside = make_module(tmp_path / "elsewhere", "X").resolve()
     rescan(panel)
-    bridge.rename(str(outside), "Y")
-    bridge.rename(str(folder), None)
+    bridge.menu(str(outside))
+    for bad in (None, "0", 5, -1, True):
+        bridge.menu_pick(bad)
     panel.wait()
-    assert outside.is_dir() and folder.is_dir()
+    assert window.calls("menu") == [] and outside.is_dir()
 
 
-def test_remove_asks_through_the_panel_dialog_and_cancel_moves_nothing(panel, bridge, window, home):
+def test_picking_remove_asks_through_the_panel_dialog_and_cancel_moves_nothing(panel, bridge, window, home):
+    with_tidy(home)
     folder = make_module(home / "modules", "A").resolve()
     rescan(panel)
-    bridge.remove(str(folder))  # 立刻回來；工作執行緒卡在對話框，等頁面回答
+    bridge.menu(str(folder))
+    panel.wait()
+    bridge.menu_pick(1)  # 立刻回來；工作執行緒卡在對話框，等頁面回答
     ask_id, prompt = pending(window, "confirm")
     assert "A" in prompt and "垃圾桶" in prompt
     bridge.answer(ask_id, None)
     panel.wait()
     assert folder.is_dir()
-
-
-def test_remove_of_a_bundled_module_says_why_without_asking(panel, bridge, window, home):
-    folder = make_module(home / "modules", "開工").resolve()
-    rescan(panel)
-    bridge.remove(str(folder))
-    panel.wait()
-    assert window.calls("log")[-1] == [T["protected_bundled"].format(name="開工")] and folder.is_dir()
 
 
 # 回報與「打開檔案」

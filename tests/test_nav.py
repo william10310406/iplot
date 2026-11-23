@@ -1,4 +1,5 @@
-"""模組導覽列（D153）：ui/nav.py 算要列的格子、掛上載入後的注入與 _iplot_nav，ui/nav.js 畫那一排。
+"""模組導覽列（D153、D159）：「導覽列」模組（提供 page.top）算要列的格子、它的 nav.js 畫那一排；ui/nav.py 問它、掛上載入後的注入與 _iplot_nav。
+這裡的「導覽列」是一份拷貝，放在 iPLoT 的上一層（ROOTS 的 ".."）：面板找得到它，但它不是 modules/ 裡那些模組的同一層。
 Python 這一頭用假的 webview；JS 那一頭用 node 跑一個假的 DOM（沒有 node 就跳過），畫得對不對在 Mac 上真的看一次（人工驗收）。"""
 
 import json
@@ -7,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import FakeWebview, FakeWindow, make_module, until
+from conftest import FakeView, FakeWebview, FakeWindow, make_module, until
 from test_web import in_thread
 
 from core.core import Core
@@ -17,9 +18,15 @@ from core.types import DEFAULT_CONFIG
 from ui import nav
 from ui.web import WebPanel
 
-UI = Path(__file__).resolve().parents[1] / "ui"
+NAV = Path(__file__).resolve().parents[1] / "modules" / "導覽列"
+SOURCE = (NAV / "nav.js").read_text(encoding="utf-8")
 PAGE = 'def run(app):\n    app.page("頁", "<p>hi</p>")\n    app.log("頁關了")\n'
 PANEL = {"k": "panel", "t": "主控面板", "i": "", "d": ""}
+
+
+@pytest.fixture(autouse=True)
+def provider(home):
+    shutil.copytree(NAV, home.parent / "導覽列")
 
 
 def tree(home):
@@ -32,7 +39,7 @@ def tree(home):
 
 
 def core_with(home, info):
-    core = Core(home, DEFAULT_CONFIG, None)
+    core = Core(home, DEFAULT_CONFIG, FakeView())
     core.running.append(info)
     return core
 
@@ -46,7 +53,7 @@ def info_of(home, *names):
 
 def test_cells_for_a_top_level_module_are_the_panel_then_its_children(home):
     tree(home)
-    bar = nav.Nav(FakeWindow("頁", {}), core_with(home, info_of(home, "課程")))
+    bar = nav.make(FakeWindow("頁", {}), core_with(home, info_of(home, "課程")))
     assert bar.cells == [PANEL, {"k": "child", "t": "第一份", "i": "📄", "d": "說明一"},
                          {"k": "child", "t": "第二份", "i": "", "d": ""}]
     assert [t and t.name for t in bar.targets] == [None, "HK1", "HK2"]
@@ -54,15 +61,30 @@ def test_cells_for_a_top_level_module_are_the_panel_then_its_children(home):
 
 def test_cells_for_a_child_add_the_parent_in_the_middle(home):
     tree(home)
-    bar = nav.Nav(FakeWindow("頁", {}), core_with(home, info_of(home, "課程", "HK1")))
+    bar = nav.make(FakeWindow("頁", {}), core_with(home, info_of(home, "課程", "HK1")))
     assert bar.cells == [PANEL, {"k": "parent", "t": "↑ 課程作業", "i": "", "d": "作業"},
-                         {"k": "child", "t": "G", "i": "", "d": ""}]
-    assert [t and t.name for t in bar.targets] == [None, "課程", "G"]
+                         {"k": "sibling", "t": "第二份", "i": "", "d": ""}, {"k": "child", "t": "G", "i": "", "d": ""}]
+    assert [t and t.name for t in bar.targets] == [None, "課程", "HK2", "G"]
+
+
+def test_a_top_level_module_lists_the_other_top_level_modules_of_its_folder(home):
+    """Discussion #9：最上層的模組沒有上一層、多半也沒有下一層，以前那一排只剩主控面板；現在有同一層。"""
+    tree(home)
+    make_module(home / "modules", "行事曆", 'ICON = "📅"\n')
+    bar = nav.make(FakeWindow("頁", {}), core_with(home, info_of(home, "行事曆")))
+    assert bar.cells == [PANEL, {"k": "sibling", "t": "課程作業", "i": "", "d": "作業"}]
+
+
+def test_without_a_provider_the_page_opens_with_no_bar(home):
+    shutil.rmtree(home.parent / "導覽列")
+    tree(home)
+    window = FakeWindow("頁", {})
+    assert nav.make(window, core_with(home, info_of(home, "課程"))) is None and window.exposed == {}
 
 
 def test_a_module_with_no_parent_and_no_children_only_has_the_panel_cell(home):
     make_module(home / "modules", "孤")
-    bar = nav.Nav(FakeWindow("頁", {}), core_with(home, info_of(home, "孤")))
+    bar = nav.make(FakeWindow("頁", {}), core_with(home, info_of(home, "孤")))
     assert bar.cells == [PANEL] and bar.targets == [None]
 
 
@@ -70,26 +92,26 @@ def test_names_go_in_as_data_never_markup(home):
     make_module(home / "modules", "孤", 'TITLE = "<b>x</b>"\n')
     make_module(home / "modules" / "孤", "子", 'TITLE = "</script>\\"\'"\n')
     window = FakeWindow("頁", {})
-    nav.Nav(window, core_with(home, info_of(home, "孤")))
+    nav.make(window, core_with(home, info_of(home, "孤")))
     window.fire("loaded")
     [script] = window.js
-    assert json.loads(script.removeprefix(f"({nav.source()})(").removesuffix(")"))[1]["t"] == "</script>\"'"
+    assert json.loads(script.removeprefix(f"({SOURCE})(").removesuffix(")"))[1]["t"] == "</script>\"'"
 
 
 def test_the_bar_is_injected_after_the_page_loads_and_again_after_every_load(home):
     tree(home)
     window = FakeWindow("頁", {})
-    bar = nav.Nav(window, core_with(home, info_of(home, "課程")))
+    bar = nav.make(window, core_with(home, info_of(home, "課程")))
     assert window.js == []
     window.fire("loaded")
     window.fire("loaded")
-    assert window.js == [f"({nav.source()})({json.dumps(bar.cells)})"] * 2
+    assert window.js == [f"({SOURCE})({json.dumps(bar.cells)})"] * 2
 
 
 def test_iplot_nav_is_exposed_under_that_exact_name(home):
     tree(home)
     window = FakeWindow("頁", {})
-    nav.Nav(window, core_with(home, info_of(home, "課程")))
+    nav.make(window, core_with(home, info_of(home, "課程")))
     assert list(window.exposed) == ["_iplot_nav"]  # 底線開頭：pywebview 攤開模組的 api 時略過，撞不到
 
 
@@ -97,7 +119,7 @@ def test_iplot_nav_is_exposed_under_that_exact_name(home):
 def test_iplot_nav_only_accepts_an_index_on_the_bar(home, bad):
     tree(home)
     window = FakeWindow("頁", {})
-    bar = nav.Nav(window, core_with(home, info_of(home, "課程")))
+    bar = nav.make(window, core_with(home, info_of(home, "課程")))
     window.exposed["_iplot_nav"](bad)
     assert not window.destroyed and bar.choice is None
 
@@ -105,7 +127,7 @@ def test_iplot_nav_only_accepts_an_index_on_the_bar(home, bad):
 def test_choosing_twice_keeps_the_first_choice(home):
     tree(home)
     window = FakeWindow("頁", {})
-    bar = nav.Nav(window, core_with(home, info_of(home, "課程")))
+    bar = nav.make(window, core_with(home, info_of(home, "課程")))
     window.exposed["_iplot_nav"](1)
     window.exposed["_iplot_nav"](2)
     assert bar.choice == 1
@@ -114,7 +136,7 @@ def test_choosing_twice_keeps_the_first_choice(home):
 def test_choosing_closes_the_page_and_remembers_which(home):
     tree(home)
     window = FakeWindow("頁", {})
-    bar = nav.Nav(window, core_with(home, info_of(home, "課程")))
+    bar = nav.make(window, core_with(home, info_of(home, "課程")))
     window.exposed["_iplot_nav"](2)
     assert window.destroyed and bar.choice == 2 and bar.targets[2].name == "HK2"
 
@@ -122,7 +144,7 @@ def test_choosing_closes_the_page_and_remembers_which(home):
 def test_jump_runs_the_chosen_module_with_the_given_press(home):
     tree(home)
     window, calls = FakeWindow("頁", {}), []
-    bar = nav.Nav(window, core := core_with(home, info_of(home, "課程")))
+    bar = nav.make(window, core := core_with(home, info_of(home, "課程")))
     window.exposed["_iplot_nav"](1)
     bar.jump(lambda c, info: calls.append((c, info.name)))
     assert calls == [(core, "HK1")]
@@ -131,7 +153,7 @@ def test_jump_runs_the_chosen_module_with_the_given_press(home):
 def test_jump_to_the_panel_runs_nothing(home):
     tree(home)
     window, calls = FakeWindow("頁", {}), []
-    bar = nav.Nav(window, core_with(home, info_of(home, "課程")))
+    bar = nav.make(window, core_with(home, info_of(home, "課程")))
     window.exposed["_iplot_nav"](0)
     bar.jump(lambda *a: calls.append(a))
     assert window.destroyed and calls == []
@@ -139,7 +161,7 @@ def test_jump_to_the_panel_runs_nothing(home):
 
 def test_jump_with_no_choice_runs_nothing(home):
     tree(home)
-    bar = nav.Nav(FakeWindow("頁", {}), core_with(home, info_of(home, "課程")))
+    bar = nav.make(FakeWindow("頁", {}), core_with(home, info_of(home, "課程")))
     bar.jump(lambda *a: pytest.fail("不該跑"))
 
 
@@ -148,7 +170,7 @@ def test_jump_to_a_module_that_is_gone_says_so_and_rescans(home, view):
     window = FakeWindow("頁", {})
     core = Core(home, DEFAULT_CONFIG, view)
     core.running.append(info_of(home, "課程"))
-    bar = nav.Nav(window, core)
+    bar = nav.make(window, core)
     window.exposed["_iplot_nav"](1)
     core.running.clear()  # 真正跳的時候，頁面所屬的那次執行已經結束了
     shutil.rmtree(top / "HK1")
@@ -293,7 +315,7 @@ console.log(JSON.stringify({plain: run(cells, false, false), off: run(cells, tru
 @pytest.mark.skipif(NODE is None, reason="沒有 node")
 def test_nav_js_draws_one_closed_shadow_bar_with_text_only_and_calls_the_index(home):
     cells = [PANEL, {"k": "parent", "t": "↑ 上", "i": "", "d": "說明"}, {"k": "child", "t": "<b>x</b>", "i": "📄", "d": ""}]
-    out = subprocess.run([NODE, "-e", HARNESS, str(UI / "nav.js"), json.dumps(cells)],
+    out = subprocess.run([NODE, "-e", HARNESS, str(NAV / "nav.js"), json.dumps(cells)],
                          capture_output=True, text=True, encoding="utf-8", check=True).stdout
     got = json.loads(out)
     plain = got["plain"]
@@ -309,7 +331,7 @@ def test_nav_js_draws_one_closed_shadow_bar_with_text_only_and_calls_the_index(h
 
 
 def test_nav_js_has_no_globals_and_no_inner_html():
-    text = (UI / "nav.js").read_text(encoding="utf-8")
+    text = (NAV / "nav.js").read_text(encoding="utf-8")
     assert text.lstrip().startswith(("//", "(")) and "innerHTML" not in text and "outerHTML" not in text
     assert "document.write" not in text and "eval(" not in text
 
@@ -329,6 +351,6 @@ def test_a_module_made_with_the_plus_button_gets_the_bar_after_one_app_page_line
     page = open_page(panel, folder)
     assert list(page.exposed) == ["_iplot_nav"]
     page.fire("loaded")
-    assert json.loads(page.js[-1].removeprefix(f"({nav.source()})(").removesuffix(")")) == [PANEL]
+    assert json.loads(page.js[-1].removeprefix(f"({SOURCE})(").removesuffix(")")) == [PANEL]
     page.fire("closed")
     panel.wait()

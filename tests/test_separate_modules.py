@@ -83,8 +83,13 @@ def test_workshop_in_the_web_panel_hands_off_without_fetching_or_opening_a_page(
     home, folder, run_py = setup
     (home / "modules" / "互通" / "separate.py").write_bytes(SEPARATE.read_bytes())
     app, launched = WorkshopApp(home, folder), []
-    run_workshop(app, monkeypatch, lambda url: pytest.fail("在面板裡不該先抓清單"),
-                 popen=lambda argv, **kw: launched.append(argv))
+
+    def popen(argv, **kw):  # 像真的一樣：另開的程序起來後把自己的 pid 寫進 .pid
+        launched.append(argv)
+        (folder / ".pid").write_text("303", encoding="utf-8")
+        return types.SimpleNamespace(pid=303, poll=lambda: None)
+
+    run_workshop(app, monkeypatch, lambda url: pytest.fail("在面板裡不該先抓清單"), popen=popen)
     assert [a[1:] for a in launched] == [[str(run_py), str(folder)]]
     assert app.pages == [] and app.logs == ["在另一個視窗打開「工作坊」"]
 

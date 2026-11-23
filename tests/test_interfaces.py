@@ -37,6 +37,10 @@ def test_version_and_api_version():
     (Core.press, [("self", EMPTY), ("info", EMPTY), ("handler", "run"), ("args", ()), ("quiet", False)]),
     (Core.run_by_name, [("self", EMPTY), ("name", EMPTY)]),
     (Core.action, [("self", EMPTY), ("name", EMPTY), ("args", EMPTY)]),
+    (Core.providers, [("self", EMPTY), ("role", EMPTY)]),  # 0.8.0 起：角色（D159）
+    (Core.call, [("self", EMPTY), ("role", EMPTY), ("args", EMPTY)]),
+    (Core.each, [("self", EMPTY), ("role", EMPTY), ("args", EMPTY)]),
+    (Core.run_role, [("self", EMPTY), ("info", EMPTY), ("role", EMPTY), ("args", ())]),
     (load_config, [("path", EMPTY)]),
     (scan.module_info, [("folder", EMPTY), ("root", EMPTY), ("level", EMPTY)]),
     (scan.find_modules, [("roots", EMPTY)]),

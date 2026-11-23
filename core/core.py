@@ -1,13 +1,14 @@
 """組裝與編排：持有設定、畫面與記憶，把面板上的動作接到底層的檔案。"""
 
 import contextlib
+import json
 import runpy
 import time
 import unicodedata
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import history, modify, runner, scan
+from . import history, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
 from .errors import from_exception, reason
@@ -59,13 +60,14 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
 
 
 class Core:
-    """iPLoT 的編排：重掃、進入／返回、按下、依名稱執行、新增、回報核心錯誤。"""
+    """iPLoT 的編排：重掃、進入／返回、按下、依名稱執行、依角色找模組（D159）、新增、回報核心錯誤。"""
 
     def __init__(self, home: Path, config: Config, view: View, safe: bool = False) -> None:
         self.home, self.config, self.view, self.safe = home, config, view, safe
         self.scope = Scope(("iPLoT",), ())
         self.memories: dict[Path, dict] = {}
         self._stack: list[ModuleInfo] = []
+        self._declined: set[Path] = set()  # 這次執行期間答了「不允許」的工作坊模組，不再問
         self.running, self._pending = [], False  # running：正在執行的模組（ModuleInfo），最裡面的在最後；app.page 被呼叫時 running[-1] 就是開頁面的那一個
 
     def roots(self) -> list[Root]:
@@ -147,9 +149,48 @@ class Core:
             name = found[0]
         return self.press(name)
 
+    def providers(self, role: str) -> list[ModuleInfo]:
+        """最上層宣告了 PROVIDES 而且裡面有 role 的模組，依掃描順序（D159）。role 是什麼意思核心不管，
+        由提供的模組和使用的模組自己約定。從工作坊裝來的（有 .origin）要使用者允許過才算。"""
+        found = [m for g in scan.find_modules(self.roots()) for m in g.modules if role in dict(m.provides)]
+        return [m for m in found if self._allowed(m)]
+
+    def _allowed(self, info: ModuleInfo) -> bool:
+        """自己寫的、隨附的直接算；有 .origin 的，.roles-ok 記著的宣告跟現在一樣才算，否則問一次。
+        答應了就記下（並拿掉 .unconfirmed：允許它提供功能，就是允許它執行）；不答應的這次執行期間不再問。"""
+        if not (info.folder / ".origin").is_file():
+            return True
+        stamp, ok = json.dumps(sorted(info.provides), ensure_ascii=False), info.folder / ".roles-ok"
+        with contextlib.suppress(OSError):
+            if ok.read_text(encoding="utf-8") == stamp:
+                return True
+        roles = "、".join(role for role, _ in info.provides)
+        if info.folder in self._declined or not self.view.confirm(T["allow_roles"].format(title=info.title, roles=roles)):
+            self._declined.add(info.folder)
+            return False
+        with contextlib.suppress(OSError):
+            ok.write_text(stamp, encoding="utf-8")
+            (info.folder / ".unconfirmed").unlink(missing_ok=True)
+        return True
+
+    def call(self, role: str, *args: Any) -> Any:
+        """交給第一個提供 role 的模組執行，回它的回傳值；沒有提供者回 None。"""
+        found = self.providers(role)
+        return self.run_role(found[0], role, args) if found else None
+
+    def each(self, role: str, *args: Any) -> list[tuple[ModuleInfo, Any]]:
+        """交給每一個提供 role 的模組，依序執行；回（模組, 回傳值）。某一個壞了照常報錯，不影響其他的。"""
+        return [(m, self.run_role(m, role, args)) for m in self.providers(role)]
+
+    def run_role(self, info: ModuleInfo, role: str, args: tuple = ()) -> Any:
+        """執行 info 為 role 宣告的那個函式，跟按下一樣走 press（快照、錯誤、排隊照舊）。"""
+        return self.press(info, dict(info.provides)[role], args, quiet=True).value
+
     def action(self, name: str, *args: Any) -> Any:
-        """交給 modules/ 裡的「作業系統」模組做：執行它的 name(app, *args)，回傳值傳回來。
-        沒有那個模組就在訊息區記一行、回 None；壞了就像任何模組一樣在面板報錯。"""
+        """碰作業系統的事（open、edit、reveal、terminal、trash、requirements、webview_ready）：交給提供 os.<name> 的模組。
+        0.8 過渡（0.9 拿掉）：沒有提供者時，照舊找 modules/ 裡的「作業系統」——使用者改過的舊版沒有 PROVIDES。"""
+        if found := self.providers("os." + name):
+            return self.run_role(found[0], "os." + name, args)
         folder = self.home / "modules" / SYSTEM_MODULE
         if not scan.is_module(folder):
             return self.view.log(T["no_system"].format(module=SYSTEM_MODULE, name=name))
@@ -169,45 +210,6 @@ class Core:
         self.rescan()
         self.action("edit", folder / "iplot.py", self.config.editor, None)
         return folder
-
-    def rename(self, info: ModuleInfo, new: str) -> Path | None:
-        """模組的資料夾改名（模組的名字就是資料夾的名字）：只動使用者自己新增的；名稱不對、撞名、不能動或改不了時
-        寫進訊息區、回 None。資料夾裡的東西（.history、設定、子模組）跟著走；從別處用名字呼叫它的模組要自己跟著改。"""
-        if why := modify.refusal(info, self.home, True):
-            return self.view.log(why)
-        try:
-            folder = modify.target(info, new)
-            if folder is None:
-                return None
-            info.folder.rename(folder)
-        except BadName:
-            return self.view.log(T["bad_name"])
-        except FileExistsError:
-            return self.view.log(T["name_taken"].format(name=new.strip()))
-        except OSError as exc:
-            return self.view.log(T["rename_failed"].format(name=info.name, message=self._why(exc)))
-        self.memories.pop(info.folder, None)
-        self.rescan()
-        self.view.log(T["renamed"].format(old=info.name, new=folder.name))
-        return folder
-
-    def remove(self, info: ModuleInfo) -> bool:
-        """把模組的資料夾移到系統垃圾桶（永遠不直接刪除，可以放回）：先問一次，取消就什麼都不動；
-        不能動（隨附的、父層的一部分）、沒移成時寫進訊息區、回 False。"""
-        if why := modify.refusal(info, self.home, False):
-            self.view.log(why)
-            return False
-        ask = T["confirm_remove"].format(title=info.title, folder=info.folder)
-        if not self.view.confirm(ask + (T["confirm_remove_workshop"] if (info.folder / ".origin").is_file() else "")):
-            return False
-        self.action("trash", info.folder)
-        if gone := not info.folder.exists():
-            self.memories.pop(info.folder, None)
-            self.view.log(T["removed"].format(title=info.title))
-        else:
-            self.view.log(T["remove_failed"].format(title=info.title))
-        self.rescan()
-        return gone
 
     def _why(self, exc: OSError) -> str:
         """OSError 的中文原因；errno 與英文原文寫進 logs/iplot.log，事後才查得到（審查 S4）。"""
