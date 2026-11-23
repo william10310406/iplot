@@ -11,6 +11,7 @@ import importlib.util
 import os
 import runpy
 import sys
+import time
 from pathlib import Path
 
 import workshop
@@ -87,6 +88,22 @@ def _separate(app) -> bool:
         spec = importlib.util.spec_from_file_location("iplot_interop_separate", path)
         separate = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(separate)
-        return separate.here(app)
+        if separate.here(app):
+            return True
+        return not _opened(app, separate)
     except Exception:  # noqa: BLE001
         return True
+
+
+WAIT = float(os.environ.get("IPLOT_SEPARATE_WAIT", "10"))  # 秒：交給互通另開之後，等它開起來的上限（環境變數給測試用）
+
+
+def _opened(app, separate, wait=WAIT, sleep=time.sleep) -> bool:
+    """交出去之後確認對方真的開了（R7，2026-11-23 依賴盤點 P1）：另開的程序一開始就把自己的 pid 寫進這個資料夾的 .pid，
+    看到活著的那一個才算數。互通的 run.py 啟動之後才壞掉（輸出丟掉了，沒有任何聲音）時，等不到就說一句、在這裡開。"""
+    for _ in range(int(wait * 10)):
+        if separate.running_pid(app.module.folder) is not None:
+            return True
+        sleep(0.1)
+    app.log("另開的視窗沒有開起來，改在這裡打開工作坊；開著的期間，面板上按別的模組會等它關掉才跑")
+    return False

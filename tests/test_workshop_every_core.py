@@ -60,6 +60,9 @@ class View:
         seen["pages"].append(title)
         seen["installed"].append(api.install("車車") if api is not None else None)
 
+if len(sys.argv) > 3 and sys.argv[3] == "web":  # 假裝在網頁面板裡：工作坊會先交給互通另開（separate.py 看 "ui.web"）
+    import types
+    sys.modules["ui.web"] = types.ModuleType("ui.web")
 core = Core(home, Config(roots=("modules",), editor=None, history_keep=3, workshop_url=url), View())
 core.rescan()
 [info] = [m for m in core.all_modules() if m.folder.name == "工作坊"]
@@ -109,9 +112,9 @@ def setup(tmp_path, tag, with_new_workshop, author="william10310406"):
     return home, index.as_uri()
 
 
-def press(home, url):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("IPLOT_")}
-    done = subprocess.run([sys.executable, "-c", HARNESS, str(home), url], capture_output=True, text=True,
+def press(home, url, *extra, env_extra=None):
+    env = {**{k: v for k, v in os.environ.items() if not k.startswith("IPLOT_")}, **(env_extra or {})}
+    done = subprocess.run([sys.executable, "-c", HARNESS, str(home), url, *extra], capture_output=True, text=True,
                           encoding="utf-8", env=env, cwd=str(home), timeout=120, check=False)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout.strip().splitlines()[-1])
@@ -136,10 +139,29 @@ def test_the_workshop_updates_itself_first_on_every_core(tmp_path, tag):
     seen = press(home, url)
     folder = home / "modules" / "工作坊"
     assert seen["reports"] == [] and seen["pages"] == ["工作坊"], seen  # 清單只開一次，而且是新版開的
-    assert any("工作坊已自動更新：1.0.0 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
+    assert any("工作坊已自動更新：1.1.0 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
     assert b"NEW_VERSION_MARK" in (folder / "iplot.py").read_bytes()
     assert not (folder / ".unconfirmed").exists() and not (folder / ".origin").exists()
     assert list((folder / ".history").glob("*-folder.zip"))
+
+
+BROKEN_RUN = "import sys\nsys.exit('互通壞了：一啟動就結束，什麼都沒開')\n"
+
+
+@needs_tags
+@pytest.mark.parametrize("tag", [*TAGS[:1], *TAGS[-1:], "HEAD"])
+@pytest.mark.parametrize("interop", ["broken", "missing"])
+def test_in_the_web_panel_the_workshop_still_opens_when_interop_does_not(tmp_path, tag, interop):
+    """R7（2026-11-23 依賴盤點 P1）：網頁面板裡工作坊先交給互通另開。互通的 run.py 一啟動就壞掉（輸出被丟掉、沒有聲音），
+    或互通根本不在，工作坊都要自己開。最舊的核心、最新的 tag、現在這一版各跑一次。"""
+    home, url = setup(tmp_path, tag, with_new_workshop=False)
+    if interop == "broken":
+        shutil.copytree(ROOT / "modules" / "互通", home / "modules" / "互通", ignore=shutil.ignore_patterns("__pycache__"))
+        (home / "modules" / "互通" / "run.py").write_text(BROKEN_RUN, encoding="utf-8")
+    seen = press(home, url, "web", env_extra={"IPLOT_SEPARATE_WAIT": "1"})
+    assert seen["pages"] == ["工作坊"] and seen["reports"] == [], seen
+    if interop == "broken":
+        assert any("另開的視窗沒有開起來" in line for line in seen["logs"]), seen["logs"]
 
 
 @needs_tags
