@@ -234,7 +234,7 @@ def test_own_version(load, tmp_path):
     assert boot.own_version(tmp_path) == "?"
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.2.0] - 2026-10-08\n\nx\n\n## [0.1.0]\n",
                                            encoding="utf-8")
-    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.4.0"
+    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.5.0"
 
 
 def test_boot_and_run_read_on_python_3_8():
@@ -1799,12 +1799,12 @@ def test_a_modules_own_eoferror_in_the_popup_is_still_an_error(entry, home):
 
 # ── 導覽列（D154）：互通自己的 nav.py、nav.js ──
 
-UI_NAV_JS = Path(__file__).resolve().parents[1] / "ui" / "nav.js"
+UI_NAV_JS = Path(__file__).resolve().parents[1] / "modules" / "導覽列" / "nav.js"  # 0.8 起在「導覽列」模組裡（D159）
 NAV_JS_SHA256 = "27466bf9857847e17a7ff2e288a49c73d1e3b35790e2f67369005868faaf14d7"
 
 
 def test_the_two_nav_js_files_are_byte_for_byte_the_same_and_pinned():
-    """ui/nav.js 與互通的 nav.js 是同一份（互通不 import ui/，D80，所以各放一份）：一字不差，而且釘住——
+    """「導覽列」的 nav.js 與互通的 nav.js 是同一份（互通在沒有「導覽列」的舊核心上也要畫得出來，所以各放一份）：一字不差，而且釘住——
     要改就兩份一起改，連這個 sha256 一起換（跟 snippet.TEXT 的做法一樣）。"""
     import hashlib
     # Windows 的 git 可能把換行換成 CRLF 再檢出：比的是內容，不是那一個位元組
@@ -1850,6 +1850,19 @@ def test_nav_cells_have_the_panel_the_parent_and_the_children(load, home):
                          {"k": "parent", "t": "↑ 課程作業", "i": "", "d": "說明"},
                          {"k": "child", "t": "G", "i": "", "d": ""}]
     assert [t.name for t in bar.targets] == ["主控面板", "課程", "G"]
+
+
+def test_nav_asks_the_page_top_provider_so_it_matches_the_panel_and_has_the_same_level(load, home):
+    """核心 0.8 起（有 Core.call）：問「導覽列」模組，跟面板裡開的頁面一樣多了同一層（Discussion #9）。
+    它的「主控面板」那一格（目標 None）在這裡換成「主控面板」模組，照舊另開。「導覽列」放在上一層（ROOTS 的 ".."），不算同一層。"""
+    nav_tree(home)
+    shutil.copytree(UI_NAV_JS.parent, home.parent / "導覽列")
+    bar, _, _ = nav_for(load, home, "孤")
+    assert [(c["k"], c["t"]) for c in bar.cells] == [("panel", "主控面板"), ("sibling", "課程作業")]  # 主控面板不重複列
+    assert [t.name for t in bar.targets] == ["主控面板", "課程"]
+    bar, _, _ = nav_for(load, home, "課程", "一")
+    assert [(c["k"], c["t"]) for c in bar.cells] == [("panel", "主控面板"), ("parent", "↑ 課程作業"), ("sibling", "作業二"),
+                                                      ("child", "G")]
 
 
 def test_nav_panel_cell_only_when_the_top_level_has_exactly_one_and_it_is_not_the_page_itself(load, home):

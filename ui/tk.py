@@ -11,6 +11,7 @@ from core.scan import is_module, module_info
 from core.text import REPORT_MODULE, T
 from core.types import ErrorInfo, Group, ModuleInfo, Scope
 from ui import errlog
+from ui import menu as ui_menu
 
 COLORS = {"here": "blue", "parent": "red", "extra": "green"}
 
@@ -106,25 +107,26 @@ class Panel:
         menu.add_command(label=T["menu_terminal"],
                          command=lambda: self.core.action("terminal", info.folder))
         menu.add_command(label=T["menu_add_child"], command=lambda: self._create(info.folder))
-        menu.add_command(label=T["menu_rename"], command=lambda: self._rename(info))
-        menu.add_command(label=T["menu_remove"], command=lambda: self.core.remove(info))
+        fixed = menu.index("end")
 
         def popup(event: tk.Event) -> str:
+            self._extend(menu, fixed, info)
             menu.tk_popup(event.x_root, event.y_root)
             return "break"  # Control-click 不要同時算成左鍵按下
 
         for sequence in ("<Button-2>", "<Button-3>", "<Control-Button-1>"):
             button.bind(sequence, popup)
 
+    def _extend(self, menu: tk.Menu, fixed: int, info: ModuleInfo) -> None:
+        """右鍵選單打開時：固定的幾項後面，換上提供 menu.module 的模組這一次給的項目（D159）。"""
+        menu.delete(fixed + 1, "end")
+        for pick, label in zip(*ui_menu.items(self.core, info), strict=True):
+            menu.add_command(label=label, command=lambda pick=pick: self.core.press(*pick, quiet=True))
+
     def _create(self, parent: Path) -> None:
         name = self.ask(T["ask_name"])
         if name is not None:
             self.core.create(parent, name)
-
-    def _rename(self, info: ModuleInfo) -> None:
-        name = self.ask(T["ask_rename"].format(name=info.name), info.name)
-        if name is not None:
-            self.core.rename(info, name)
 
     def log(self, text: str) -> None:
         """訊息區末尾加一行。"""

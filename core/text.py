@@ -26,28 +26,14 @@ T: dict[str, str] = {
                 "也不能是 CON、NUL 這類 Windows 保留字（模組要能複製到任何系統）",
     "already_exists": "『{name}』已經是模組了",
     "ask_name": "新模組的名稱",
-    "ask_rename": "『{name}』的新名稱",
-    "name_taken": "這裡已經有叫『{name}』的東西了（大小寫不同也算同一個），換一個名稱",
-    "rename_failed": "沒有把『{name}』改名：{message}。它如果正開著，先關掉再試一次；它的資料夾沒有動",
-    "renamed": "已把『{old}』改名為『{new}』",
-    "protected_bundled": "『{name}』是 iPLoT 隨附的模組，iPLoT 的功能要靠它，不能從這裡改名或刪除。不想用它的話，什麼都不用做",
-    "protected_parent": "『{name}』是『{parent}』的一部分，不能單獨改名或刪除；要處理就處理『{parent}』",
-    "protected_workshop": "『{name}』是從工作坊裝來的，改了名字工作坊就認不得它、也沒辦法更新。不要它的話，可以移到垃圾桶，之後在工作坊還能再裝",
-    "confirm_remove": "要把『{title}』移到垃圾桶嗎？\n整個資料夾（{folder}）都會移走，裡面的檔案也是。"
-                      "要找回來，到垃圾桶（Windows 是資源回收筒）裡找，可以放回原來的位置。",
-    "confirm_remove_workshop": "\n它是從工作坊裝來的，之後想再用，也可以到工作坊重新安裝。",
     "bundled_updated": "隨附模組已換成這一版的：{names}。換下來的舊檔案備份在 {backup}",
     "bundled_modified": "隨附模組『{name}』的程式你改過，這次沒有換，你的版本照舊留著。新版在 {package} 裡的 modules/{name}/：想用新版，把它複製過去（你改過的先自己留一份）",
     "bundled_failed": "隨附模組『{name}』沒換成新版：{message}。已經放回原來的檔案，下次啟動會再試一次",
-    "removed": "已把『{title}』移到垃圾桶。要找回來，到垃圾桶（Windows 是資源回收筒）裡找",
-    "remove_failed": "沒有把『{title}』移到垃圾桶，它還在原來的地方。確認它沒有被別的程式開著，再試一次",
     "open_file": "打開檔案",
     "menu_edit": "打開程式碼",
     "menu_reveal": "在資料夾中顯示",
     "menu_terminal": "在終端機打開",
     "menu_add_child": "在這裡新增下一層模組…",
-    "menu_rename": "改名…",
-    "menu_remove": "移到垃圾桶…",
     "menu_run": "執行",
     "menu_enter": "進入下一層",
     "add_tile": "新模組",
@@ -74,8 +60,6 @@ T: dict[str, str] = {
     "refresh_failed": "介面的套件這次沒有換成新的：{message}\n先用現有的開；有網路之後重新啟動 iPLoT 會再試一次。",
     "confirm_foreign": "『{title}』是從外面裝進來的，第一次執行前確認：它是會在這台電腦上執行的程式，能讀寫你的檔案。要執行嗎？",
     "cancelled": "已取消執行『{title}』",
-    "nav_panel": "主控面板",
-    "nav_parent": "↑ {title}",
     "nav_gone": "找不到模組『{title}』，可能已經被移除了",
     "page_unsupported": "這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用",
     "running": "執行中：{title}…",
@@ -100,14 +84,16 @@ T: dict[str, str] = {
     "os_ENAMETOOLONG": "名稱太長",
     "os_ENOENT": "找不到檔案或資料夾",
     "os_other": "系統拒絕了這個動作，可以再試一次；還是不行就看 logs/iplot.log",
+    "allow_roles": "『{title}』是從工作坊裝來的，它想提供這些功能：{roles}。\n允許的話，iPLoT 需要這些功能時會執行它的程式"
+                   "（不用等你按它）。要允許嗎？\n不允許也沒關係：它照樣是一顆按鈕，下次啟動會再問。",
     "no_system": "沒有『{module}』模組，無法執行 {name}。要有這個功能，在 modules/ 新增一個叫『{module}』的模組"
                  "並定義 {name}(app, …)；見 docs/07_接口與邊界.md",
 }
 
-# 隨附的模組（核心的包帶的那 11 個）：核心的功能靠它們的名字找到，不讓使用者在面板上改名或刪除（D155）。
-# tests/test_modify.py 對照 git 的內容，包多一個、少一個都會紅
+# 隨附的模組（核心的包帶的）：「更新」之後跟著換成新版的就是這些（D156）。0.9 跟著隨附同步一起搬進「更新」。
+# 「整理」模組有一份一樣的（不讓人在面板上改名或刪除，D155）；tests/test_modify.py 對照 git 的內容，兩份多一個、少一個都會紅
 BUNDLED = frozenset({"主控面板", "互通", "作業系統", "回報與討論", "工作坊", "打開核心原始碼", "更新", "行事曆", "重新啟動",
-                     "開Terminal", "開工"})
+                     "開Terminal", "開工", "整理", "導覽列"})
 # 碰作業系統的事（打開、編輯、顯示、終端機、垃圾桶）由 modules/ 裡叫這個名字的模組做（D50、D52）
 SYSTEM_MODULE = "作業系統"
 # 錯誤那一列的「回報這個問題」交給 modules/ 裡叫這個名字的模組的 on_error(app, error)（D110）

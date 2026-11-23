@@ -56,17 +56,38 @@ def parent_of(info, roots):
     return scan.module_info(up, info.root, next((r.level for r in roots if top and r.path == info.root), "child"))
 
 
+def from_provider(core, owner, panel):
+    """核心 0.8 起：問提供 page.top 的模組（隨附的「導覽列」，D159），面板裡開的頁面用的也是它，所以兩邊一樣（多了同一層，
+    Discussion #9）。它的「主控面板」那一格目標是 None（關掉這一頁），在這裡換成「主控面板」模組；沒有那個模組就不列。
+    沒有提供者、或回的東西不對，回 None。"""
+    if not hasattr(core, "call"):
+        return None
+    got = core.call("page.top", owner)
+    if not (isinstance(got, dict) and isinstance(got.get("cells"), list) and isinstance(got.get("targets"), list)
+            and len(got["cells"]) == len(got["targets"])):
+        return None
+    found = []
+    for cell, target in zip(got["cells"], got["targets"], strict=True):
+        target = panel if target is None else target
+        if target is not None and isinstance(cell, dict):
+            found.append((cell.get("k", ""), target, cell.get("t", ""), cell.get("i", ""), cell.get("d", "")))
+    return found
+
+
 class Nav:
     """一個頁面視窗的導覽列：格子與目標一一對應（主控面板、父層、子模組；沒有的就不列）。"""
 
     def __init__(self, window, core, log, popen=subprocess.Popen, environ=os.environ) -> None:
         owner = core.running[-1]  # 呼叫 app.page 的模組：最裡面那一個
-        up, kids = parent_of(owner, core.roots()), scan.find_children(owner.folder, owner.root)
         tops = [m for m in core.all_modules() if m.name == PANEL]  # 在面板外，all_modules 一律是最上層
-        found = [("panel", tops[0], PANEL, "", "")] if len(tops) == 1 and owner.name != PANEL else []
-        if up:
-            found.append(("parent", up, PARENT.format(title=up.title), "", up.description))
-        found += [("child", m, m.title, m.icon or "", m.description) for m in kids]
+        panel = tops[0] if len(tops) == 1 and owner.name != PANEL else None
+        found = from_provider(core, owner, panel)
+        if found is None:  # 核心 0.7 以前、或沒有「導覽列」模組：自己畫主控面板、父層、子模組
+            up, kids = parent_of(owner, core.roots()), scan.find_children(owner.folder, owner.root)
+            found = [("panel", panel, PANEL, "", "")] if panel else []
+            if up:
+                found.append(("parent", up, PARENT.format(title=up.title), "", up.description))
+            found += [("child", m, m.title, m.icon or "", m.description) for m in kids]
         self.targets = [target for _, target, *_ in found]
         self.cells = [{"k": k, "t": t, "i": i, "d": d} for k, _, t, i, d in found]
         self.choice = None

@@ -49,7 +49,8 @@ def module_info(folder: Path, root: Path, level: Level) -> ModuleInfo:
         icon_file = next((folder / n for n in ICONS if n in names and (folder / n).is_file()), None)
         has_children = bool(_module_folders(folder))
     return ModuleInfo(name, meta.title or name, meta.description, folder, file, root, level,
-                      meta.has_run, meta.accepts_files, has_children, meta.error, meta.icon, icon_file)
+                      meta.has_run, meta.accepts_files, has_children, meta.error, meta.icon, icon_file,
+                      meta.provides)
 
 
 def _same(a: Path, b: Path) -> bool:

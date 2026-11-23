@@ -19,7 +19,7 @@ from core.errors import describe
 from core.scan import is_module, module_info
 from core.text import REPORT_MODULE, T
 from core.types import ErrorInfo, ModuleInfo, Scope
-from ui import errlog, nav
+from ui import errlog, menu, nav
 
 MAX_ICON = 1024 * 1024  # 圖示檔的上限：1 MB（D65）
 MIME = {".png": "image/png", ".svg": "image/svg+xml"}
@@ -122,13 +122,14 @@ class Bridge:
         """在模組底下新增下一層模組。"""
         self._on(id, lambda core, info: core.create(info.folder, name))
 
-    def rename(self, id: str, name: str) -> None:
-        """右鍵「改名…」：模組的資料夾改名；隨附的、從工作坊裝來的、撞名的，訊息區說一句，什麼都不動（D155）。"""
-        self._on(id, lambda core, info: core.rename(info, name if isinstance(name, str) else ""))
+    def menu(self, id: str) -> None:
+        """右鍵選單打開了：問提供 menu.module 的模組要加哪些項目，用 iplot.menu(id, 顯示的字) 送回頁面（D159）。"""
+        self._on(id, self._panel.menu)
 
-    def remove(self, id: str) -> None:
-        """右鍵「移到垃圾桶…」：先問一次才把模組的資料夾移到系統垃圾桶，不直接刪除（D155）。"""
-        self._on(id, lambda core, info: core.remove(info))
+    def menu_pick(self, index: int) -> None:
+        """按了模組提供的第 index 項：交給提供它的模組，參數是那一格的模組。"""
+        if type(index) is int and 0 <= index < len(items := self._panel.menu_items):
+            self._panel.submit(lambda: self._panel.press(self._panel.core, *items[index], quiet=True))
 
     def action(self, name: str, id: str) -> None:
         """右鍵選單的 edit／reveal／terminal，交給「作業系統」模組做。"""
@@ -177,6 +178,7 @@ class WebPanel:
         self._ids = itertools.count(1)
         self._waiting: dict[int, tuple[threading.Event, list]] = {}  # 等回答的對話框
         self._closed = False
+        self.menu_items: list[tuple[ModuleInfo, str, tuple]] = []  # 右鍵選單上模組提供的項目：（提供者, 函式名, (那一格,)）
         self._pages: list = []  # 開著的頁面視窗（app.page）；已經有一頁開著，新的一頁不畫導覽列
         self._warned: set[Path] = set()
         self.recent, self.offer = errlog.Recent(), errlog.Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
@@ -235,6 +237,11 @@ class WebPanel:
         self._js("busy", info.title)
         core.press(info, handler, args, quiet)
         self._js("busy", None)
+
+    def menu(self, core: Core, info: ModuleInfo) -> None:
+        """右鍵選單上模組提供的項目（見 Bridge.menu）。"""
+        self.menu_items, labels = menu.items(core, info)
+        self._js("menu", str(info.folder), labels)
 
     def submit(self, job: Callable[[], object]) -> None:
         """排一件工作給工作執行緒，立刻回傳。"""
@@ -337,7 +344,7 @@ class WebPanel:
         window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
         done, bar = threading.Event(), None
         if self.core.running and not self._pages:
-            bar = nav.Nav(window, self.core)
+            bar = nav.make(window, self.core)
         self._pages.append(window)
         window.events.closed += done.set
         done.wait()

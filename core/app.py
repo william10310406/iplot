@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import __version__, scan
 from .types import Config, ModuleInfo, Result
@@ -14,14 +14,34 @@ if TYPE_CHECKING:
 
 class App:
     """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version 並寫進 CHANGELOG
-    （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page；4 加了 parent、children）。version 是核心的版本字串。"""
+    （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page；4 加了 parent、children；
+    5 加了 call、each、providers，以及「沒有的名字交給提供 app.<名字> 的模組」，見 D159）。version 是核心的版本字串。"""
 
-    api_version: int = 4
+    api_version: int = 5
     version: str = __version__
 
     def __init__(self, core: Core, info: ModuleInfo) -> None:
         self._core, self._info = core, info
         self._memory = core.memories.setdefault(info.folder, {})
+
+    def __getattr__(self, name: str) -> Any:
+        """app 上沒有的名字：有模組宣告提供 app.<name>，app.<name>(…) 就交給它執行（D159）；沒有就是 AttributeError，
+        所以 hasattr(app, "x") 照樣看得出有沒有這個功能。新功能不用改核心：寫一個提供它的模組。"""
+        if name.startswith("_") or not self._core.providers("app." + name):
+            raise AttributeError(name)
+        return lambda *args: self._core.call("app." + name, *args)
+
+    def call(self, role: str, *args: Any) -> Any:
+        """交給第一個提供 role 的模組（PROVIDES 宣告的），回它的回傳值；沒有提供者回 None。"""
+        return self._core.call(role, *args)
+
+    def each(self, role: str, *args: Any) -> list[tuple[ModuleInfo, Any]]:
+        """交給每一個提供 role 的模組，回（模組, 回傳值）的清單。"""
+        return self._core.each(role, *args)
+
+    def providers(self, role: str) -> tuple[ModuleInfo, ...]:
+        """提供 role 的模組，依掃描順序。"""
+        return tuple(self._core.providers(role))
 
     @property
     def module(self) -> ModuleInfo:

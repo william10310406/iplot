@@ -259,8 +259,25 @@ def add_child(panel, text):
 def test_right_click_menu_has_add_child(home, panel, monkeypatch):
     lone_module(home, panel, monkeypatch)
     _, labels = row_menu(panel, "A")
+    assert labels == ["打開程式碼", "在資料夾中顯示", "在終端機打開", "在這裡新增下一層模組…"]
+    assert labels[3:] == [T["menu_add_child"]]
+
+
+def opened_menu(home, panel, text):
+    """右鍵選單打開時的樣子：固定的四項，加上提供 menu.module 的模組（這裡是放在上一層的「整理」）給的。"""
+    if not (home.parent / "整理").exists():
+        shutil.copytree(Path(__file__).resolve().parents[1] / "modules" / "整理", home.parent / "整理")
+    menu, _ = row_menu(panel, text)
+    [info] = [m for m in panel.core.all_modules() if m.title == text]
+    panel._extend(menu, 3, info)
+    return menu, [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)]
+
+
+def test_opening_the_menu_adds_the_providers_items_once(home, panel, monkeypatch):
+    lone_module(home, panel, monkeypatch)
+    opened_menu(home, panel, "A")
+    _, labels = opened_menu(home, panel, "A")  # 打開兩次：項目換新，不會疊兩份
     assert labels == ["打開程式碼", "在資料夾中顯示", "在終端機打開", "在這裡新增下一層模組…", "改名…", "移到垃圾桶…"]
-    assert labels[3:] == [T["menu_add_child"], T["menu_rename"], T["menu_remove"]]
 
 
 def test_add_child_creates_under_module_and_shows_arrow(home, panel, monkeypatch):
@@ -289,10 +306,10 @@ def test_right_click_rename_asks_with_the_old_name_and_renames_the_folder(home, 
     core, _ = lone_module(home, panel, monkeypatch, answer="新名字")
     asked = []
     monkeypatch.setattr(panel, "ask", lambda prompt, default="": asked.append((prompt, default)) or "新名字")
-    menu, labels = row_menu(panel, "A")
-    menu.invoke(labels.index(T["menu_rename"]))
+    menu, labels = opened_menu(home, panel, "A")
+    menu.invoke(labels.index("改名…"))
     panel.root.update()
-    assert asked == [(T["ask_rename"].format(name="A"), "A")]
+    assert asked == [("『A』的新名稱", "A")]
     assert (home / "modules" / "新名字" / "iplot.py").is_file() and not (home / "modules" / "A").exists()
     assert button(panel.body, "新名字")
 
@@ -301,12 +318,12 @@ def test_right_click_remove_confirms_then_hands_the_folder_to_the_trash_action(h
     core, seen = lone_module(home, panel, monkeypatch)
     prompts = []
     monkeypatch.setattr(panel, "confirm", lambda prompt: prompts.append(prompt) or False)
-    menu, labels = row_menu(panel, "A")
-    menu.invoke(labels.index(T["menu_remove"]))
+    menu, labels = opened_menu(home, panel, "A")
+    menu.invoke(labels.index("移到垃圾桶…"))
     panel.root.update()
     assert len(prompts) == 1 and (home / "modules" / "A").is_dir() and seen == []  # 按取消：什麼都不動
     monkeypatch.setattr(panel, "confirm", lambda prompt: True)
-    menu.invoke(labels.index(T["menu_remove"]))
+    menu.invoke(labels.index("移到垃圾桶…"))
     panel.root.update()
     assert seen == [("trash", (home / "modules" / "A").resolve())]  # 真正搬走的是「作業系統」模組；這裡只記下交給它的路徑
 
