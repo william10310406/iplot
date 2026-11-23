@@ -24,9 +24,10 @@ def spawn(request, monkeypatch):
 
 
 def test_a_child_that_dies_at_once_is_a_failure_and_its_stderr_is_kept(spawn, tmp_path):
-    argv = [sys.executable, "-c", "import sys; sys.stderr.write('壞了'); sys.exit(1)"]
+    # 只寫 ASCII：Windows 的子程序 stderr 用 cp1252，中文會變成 \\u 跳脫（內容還在，只是比對不到原字）
+    argv = [sys.executable, "-c", "import sys; sys.stderr.write('broken-at-import'); sys.exit(1)"]
     assert spawn(subprocess.Popen, argv, tmp_path, wait=10) is False
-    assert "壞了" in (tmp_path / "logs" / "separate.log").read_text(encoding="utf-8")
+    assert "broken-at-import" in (tmp_path / "logs" / "separate.log").read_text(encoding="utf-8")
 
 
 def test_a_child_that_keeps_running_or_finishes_fine_is_up(spawn, tmp_path):
