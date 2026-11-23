@@ -1,13 +1,15 @@
-"""行數預算（規格「全域限制」、D68）：核心邏輯 ≤ 699 有效行，而且只降不升（D159；2026-10-07 由 500 調到 505，D83；2026-11-14 體驗打磨 2-10 調到 510；2026-11-15 導覽列 516 → 530，D152；2026-11-16 面板上的改名與移到垃圾桶 → 595，D155；隨附模組跟著更新 → 700，D156；2026-11-23 依角色找模組 → 699，從此只降不升，D159）；UI 的各檔各有上限（`UI_BUDGETS`）。
+"""行數預算（規格「全域限制」、D68）：核心邏輯與 main.py、ui/ 各檔的上限在 tools/limits.json，只降不升，破例在 tools/exceptions.json（D160；核心的歷史：2026-10-07 由 500 調到 505，D83；2026-11-14 體驗打磨 2-10 調到 510；2026-11-15 導覽列 516 → 530，D152；2026-11-16 面板上的改名與移到垃圾桶 → 595，D155；隨附模組跟著更新 → 700，D156；2026-11-23 依角色找模組 → 699，從此只降不升，D159）。
 
 有效行（Python）＝非空白、非純註解、非 docstring 所在的行。
 有效行（HTML／CSS／JS）＝非空白、非整行註解（//、/* … */、<!-- … -->）的行。"""
 
 import ast
 import io
+import json
 import re
 import subprocess
 import tokenize
+import warnings
 from pathlib import Path
 
 import pytest
@@ -16,10 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core"
 SKIP = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
         tokenize.ENCODING, tokenize.ENDMARKER}
-# ui/web.py：2026-10-05 由 200 調到 220（M3 的 page 5 行，日後關閉前確認 8 行）；2026-11-07 由 220 調到 230
-# （M9 自動問「要回報嗎？」，D150）；2026-11-15 由 230 調到 235（導覽列，D153）；2026-11-23 由 240 調到 242（右鍵選單改問提供 menu.module 的模組，拿掉改名、刪除兩個入口，D159）。ui/errlog.py 是 M9 新加的，兩個面板與 main.py 共用
-UI_BUDGETS = {"ui/web.py": 242, "ui/tk.py": 180, "ui/install.py": 80, "ui/errlog.py": 80, "ui/nav.py": 60, "ui/menu.py": 20,
-              "ui/index.html": 120, "ui/app.js": 400, "ui/style.css": 300}
+# 上限在 tools/limits.json，破例在 tools/exceptions.json（D160）：歷史記在 git 與 docs/03，不再記在這裡的註解
+LIMITS = {k: v for k, v in json.loads((ROOT / "tools" / "limits.json").read_text(encoding="utf-8")).items() if k != "說明"}
+EXCEPTIONS = json.loads((ROOT / "tools" / "exceptions.json").read_text(encoding="utf-8"))
+UI_BUDGETS = {k: v for k, v in LIMITS.items() if k.startswith("ui/")}
 BLOCKS = (("/*", "*/"), ("<!--", "-->"))
 
 
@@ -80,7 +82,27 @@ def test_web_lines_definition(tmp_path):
     assert web_lines(f) == 4  # * { }、a { }、d { }、<p>
 
 
-CORE_LIMIT = 699  # 依角色找模組 700 → 699（D159，量到 699；之後只降不升，見 test_core_limit_never_goes_up）；隨附模組跟著更新 595 → 700（D156，量到 695）；面板上的改名與移到垃圾桶 530 → 595（D155，量到 591）；導覽列的基礎 516 → 530（D152）； 體驗打磨 2-10：505 → 510；審查 S4：510 → 516（清單檔「裁決紀錄」）
+CORE_LIMIT = LIMITS["core"]
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in text.split("."))
+
+
+def current_version() -> tuple[int, ...]:
+    found = re.search(r'__version__ = "([\d.]+)"', (ROOT / "core" / "__init__.py").read_text(encoding="utf-8"))
+    return _version(found.group(1))
+
+
+def measured() -> dict[str, int]:
+    """limits.json 每一項現在量到的行數；列了的檔不見了就是 None（測試會紅，不 skip）。"""
+    out = {"core": sum(core_logic().values())}
+    for name in LIMITS:
+        if name != "core":
+            path = ROOT / name
+            out[name] = (None if not path.exists()
+                         else effective_lines(path) if path.suffix == ".py" else web_lines(path))
+    return out
 
 
 def test_core_logic_within_limit():
@@ -89,23 +111,67 @@ def test_core_logic_within_limit():
     assert total <= CORE_LIMIT, f"核心邏輯 {total} 行 > {CORE_LIMIT}：{logic}"
 
 
-def _tagged_limit() -> tuple[str, int] | None:
-    """最新一個 vX.Y.Z tag 的 CORE_LIMIT；不是 git 的工作目錄、沒有 tag（淺 clone）就回 None。"""
-    run = lambda *a: subprocess.run(["git", *a], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")  # noqa: E731
-    tags = [t for t in run("tag", "--list", "v*").stdout.split() if re.fullmatch(r"v\d+\.\d+\.\d+", t)]
+@pytest.mark.parametrize("name", [k for k in LIMITS if k != "core"])
+def test_file_within_limit(name):
+    """列在 limits.json 的檔不見了也算紅：改名、搬家要一起改上限表，上限才不會靜靜失效。"""
+    n = measured()[name]
+    assert n is not None, f"{name} 不見了：搬家或改名要一起改 tools/limits.json"
+    assert n <= LIMITS[name], f"{name} {n} 行 > {LIMITS[name]}（tools/limits.json）"
+
+
+def test_limits_leave_no_slack():
+    """量到的比上限低 20 行以上，就該把上限降下來（只提醒，不擋）。"""
+    for name, n in measured().items():
+        if n is not None and LIMITS[name] - n >= 20:
+            warnings.warn(f"{name} 量到 {n}，上限 {LIMITS[name]}：可以把 tools/limits.json 降下來", stacklevel=1)
+
+
+def _git(*args: str) -> str | None:
+    done = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    return done.stdout if done.returncode == 0 else None
+
+
+def tagged_limits() -> tuple[str, dict[str, int]] | None:
+    """最新一個 vX.Y.Z tag 的上限：有 tools/limits.json 就讀它；更早的版本從 tests/test_budget.py 的 CORE_LIMIT、UI_BUDGETS 讀。
+    不是 git 的工作目錄、沒有 tag（淺 clone）就回 None。"""
+    tags = [t for t in (_git("tag", "--list", "v*") or "").split() if re.fullmatch(r"v\d+\.\d+\.\d+", t)]
     if not tags:
         return None
-    last = max(tags, key=lambda t: tuple(map(int, t[1:].split("."))))
-    found = re.search(r"^CORE_LIMIT = (\d+)", run("show", f"{last}:tests/test_budget.py").stdout, re.M)
-    return (last, int(found.group(1))) if found else None
+    last = max(tags, key=lambda t: _version(t[1:]))
+    if (data := _git("show", f"{last}:tools/limits.json")) is not None:
+        return last, {k: v for k, v in json.loads(data).items() if k != "說明"}
+    old = _git("show", f"{last}:tests/test_budget.py") or ""
+    limits = {}
+    if found := re.search(r"^CORE_LIMIT = (\d+)", old, re.M):
+        limits["core"] = int(found.group(1))
+    if found := re.search(r"^UI_BUDGETS = (\{.*?\})", old, re.M | re.S):
+        limits.update(ast.literal_eval(found.group(1)))
+    return last, limits
 
 
-def test_core_limit_never_goes_up():
-    """D159：上限只降不升。真的要升，同一個 PR 要先把某個功能從核心搬成模組，讓量到的行數先降下來。"""
-    tagged = _tagged_limit()
+def test_limits_never_go_up():
+    """D159、D160：上限只降不升。比最新的 tag 高，就要有一筆沒到期的例外，raises 寫著這個數字。"""
+    tagged = tagged_limits()
     if tagged is None:
         pytest.skip("沒有 tag 可以比（淺 clone、或不是 git 的工作目錄）")
-    assert tagged[1] >= CORE_LIMIT, f"CORE_LIMIT {CORE_LIMIT} 比 {tagged[0]} 的 {tagged[1]} 高：上限只降不升（D159）"
+    tag, before = tagged
+    raised = {}
+    for e in EXCEPTIONS:
+        for name, n in e.get("raises", {}).items():
+            raised[name] = max(raised.get(name, 0), n)
+    up = [f"{name}：{tag} 是 {before[name]}，現在 {n}" for name, n in LIMITS.items()
+          if name in before and n > before[name] and raised.get(name, 0) < n]
+    assert up == [], "上限只降不升；真的要升，在 tools/exceptions.json 加一筆例外（D 編號、為什麼、要換成什麼、remove_by、raises）：" + "；".join(up)
+
+
+def test_exceptions_are_complete_and_not_expired():
+    """每一筆例外都寫齊；版本號到了 remove_by 還沒回收就紅：要嘛回收，要嘛改 remove_by 明著延期（D160）。"""
+    now = current_version()
+    for e in EXCEPTIONS:
+        assert all(e.get(k) for k in ("id", "where", "why", "replace_with", "remove_by")), e
+        assert set(e.get("raises", {})) <= set(LIMITS), e
+        if e["remove_by"] != "不回收":
+            assert now < _version(e["remove_by"]), f"例外 {e['id']} 說 {e['remove_by']} 前回收，現在是 {'.'.join(map(str, now))}"
 
 
 # 0.8 過渡：核心還認得的模組名字，只能出現在 core/text.py 的這三個常數裡（0.9 隨附同步搬進「更新」、作業系統只靠 PROVIDES、
@@ -133,12 +199,3 @@ def test_core_names_no_module_except_the_transitional_constants():
 def test_panel_is_not_in_core():
     """面板在 ui/：core/ 裡沒有 ui.py，核心邏輯才是「一個下午讀得完」的那一塊。"""
     assert not (CORE / "ui.py").exists() and (ROOT / "ui" / "tk.py").exists()
-
-
-@pytest.mark.parametrize("name", UI_BUDGETS)
-def test_ui_file_budgets(name):
-    path = ROOT / name
-    if not path.exists():
-        pytest.skip(f"{name} 還沒有")
-    n = effective_lines(path) if path.suffix == ".py" else web_lines(path)
-    assert n <= UI_BUDGETS[name], f"{name} {n} 行 > {UI_BUDGETS[name]}"

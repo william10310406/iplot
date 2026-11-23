@@ -100,6 +100,8 @@ SYSTEM_MODULE = "作業系統"
 REPORT_MODULE = "回報與討論"
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
+# 規則在 iPLoT 資料夾的 AGENTS.md（給 AI 助手：改這個檔之前先讀它）。重點：只透過 app 碰 iPLoT，不 import core；
+# 要別的模組的功能用角色（app.call），用到的角色或模組寫在 NEEDS；第三方套件包在 try 裡、或在頂層寫 REQUIRES = [...] 自己裝
 # TITLE = "顯示名稱"   # 要讓按鈕文字跟資料夾名稱不同時才打開這一行
 # ICON = "🧩"   # 按鈕的圖示：一個 emoji；或在資料夾放 icon.png
 

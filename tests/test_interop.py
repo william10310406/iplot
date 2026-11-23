@@ -1909,7 +1909,7 @@ def test_nav_jump_starts_a_new_process_with_run_py_and_then_closes_the_page(load
     [((argv,), kw)] = calls
     assert argv == [sys.executable, str(INTEROP / "run.py"), str((home / "modules" / "課程" / "二").resolve())]
     assert kw["env"] == {"A": "b"} and kw["start_new_session"] is True
-    assert kw["stdin"] == kw["stdout"] == kw["stderr"] == subprocess.DEVNULL
+    assert kw["stdin"] == kw["stdout"] == subprocess.DEVNULL and kw["stderr"].name.endswith("separate.log")  # D160 第 3 條
     assert window.destroyed and bar.choice == 2 and env == {"IPLOT_CALENDAR": "1", "A": "b"}
 
 

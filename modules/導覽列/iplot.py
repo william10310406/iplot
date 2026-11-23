@@ -5,6 +5,8 @@ ICON = "🧭"
 # iPLoT 0.8 起面板開頁面時問「誰提供頁面上方的那一排（page.top）」（D159）；核心不知道導覽列。
 # 「互通」另開的頁面也問同一個，所以兩邊長得一樣（Discussion #9）
 PROVIDES = {"page.top": "bar"}
+# 用到的模組（D160 R5）：第一格回主控面板
+NEEDS = ("主控面板",)
 JS = Path(__file__).with_name("nav.js")
 PANEL = "主控面板"
 T = {

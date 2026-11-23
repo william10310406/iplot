@@ -815,7 +815,7 @@ def test_in_the_panel_process_launches_detached_with_the_env(load, home, tmp_pat
     [(argv, kw)] = launched
     assert argv == [sys.executable, str(run_py), str(folder)]
     assert kw["env"] == {"PATH": "/bin", "IPLOT_CALENDAR": "1"} and kw["start_new_session"] is True
-    assert (kw["stdin"], kw["stdout"], kw["stderr"]) == (subprocess.DEVNULL,) * 3 and app.logs == ["打開行事曆"] and app.pages == []
+    assert (kw["stdin"], kw["stdout"]) == (subprocess.DEVNULL,) * 2 and kw["stderr"].name.endswith("separate.log") and app.logs == ["打開行事曆"] and app.pages == []
 
 
 def test_without_interop_says_one_sentence_and_does_not_launch(load, home, tmp_path):
@@ -1259,9 +1259,9 @@ def test_page_html_turns_off_the_module_nav_bar_because_it_has_its_own():
     assert head.count('<meta name="iplot-nav" content="off">') == 1
 
 
-def test_calendar_changelog_top_section_is_0_1_3():
+def test_calendar_changelog_top_section_is_0_1_4():
     top = re.search(r"^## \[(\d+(?:\.\d+)*)\]", (CALENDAR / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
-    assert top.group(1) == "0.1.3"
+    assert top.group(1) == "0.1.4"
 
 
 def test_page_html_calls_exactly_the_api_methods():

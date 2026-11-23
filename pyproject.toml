@@ -16,5 +16,7 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "BLE", "S102", "S605", "
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["core"]
-omit = ["ui/*"]
+# 量核心、面板、main.py 與隨附模組（D160 第 5 條）；基準在 tools/coverage-baseline.json，只准持平或上升（tools/check_coverage.py）。
+# 不量的：科學計算、課程作業、Lean（不是隨附模組），與另開的子程序（它們跑的是同一份程式碼，量到的會重複）
+source = ["core", "ui", "main", "modules"]
+omit = ["modules/科學計算/*", "modules/課程作業/*", "modules/Lean/*", "*/tests/*"]

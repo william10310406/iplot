@@ -1,6 +1,6 @@
 # `app`：模組看得到的全部
 
-- `api_version = 4`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改。
+- `api_version = 5`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加。
 - 每次執行都新建一個 `App` 傳給 `run(app)`（或 `on_files(app, paths)`）；`module` 與 `memory` 在建立時綁好。執行一次＝在面板上雙擊模組的圖示，或右鍵選「執行」；tkinter 面板是單擊按鈕。tkinter 面板在兩種時候出現：安全模式（`python3 main.py --safe`，只掃 `modules/`），以及網頁面板開不起來時的備用面板（照常掃上一層與 `ROOTS`，不是安全模式，D75）；下面說「tkinter 面板」就是指這兩種。下面說的「按下」都是指執行這一次。
 - `def run(app)` 可省略：沒有 `run` 時最外層程式碼就是按下的動作，不用 `app` 也能寫模組（見最後一節）。
 - 本表整理自 `core/app.py` 的 docstring；兩邊不一致時以 `core/app.py` 為準。
@@ -13,7 +13,7 @@
 | 身分 | `app.parent` → `ModuleInfo | None`（唯讀） | 這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 `app.run`。 |
 | 身分 | `app.children` → `tuple[ModuleInfo, ...]`（唯讀） | 這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 `app.run`。 |
 | 身分 | `app.config` → `Config`（唯讀） | config.py 讀出來的設定（唯讀）：roots、editor、history_keep、update_url、workshop_url。 |
-| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.7.4"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
+| 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.8.0"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
 | 狀態 | `app.memory` → `dict`（唯讀） | 這個模組自己的 dict，iPLoT 開著期間保留；跨次啟動要留的請寫成檔案放 module.folder。 |
 | 動作 | `app.log(text: str)` → `None` | 寫一行到面板下方的訊息區。 |
 | 動作 | `app.open(path: Path)` → `None` | 打開：資料夾用檔案總管、檔案用預設程式。由 modules/作業系統 執行。 |
@@ -22,6 +22,10 @@
 | 動作 | `app.terminal(path: Path)` → `None` | 在終端機打開這個資料夾。 |
 | 動作 | `app.trash(path: Path)` → `Path | None` | 搬到系統垃圾桶，永遠不直接刪除；回傳搬到哪裡（Windows 的資源回收筒沒有路徑，回 None）。 |
 | 動作 | `app.run(name: str | ModuleInfo)` → `Result` | 執行另一個模組：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 LookupError，不猜。 |
+| 角色 | `app.call(role: str, *args)` → 回傳值或 `None` | 交給第一個提供 role 的模組（`PROVIDES` 宣告的），回它的回傳值；沒有提供者回 None（D159，核心 0.8.0）。 |
+| 角色 | `app.each(role: str, *args)` → `list[tuple[ModuleInfo, 回傳值]]` | 交給每一個提供 role 的模組，依掃描順序；某一個壞了照常報錯，不影響其他的。 |
+| 角色 | `app.providers(role: str)` → `tuple[ModuleInfo, ...]` | 提供 role 的模組，依掃描順序。 |
+| 角色 | `app.<名字>(…)` | `app` 上沒有的名字：有模組提供 `app.<名字>` 這個角色，就交給它；沒有就是 AttributeError，所以 `hasattr(app, "x")` 看得出有沒有。 |
 | 動作 | `app.rescan()` → `None` | 重新掃描並重畫面板；在模組執行中呼叫時，會等這次執行結束後才做。 |
 | 問人 | `app.ask(prompt: str, default: str = '')` → `str | None` | 跳出對話框問一個字串；按取消回 None。 |
 | 問人 | `app.confirm(prompt: str)` → `bool` | 跳出對話框問「確定／取消」；按確定回 True。 |
@@ -49,6 +53,31 @@
 - `app.parent`、`app.children`（D152，核心 0.7.0）給的是 `ModuleInfo`，直接交給 `app.run` 就能叫到那一個，哪一層都叫得到：`app.run(app.parent)`、`app.run(next(m for m in app.children if m.name == "子"))`。`app.run("名稱")` 還是只找面板目前這一層與最上層，不找下一層（D83）。父層的定義：資料夾上一層是模組（符號連結不算）、而且不是根目錄；中間隔著一個不是模組的資料夾，就沒有父層。
 - **有頁面的模組有一排「模組導覽列」**（D153，核心 0.7.0；互通 0.3.0 起面板外也有）：`app.page` 開出來的頁面，載入後最上面多一排——主控面板、「↑ 父層名稱」、這個模組的子模組——按一下就關掉這一頁、再跑那個模組。模組什麼都不用寫。已經有一頁開著時再開的頁面沒有；`body` 是橫向的 flex 或 grid 的頁面、或自己已經有一排模組列的頁面，在 `<head>` 放 `<meta name="iplot-nav" content="off">` 就不會有。它在頁面最前面多一個 `<iplot-nav>` 元素（內容在 closed 的 Shadow DOM 裡），`pywebview.api` 多一個 `_iplot_nav`。tkinter 面板沒有頁面，也沒有導覽列。
 - 圖示的來源依序是（D65）：模組資料夾裡的 `icon.png` 或 `icon.svg`（檔名要一字不差，`Icon.png` 不算；兩個都有用 png；1 MB 以內）→ `iplot.py` 頂層的 `ICON = "🧩"`（一個 emoji；跟 `TITLE` 一樣只認寫死的字串，不執行模組就讀得到）→ 都沒有就用顯示名稱的第一個字，底色由資料夾名稱算出來，同一個模組每次都一樣。圖檔超過 1 MB 或讀不到時當作沒有圖檔（有 `ICON` 就用 `ICON`），訊息區記一行。圖示只在網頁面板顯示，tkinter 面板沒有圖示。
+
+## 角色：模組之間怎麼合作（核心 0.8.0，D159）
+
+核心不知道任何模組的名字，也不解讀角色的意思：它只認「哪個模組宣告提供哪個角色」，叫的人和提供的人自己約定角色字串的意思。
+要用別的模組的功能，問角色，不要寫死它的名字或路徑（規則全文在 iPLoT 資料夾的 `AGENTS.md`）。
+
+```python
+# 提供：iplot.py 頂層，字面值（核心只用 ast 讀，不執行）
+PROVIDES = {"menu.module": "items"}
+
+def items(app, info):            # 被叫的時候，第一個參數是 app，後面是叫的人給的
+    return [("改名…", "rename")]
+
+# 使用：寫明用到哪些角色（AGENTS.md 第 3 條）
+NEEDS = ("page.top",)
+
+def run(app):
+    if not hasattr(app, "call"):  # 核心 0.7 以前沒有角色
+        return app.log("這個功能要 iPLoT 0.8 以上")
+    bar = app.call("page.top", app.module)
+```
+
+- 提供者的函式跟按下一樣執行（存快照、錯誤顯示在面板、一次一個排隊）。
+- 從工作坊裝來的模組宣告角色，第一次會先問使用者允不允許；不允許的話，這次執行期間它不算提供者，下次啟動再問。隨附的與自己寫的不用問。
+- 現在有的角色：`os.open`、`os.edit`、`os.reveal`、`os.terminal`、`os.trash`、`os.requirements`、`os.webview_ready`（作業系統）；`menu.module`（整理：面板上右鍵選單多的項目，回 `[(文字, 函式名), …]`）；`page.top`（導覽列：頁面上方那一排）。
 
 ## 有頁面的模組：在另開的視窗裡開
 
