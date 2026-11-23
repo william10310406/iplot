@@ -116,6 +116,46 @@ def test_a_module_the_user_removed_is_not_brought_back_but_a_new_file_is_added(h
     assert len(notes) == 1
 
 
+def introduced(table: dict, **versions: str) -> dict:
+    return {**table, ".introduced": versions}
+
+
+def test_a_module_new_in_this_version_is_installed(home):
+    """D159：0.8 新加的「整理」「導覽列」，從 0.7.x 更新上來的人本機沒有：這一版才加的就裝上。"""
+    (home / ".bundled-version").write_text("0.7.1\n", encoding="utf-8")
+    package(home, {"整理/iplot.py": b"# new\n", "整理/CHANGELOG.md": b"x"})
+    notes = bundled.sync(home, V, introduced(known(), 整理=V))
+    assert (home / "modules" / "整理" / "iplot.py").read_bytes() == b"# new\n"
+    assert (home / "modules" / "整理" / "CHANGELOG.md").read_bytes() == b"x"
+    assert "整理" in notes[0] and not list((home / "modules").glob(".*"))  # 暫存的資料夾不留下
+
+
+def test_a_module_that_existed_before_and_was_removed_stays_removed(home):
+    (home / ".bundled-version").write_text("0.7.1\n", encoding="utf-8")
+    package(home, {"開工/iplot.py": b"# new\n"})
+    assert bundled.sync(home, V, introduced(known(), 開工="0.5.0")) == []
+    assert not (home / "modules" / "開工").exists()
+
+
+def test_an_install_without_a_marker_only_gets_modules_new_in_exactly_this_version(home):
+    package(home, {"整理/iplot.py": b"# new\n", "開工/iplot.py": b"# old\n"})
+    bundled.sync(home, V, introduced(known(), 整理=V, 開工="0.5.0"))
+    assert (home / "modules" / "整理").is_dir() and not (home / "modules" / "開工").exists()
+
+
+def test_a_new_module_that_fails_to_install_leaves_nothing_and_tries_again(home, monkeypatch):
+    (home / ".bundled-version").write_text("0.7.1\n", encoding="utf-8")
+    package(home, {"整理/iplot.py": b"# new\n"})
+    real = os.replace
+    monkeypatch.setattr(bundled.os, "replace", lambda *a: (_ for _ in ()).throw(PermissionError(13, "no")))
+    notes = bundled.sync(home, V, introduced(known(), 整理=V))
+    assert not (home / "modules" / "整理").exists() and not list((home / "modules").glob(".*")) and notes
+    assert (home / ".bundled-version").read_text(encoding="utf-8").strip() == "0.7.1"
+    monkeypatch.setattr(bundled.os, "replace", real)
+    bundled.sync(home, V, introduced(known(), 整理=V))
+    assert (home / "modules" / "整理" / "iplot.py").is_file()
+
+
 def test_a_symlinked_module_and_non_module_folders_are_skipped(home, tmp_path):
     real = tmp_path / "elsewhere"
     real.mkdir()

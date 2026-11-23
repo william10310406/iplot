@@ -1,0 +1,280 @@
+[
+ {
+  "places": [
+   "modules/Lean/iplot.py:_context",
+   "modules/工作坊/workshop.py:_context",
+   "modules/更新/update.py:_context"
+  ],
+  "same": true,
+  "why": "連 HTTPS 用的 SSL 設定（macOS 的 python.org 版沒有憑證時改用 certifi 或系統的）；三個模組各自要能獨立運作，所以抄（R9），本尊是工作坊"
+ },
+ {
+  "places": [
+   "modules/主控面板/iplot.py:_errlog",
+   "modules/互通/nav.py:_errlog",
+   "modules/互通/separate.py:_errlog",
+   "modules/行事曆/iplot.py:_errlog"
+  ],
+  "same": true,
+  "why": "另開的程序的 stderr 接到 logs/separate.log；跟 _spawn、互通 separate.py 同一份，要一樣"
+ },
+ {
+  "places": [
+   "modules/主控面板/iplot.py:_ps",
+   "modules/互通/separate.py:_ps",
+   "modules/行事曆/iplot.py:_ps"
+  ],
+  "same": true,
+  "why": "把視窗叫到最前面；0.9 換成作業系統的角色 os.activate 後刪掉抄本。互通 separate.py 的 activate 多了 ENV 的處理，已經分家，不在這組"
+ },
+ {
+  "places": [
+   "modules/主控面板/iplot.py:_spawn",
+   "modules/互通/nav.py:_spawn",
+   "modules/行事曆/iplot.py:_spawn"
+  ],
+  "same": true,
+  "why": "另開程序要確認起來了（D160 第 3 條）；三個模組各自要能獨立運作，所以抄（R9）。0.9 換成互通提供的角色 page.separate 後刪掉抄本"
+ },
+ {
+  "places": [
+   "modules/主控面板/iplot.py:activate",
+   "modules/行事曆/iplot.py:activate"
+  ],
+  "same": true,
+  "why": "把視窗叫到最前面；0.9 換成作業系統的角色 os.activate 後刪掉抄本。互通 separate.py 的 activate 多了 ENV 的處理，已經分家，不在這組"
+ },
+ {
+  "places": [
+   "modules/互通/popup.py:_cancel",
+   "ui/web.py:_cancel"
+  ],
+  "same": true,
+  "why": "互通的彈出式視窗照網頁面板的 View 做（D81）；兩邊對話框的取消與回答要一樣。0.9 面板搬成模組時合成一份"
+ },
+ {
+  "places": [
+   "modules/互通/popup.py:answer",
+   "ui/web.py:answer"
+  ],
+  "same": true,
+  "why": "互通的彈出式視窗照網頁面板的 View 做（D81）；兩邊對話框的取消與回答要一樣。0.9 面板搬成模組時合成一份"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK2.py:_dipole",
+   "modules/課程作業/範例課程/科學計算/HK02/HK2.py:_dipole"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK2.py:_poisson_fdm",
+   "modules/課程作業/範例課程/科學計算/HK02/HK2.py:_poisson_fdm"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK2.py:compute",
+   "modules/課程作業/範例課程/科學計算/HK02/HK2.py:compute"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK2.py:draw",
+   "modules/課程作業/範例課程/科學計算/HK02/HK2.py:draw"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK2.py:stats",
+   "modules/課程作業/範例課程/科學計算/HK02/HK2.py:stats"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:_case1",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:_case1"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:_case2",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:_case2"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:_draw_1d",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:_draw_1d"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:_draw_2d",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:_draw_2d"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:stats",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:stats"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:step_lax_friedrichs",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:step_lax_friedrichs"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:update",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:update"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK6.py:update_sw_2d",
+   "modules/課程作業/範例課程/科學計算/HK06/HK6.py:update_sw_2d"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK8.py:compute",
+   "modules/課程作業/範例課程/科學計算/HK08/HK8.py:compute"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK8.py:generate_text",
+   "modules/課程作業/範例課程/科學計算/HK08/HK8.py:generate_text"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK8.py:get_next_word_probabilities",
+   "modules/課程作業/範例課程/科學計算/HK08/HK8.py:get_next_word_probabilities"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/examples/HK8.py:train",
+   "modules/課程作業/範例課程/科學計算/HK08/HK8.py:train"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:_choose",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:_choose"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:_covered",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:_covered"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:_forgotten",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:_forgotten"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:fill_requires",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:fill_requires"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:imports_of",
+   "modules/科學計算/hk_tk.py:scan_imports",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:imports_of"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:missing",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:missing"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:requires_line",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:requires_line"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_page.py:third_party",
+   "modules/課程作業/作業類型/算完畫圖/coursework.py:third_party"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_tk.py:missing",
+   "modules/課程作業/框架/course.py:missing"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/科學計算/hk_tk.py:summary_of_install",
+   "modules/課程作業/框架/course.py:summary_of_install"
+  ],
+  "same": false,
+  "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ }
+]

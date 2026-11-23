@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.7.4")
+    assert core.__version__.startswith("0.8.0")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
@@ -164,6 +164,16 @@ def test_0_7_3_notes_are_for_users_and_say_pages_open_in_their_own_window():
         assert part in notes, part
     for banned in ("按送出前", "直接告訴我", "人名或學號"):
         assert banned not in notes
+
+
+def test_0_8_0_notes_say_what_moved_into_modules_and_that_everyone_presses_ok():
+    """「更新」的確認框：三到五行、沒有反引號；整理、導覽列自動裝上、互通要到工作坊更新、工作坊的模組先問一次（D159）。"""
+    notes = _notes("0.8.0")
+    assert 3 <= len(notes.splitlines()) <= 5
+    assert "`" not in notes
+    for part in ("「整理」", "「導覽列」", "同一層", "重新啟動", "「互通」到「工作坊」按「更新」", "先問你一次",
+                 "0.5.x、0.6.x、0.7.x 的人都直接按「確定」"):
+        assert part in notes
 
 
 def test_0_7_4_notes_say_only_the_workshop_updates_itself():

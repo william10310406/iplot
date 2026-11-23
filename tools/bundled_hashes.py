@@ -62,20 +62,36 @@ def from_tree(names: list[str]) -> dict[tuple[str, str], str]:
     return {key: hashlib.sha256(data).hexdigest() for key, data in tree_files(names).items()}
 
 
-def build(extra_tags: bool = True) -> dict[str, dict[str, list[str]]]:
-    names, table = bundled_names(), {}
-    for found in [*(from_tag(t, names) for t in (tags() if extra_tags else [])), from_tree(names)]:
+def current_version() -> str:
+    text = (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")
+    return re.search(r"""__version__\s*=\s*["']([^"']+)["']""", text).group(1)
+
+
+def build(extra_tags: bool = True) -> dict[str, dict]:
+    """{模組: {檔: [sha256…]}}，另加 ".introduced": {模組: 第一次出現在哪一版}（D159：新加的隨附模組，「更新」之後要裝上）。
+    模組名不會以 . 開頭（掃描會略過），所以 ".introduced" 不會撞名。"""
+    names, table, introduced = bundled_names(), {}, {}
+    versions = [*(t[1:] for t in sorted(tags() if extra_tags else [], key=lambda t: tuple(map(int, t[1:].split("."))))),
+                current_version()]
+    if OUT.is_file():  # 已經在表裡的雜湊一個都不丟：發出去過的版本不一定有 tag（例如在沒有 tag 的 clone 裡重新產生）
+        for name, files in json.loads(OUT.read_text(encoding="utf-8")).items():
+            if not name.startswith(".") and name in names:
+                for rel, hashes in files.items():
+                    table.setdefault(name, {})[rel] = list(hashes)
+    for version, found in zip(versions, [*(from_tag(f"v{v}", names) for v in versions[:-1]), from_tree(names)], strict=True):
         for (name, rel), digest in found.items():
+            introduced.setdefault(name, version)
             hashes = table.setdefault(name, {}).setdefault(rel, [])
             if digest not in hashes:
                 hashes.append(digest)
-    return {n: dict(sorted(table[n].items())) for n in sorted(table)}
+    return {**{n: dict(sorted(table[n].items())) for n in sorted(table)}, ".introduced": dict(sorted(introduced.items()))}
 
 
 def main() -> int:
     if "--check" in sys.argv[1:]:
         have = json.loads(OUT.read_text(encoding="utf-8"))
         missing = [f"{n}/{rel}" for (n, rel), d in from_tree(bundled_names()).items() if d not in have.get(n, {}).get(rel, [])]
+        missing += [f"{n}（.introduced）" for n in bundled_names() if n not in have.get(".introduced", {})]
         print("\n".join(missing) or "ok")
         return 1 if missing else 0
     OUT.write_text(json.dumps(build(), ensure_ascii=False, indent=0, sort_keys=False) + "\n", encoding="utf-8")

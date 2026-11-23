@@ -69,10 +69,13 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest -q -rs --cov=core --cov-report=term
+        run: xvfb-run -a python -m pytest -q -rs --cov --cov-report=term --cov-report=json:coverage.json
+      # 覆蓋率只准持平或上升（D160 第 5 條，AGENTS.md 第 17 條）：各作業系統跳過的測試不一樣，只在這一格比
+      - if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: python tools/check_coverage.py coverage.json
       # 不要設 PYTHONIOENCODING：它會傳給測試開的子行程，藏住「把中文印到 cp1252／cp950 管線就崩潰」的 bug，真的 Windows 使用者不會設它（所以 Windows log 的 -rs 理由是 \u 跳脫）
       - if: runner.os != 'Linux'
-        run: python -m pytest -q -rs --cov=core --cov-report=term
+        run: python -m pytest -q -rs --cov --cov-report=term
       - if: ${{ !cancelled() && runner.os == 'Linux' }}
         run: xvfb-run -a python tests/smoke.py
       - if: ${{ !cancelled() && runner.os != 'Linux' }}

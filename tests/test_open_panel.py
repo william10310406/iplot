@@ -96,7 +96,7 @@ def test_not_running_launches_detached(panel_mod, home):
     [(argv, kw)] = launched
     assert argv == [sys.executable, str(home / "main.py")] and kw["cwd"] == str(home)
     assert kw["start_new_session"] is True
-    assert (kw["stdin"], kw["stdout"], kw["stderr"]) == (subprocess.DEVNULL,) * 3
+    assert (kw["stdin"], kw["stdout"]) == (subprocess.DEVNULL,) * 2 and kw["stderr"].name.endswith("separate.log")  # D160 第 3 條
     assert app.logs == ["打開主控面板"] and activated == []
 
 

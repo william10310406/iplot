@@ -77,7 +77,10 @@ function tileEl(m) {
     if (e.detail >= 2 && armed === m.id) { armed = null; api().press(m.id); } else armed = m.id;
   };
   tile.onkeydown = (e) => { if (e.key === "Enter" && e.target === tile) api().press(m.id); };
-  tile.oncontextmenu = (e) => { e.preventDefault(); select(m.id); openMenu(e.clientX, e.clientY, menuFor(m)); };
+  tile.oncontextmenu = (e) => {
+    e.preventDefault(); select(m.id); openMenu(e.clientX, e.clientY, menuFor(m));
+    api().menu(m.id);  // 模組提供的項目（改名、移到垃圾桶……）晚一點由 iplot.menu 補上（D159）
+  };
   return tile;
 }
 
@@ -147,10 +150,7 @@ function menuFor(m) {
     [T.menu_reveal, () => api().action("reveal", m.id)],
     [T.menu_terminal, () => api().action("terminal", m.id)],
     null,
-    [T.menu_add_child, () => askName().then((name) => { if (name !== null) api().add_child(m.id, name); })],
-    null,
-    [T.menu_rename, () => askName(T.ask_rename.replace("{name}", m.name), m.name).then((name) => { if (name !== null) api().rename(m.id, name); })],
-    [T.menu_remove, () => api().remove(m.id)]);
+    [T.menu_add_child, () => askName().then((name) => { if (name !== null) api().add_child(m.id, name); })]);
   return items;
 }
 
@@ -317,6 +317,14 @@ iplot.show = (scope) => {
 };
 
 iplot.log = (text) => { entry(text); };
+
+// 右鍵選單上模組提供的項目：選單還開著、而且還是同一格才補上；按了送回第幾項
+iplot.menu = (id, labels) => {
+  const menu = $("menu"), m = find(id);
+  if (menu.hidden || !m || state.selected !== id || !labels.length) return;
+  openMenu(parseFloat(menu.style.left), parseFloat(menu.style.top),
+    [...menuFor(m), null, ...labels.map((label, i) => [label, () => api().menu_pick(i)])]);
+};
 
 // error 的欄位見 ui/web.py 的 error_json；id 與 reportable 是 WebPanel.report 加的；sentence 是白話那一句
 iplot.report = (error) => {

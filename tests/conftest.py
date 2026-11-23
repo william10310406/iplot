@@ -269,3 +269,10 @@ def fake_core(home):
 @pytest.fixture
 def view():
     return FakeView()
+
+
+@pytest.fixture(autouse=True)
+def _no_start_wait(monkeypatch):
+    """行事曆、主控面板、互通的 nav.py 另開程序之後等 IPLOT_START_WAIT 秒看它有沒有馬上出錯結束（D160 第 3 條）。
+    測試裡的 popen 多半是假的、不回程序物件：預設不等；要測等待的測試自己把 wait 傳進去（tests/test_spawn.py）。"""
+    monkeypatch.setenv("IPLOT_START_WAIT", "0")

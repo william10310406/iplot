@@ -37,3 +37,9 @@ modules/課程作業/*/
 modules/回報與討論/回報/
 # M6 的探針（開發用）
 spikes/m6/
+# 每台電腦自己的（D160 第 6 條，2026-11-23 盤點時發現沒被忽略）：「更新」的備份、隨附同步記到哪一版、模組自己裝好套件的記號
+.backup/
+.bundled-version
+modules/*/.installed
+# CI 的覆蓋率報告（tools/check_coverage.py 讀它）
+coverage.json

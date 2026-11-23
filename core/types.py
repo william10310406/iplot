@@ -18,6 +18,7 @@ class Meta:
     accepts_files: bool
     error: str | None
     icon: str | None = None
+    provides: tuple[tuple[str, str], ...] = ()  # 頂層 PROVIDES：（角色, 函式名）；核心不解讀角色（D159）
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class ModuleInfo:
     error: str | None
     icon: str | None = None
     icon_file: Path | None = None
+    provides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ from .types import Meta
 
 
 def read_meta(file: Path) -> Meta:
-    """解析 file，取 docstring 第一段、TITLE、ICON、有沒有 run 與 on_files；壞掉的檔案把錯誤放進 error。"""
+    """解析 file，取 docstring 第一段、TITLE、ICON、PROVIDES、有沒有 run 與 on_files；壞掉的檔案把錯誤放進 error。"""
     try:
         tree = ast.parse(file.read_text(encoding="utf-8-sig"), str(file))
     except SyntaxError as exc:
@@ -18,15 +18,26 @@ def read_meta(file: Path) -> Meta:
         return Meta(None, "", False, False, T["syntax_error"].format(line=exc.lineno, message=exc.msg))
     except (ValueError, OSError):  # 解碼失敗、3.10 的 NUL 位元組、讀不到
         return Meta(None, "", False, False, T["file_unreadable"])
-    consts, funcs = {}, set()  # 頂層的 TITLE = "…"、ICON = "…"：只認字串常數
+    consts, funcs, provides = {}, set(), ()  # 頂層的 TITLE = "…"、ICON = "…"：只認字串常數
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             funcs.add(node.name)
-        elif (isinstance(node, ast.Assign) and len(node.targets) == 1
-              and isinstance(node.targets[0], ast.Name) and node.targets[0].id in ("TITLE", "ICON")
-              and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+        elif _assigns(node, "PROVIDES") and isinstance(node.value, ast.Dict):  # 只認字串對字串的字面值（D159）
+            pairs = list(zip(node.value.keys, node.value.values, strict=True))
+            if all(_str(k) and _str(v) for k, v in pairs):
+                provides = tuple((k.value, v.value) for k, v in pairs)
+        elif (_assigns(node, "TITLE") or _assigns(node, "ICON")) and _str(node.value):
             consts[node.targets[0].id] = node.value.value
     doc = ast.get_docstring(tree) or ""
     description = "\n".join(takewhile(str.strip, doc.splitlines()))
     return Meta(consts.get("TITLE"), description, "run" in funcs, "on_files" in funcs, None,
-                consts.get("ICON"))
+                consts.get("ICON"), provides)
+
+
+def _assigns(node: ast.stmt, name: str) -> bool:
+    return (isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name) and node.targets[0].id == name)
+
+
+def _str(node: ast.expr | None) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
