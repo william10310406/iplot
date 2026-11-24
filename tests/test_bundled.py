@@ -15,6 +15,7 @@ import urllib.parse
 from pathlib import Path
 
 import pytest
+from conftest import make_module
 
 from core.app import App
 from core.meta import read_meta
@@ -386,15 +387,43 @@ def test_system_module_answers_through_core_action(fake_core, monkeypatch):
     assert r.ok and r.value is None
 
 
-CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "互通", "主控面板", "行事曆", "回報與討論")
+CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "主控面板", "行事曆", "回報與討論")
+
+
+def iplot_header() -> str:
+    """docs/api.md 寫的那一小段（D163）：直接執行 iplot.py 時交給 main.py --run。"""
+    doc = (MODULES.parent / "docs" / "api.md").read_text(encoding="utf-8")
+    return re.search(r"```python\n(# ── iPLoT ──.*?# ── iPLoT ──\n)```", doc, re.S)[1]
 
 
 @pytest.mark.parametrize("name", CARRY)
-def test_repo_modules_carry_the_interop_snippet(name):
+def test_repo_modules_carry_the_iplot_header(name):
+    """隨附模組帶的是 iPLoT 自己的那一段，跟 docs/api.md 一字不差；不再寫死互通的路徑（D163）。"""
+    assert iplot_header() in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
+
+
+def test_interop_keeps_its_own_snippet():
+    """互通從工作坊裝、要在舊的 iPLoT 上照舊：它自己帶的還是它自己的那一段（找 run.py，0.9 起 run.py 再轉給 main.py --run）。"""
     spec = importlib.util.spec_from_file_location("snippet_text", MODULES / "互通" / "snippet.py")
     snippet = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(snippet)
-    assert snippet.TEXT in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
+    assert snippet.TEXT in (MODULES / "互通" / "iplot.py").read_text(encoding="utf-8")
+
+
+def test_the_iplot_header_hands_over_to_main_run(tmp_path):
+    """真的直接執行：模組在 iPLoT 旁邊的資料夾也找得到；交給 main.py 的是 --run、自己的資料夾與參數。"""
+    home = tmp_path / "iPLoT"
+    (home / "core").mkdir(parents=True)
+    (home / "main.py").write_text("import sys\nprint(sys.argv[1:])\n", encoding="utf-8")
+    mod = make_module(tmp_path / "我的模組", "甲", iplot_header() + "print('不該跑到這裡')\n")
+    done = subprocess.run([sys.executable, str(mod / "iplot.py"), "a.txt"], capture_output=True, text=True,
+                          encoding="utf-8", timeout=30, env={k: v for k, v in os.environ.items() if k != "IPLOT_DIRECT"})
+    assert done.stdout.strip() == str(["--run", str(mod), "a.txt"]) and done.returncode == 0
+    alone = make_module(tmp_path / "別處" / "更遠", "乙", iplot_header() + "print('照一般腳本跑')\n")
+    (home / "main.py").unlink()
+    done = subprocess.run([sys.executable, str(alone / "iplot.py")], capture_output=True, text=True, encoding="utf-8",
+                          timeout=30)
+    assert "照一般腳本跑" in done.stdout and "找不到 iPLoT" in done.stderr
 
 
 @pytest.mark.parametrize("name", ["作業系統", "更新", "工作坊"])

@@ -14,6 +14,7 @@ from pathlib import Path
 from core.history import snapshot
 
 MARK = "# ── 互通 ──"
+IPLOT_MARK = "# ── iPLoT ──"  # iPLoT 0.9 起隨附模組的那一段（D163）
 TEXT = '''# ── 互通 ── 直接執行這個檔（python3 iplot.py）時交給 iPLoT 用彈出式視窗跑；從 iPLoT 裡執行時這段不做事。不要可以整段刪掉
 import sys
 
@@ -41,8 +42,8 @@ BOM = b"\xef\xbb\xbf"
 
 
 def has(source: str) -> bool:
-    """有沒有那一小段：有一行以記號開頭。"""
-    return re.search("^" + re.escape(MARK), source, re.M) is not None
+    """有沒有那一小段：有一行以記號開頭。iPLoT 0.9 起隨附模組帶的是 iPLoT 自己的那一段（找 main.py --run，D163），也算有。"""
+    return re.search(f"^(?:{re.escape(MARK)}|{re.escape(IPLOT_MARK)})", source, re.M) is not None
 
 
 def where(source: str) -> int:

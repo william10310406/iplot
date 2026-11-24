@@ -103,6 +103,34 @@ def run(app):
 - `run.outside`：`outside(app, core, info, files, problem, config_error)`，`python3 main.py --run <模組>` 在面板外跑一個模組時要的畫面（D163）。`info` 是找好的模組（找不到是 `None`，`problem` 是那一句），`files` 是要交給 `on_files` 的檔案；回結束碼。丟 `ImportError` 就改在終端機跑。隨附的「互通」提供它。
 - `panel.error`：`on_panel_error(app, error, recent, pressed)`。面板上出了錯（不是你這個模組出的錯），先交給你看一眼，`pressed` 是 `False`：回 `True` 表示值得問「要回報嗎？」，面板會問（每個錯誤最多問一次，可以「不要再問」）；使用者按了「回報這個問題」，或答了要回報，會再交一次，`pressed` 是 `True`。`error` 是那一筆錯誤，`recent` 是那時候訊息區最後幾行。隨附的「回報與討論」提供它。
 
+## 直接執行 `iplot.py`：檔頭的那一小段（核心 0.9.0，D163）
+
+隨附模組的 `iplot.py` 檔頭有下面這一段：在編輯器裡直接執行 `python3 iplot.py`，它會往上找 iPLoT 的 `main.py`，交給 `python3 main.py --run` 跑（有「互通」就開小視窗，沒有就在終端機）；從 iPLoT 裡執行時不做事。自己的模組要直接執行，照抄這一段；`IPLOT_DIRECT=1` 就照一般腳本跑。比較舊的 iPLoT 沒有 `--run`，請用「互通」加上它自己的那一段。
+
+```python
+# ── iPLoT ── 直接執行這個檔（python3 iplot.py）時交給 iPLoT 跑（python3 main.py --run）；從 iPLoT 裡執行時這段不做事。不要可以整段刪掉
+import sys
+
+if __name__ == "__main__" and "core.runner" not in sys.modules:
+    import os
+    import subprocess
+    here = folder = os.path.dirname(os.path.abspath(__file__))
+    main = None
+    while main is None and folder != os.path.dirname(folder):  # 往上一層層找 iPLoT：模組在它裡面或旁邊都找得到
+        folder = os.path.dirname(folder)
+        try:
+            names = [""] + sorted(os.listdir(folder))
+        except OSError:
+            names = [""]
+        mains = (os.path.join(folder, n, "main.py") for n in names)
+        main = next((m for m in mains if os.path.isfile(m) and os.path.isdir(os.path.join(os.path.dirname(m), "core"))), None)
+    if main and not os.environ.get("IPLOT_DIRECT"):  # IPLOT_DIRECT=1：不交出去，照一般腳本跑（例如在編輯器裡除錯）
+        sys.exit(subprocess.call([sys.executable, main, "--run", here, *sys.argv[1:]]))
+    if not main:
+        print("找不到 iPLoT（模組要放在 iPLoT 資料夾裡或它旁邊），照一般的 python3 iplot.py 跑", file=sys.stderr)
+# ── iPLoT ──
+```
+
 ## 最小的模組
 
 ```python

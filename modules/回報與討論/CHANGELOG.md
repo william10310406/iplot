@@ -10,6 +10,7 @@
 
 ### 變更
 - 新的 `on_panel_error`（角色 `panel.error`）；認學生作業資料夾的判斷從面板搬來 `lasterror.py`。
+- 檔頭那一小段改成交給 `python3 main.py --run`，不再寫死「互通」的路徑（D163）。
 
 ## [0.2.2] - 2026-11-19
 

@@ -1,13 +1,6 @@
 [
  {
   "rule": "R1",
-  "file": "modules/主控面板/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
- },
- {
-  "rule": "R1",
   "file": "modules/互通/iplot.py",
   "what": "開工",
   "until": "0.9",
@@ -64,13 +57,6 @@
  },
  {
   "rule": "R1",
-  "file": "modules/打開核心原始碼/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
- },
- {
-  "rule": "R1",
   "file": "modules/行事曆/iplot.py",
   "what": "主控面板",
   "until": "0.9",
@@ -103,27 +89,6 @@
   "what": "科學計算",
   "until": "0.9",
   "why": "課程作業的範例課程叫「科學計算」，是課的名字、也是要搬過來的那個模組；科學計算下架時一起拿掉"
- },
- {
-  "rule": "R1",
-  "file": "modules/重新啟動/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
- },
- {
-  "rule": "R1",
-  "file": "modules/開Terminal/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
- },
- {
-  "rule": "R1",
-  "file": "modules/開工/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
  },
  {
   "rule": "R11",
@@ -442,13 +407,6 @@
  },
  {
   "rule": "R5",
-  "file": "modules/主控面板/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
- },
- {
-  "rule": "R5",
   "file": "modules/回報與討論/iplot.py",
   "what": "互通",
   "until": "0.9",
@@ -460,13 +418,6 @@
   "what": "更新",
   "until": "永久",
   "why": "按鈕文字「更新」剛好跟模組同名，不是用到更新模組"
- },
- {
-  "rule": "R5",
-  "file": "modules/打開核心原始碼/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
  },
  {
   "rule": "R5",
@@ -502,27 +453,6 @@
   "what": "科學計算",
   "until": "0.9",
   "why": "課程作業的範例課程叫「科學計算」，是課的名字、也是要搬過來的那個模組；科學計算下架時一起拿掉"
- },
- {
-  "rule": "R5",
-  "file": "modules/重新啟動/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
- },
- {
-  "rule": "R5",
-  "file": "modules/開Terminal/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
- },
- {
-  "rule": "R5",
-  "file": "modules/開工/iplot.py",
-  "what": "互通",
-  "until": "0.9",
-  "why": "「那一小段」：直接 python3 iplot.py 時找互通的 run.py 來跑；0.9 互通改成角色時換掉"
  },
  {
   "rule": "R6",

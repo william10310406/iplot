@@ -1261,7 +1261,7 @@ def test_page_html_turns_off_the_module_nav_bar_because_it_has_its_own():
 
 def test_calendar_changelog_top_section_is_0_1_4():
     top = re.search(r"^## \[(\d+(?:\.\d+)*)\]", (CALENDAR / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
-    assert top.group(1) == "0.1.4"
+    assert top.group(1) == "0.1.5"
 
 
 def test_page_html_calls_exactly_the_api_methods():

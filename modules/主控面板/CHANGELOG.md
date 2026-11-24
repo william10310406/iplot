@@ -12,6 +12,7 @@
 - 面板（原本的 `ui/web.py`、`ui/index.html`、`ui/app.js`、`ui/style.css`）搬來這裡，宣告 `PROVIDES = {"main": "start"}`；只用核心公開的方法，不 import iPLoT 的內部。
 - 錯誤旁邊的「回報這個問題」與自動問「要回報嗎？」改問提供 `panel.error` 的模組，不再寫死「回報與討論」。
 - 拿掉面板裡的「頁面」（`app.page`）：頁面由「頁面」模組在另開的程序裡開。
+- 檔頭那一小段改成交給 `python3 main.py --run`，不再寫死「互通」的路徑（D163）。
 
 ## [0.1.4] - 2026-11-24
 
