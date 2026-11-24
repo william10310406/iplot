@@ -92,7 +92,7 @@ def test_terminal_view_ctrl_d_cancels_and_files_split_like_a_shell(monkeypatch):
     monkeypatch.setattr(builtins, "input", lambda prompt="": "'a b.txt' c.txt")
     assert [p.name for p in view.choose_files()] == ["a b.txt", "c.txt"]
     monkeypatch.setattr(builtins, "input", lambda prompt="": "/tmp")
-    assert str(view.choose_folder()) == "/tmp"
+    assert view.choose_folder() == Path("/tmp")
 
 
 def test_config_error_is_reported_before_running(home, tmp_path, capsys):
@@ -105,7 +105,7 @@ def test_config_error_is_reported_before_running(home, tmp_path, capsys):
 
 OUTSIDE = ('PROVIDES = {"run.outside": "outside"}\nfrom pathlib import Path\n\ndef run(app):\n    pass\n\n'
            "def outside(app, core, info, files, problem, err):\n"
-           "    Path(app.home, 'got.txt').write_text(f'{info.name} {[f.name for f in files]} {problem}')\n"
+           "    Path(app.home, 'got.txt').write_text(f'{info.name} {[f.name for f in files]} {problem}', encoding='utf-8')\n"
            "    return 0 if info is not None else 1\n")
 
 
