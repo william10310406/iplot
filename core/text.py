@@ -68,8 +68,6 @@ T: dict[str, str] = {
     "nav_gone": "找不到模組『{title}』，可能已經被移除了",
     "page_unsupported": "這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用",
     "running": "執行中：{title}…",
-    "tk_in_web": "這個面板裡的模組不能開 tkinter 的視窗（turtle、tkinter 的對話框都算）。"
-                 "要用的話，請用安全模式開 iPLoT：python3 main.py --safe",
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",

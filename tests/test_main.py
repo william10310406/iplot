@@ -271,36 +271,32 @@ def test_run_web_without_pywebview_is_import_error(home, monkeypatch):
         load_main().run_web(home, DEFAULT_CONFIG, None, "9.9")
 
 
-def test_module_using_tkinter_under_the_web_panel_gets_a_plain_error(home, monkeypatch):
-    """網頁面板的程序裡，tkinter（turtle 也是）一開視窗整個程序就被系統中止，沒有任何訊息（實測結束碼 133）。
-    面板開著的期間 import tkinter 要變成一般的模組錯誤，用白話說怎麼辦；面板關掉之後不再擋（後備面板要用）。"""
+def test_a_module_using_tkinter_under_the_web_panel_runs_in_its_own_process(home, monkeypatch):
+    """以前網頁面板的程序裡一開 tkinter 視窗整個程序就被系統中止（實測結束碼 133），只好擋住 import tkinter。
+    每按一次另開程序之後（D161），模組在自己的程序的主執行緒上跑，turtle、tkinter 照常 import，面板的程序不受影響。"""
+    pytest.importorskip("tkinter")  # 這個 Python 沒有 tkinter：模組本來就 import 不到，跟面板無關
     from core.types import DEFAULT_CONFIG
-    for name in [n for n in sys.modules if n.split(".")[0] in ("tkinter", "_tkinter", "turtle")]:
-        monkeypatch.delitem(sys.modules, name)
     closed = threading.Event()
 
     class Open(FakeWebview):
         def start(self):
             super().start()
-            closed.wait(5)  # 視窗開著
+            closed.wait(20)  # 視窗開著
 
     fake = Open()
     monkeypatch.setitem(sys.modules, "webview", fake)
-    folder = make_module(home / "modules", "海龜", "import turtle\nprint('reached')\n").resolve()
+    folder = make_module(home / "modules", "海龜", "import tkinter\nprint('reached')\n").resolve()
     main = load_main()
     runner = threading.Thread(target=lambda: main.run_web(home, DEFAULT_CONFIG, None, "9.9"), daemon=True)
     runner.start()
     until(lambda: fake.windows and fake.windows[0].calls("show"))
     window = fake.windows[0]
     window.kw["js_api"].press(str(folder))
-    until(lambda: window.calls("report"))
+    until(lambda: ["reached"] in window.calls("log") or window.calls("report"), 20)
     closed.set()
     runner.join(5)
-    [error] = window.calls("report")[-1]
-    assert error["kind"] == "ImportError" and error["message"] == T["tk_in_web"] and error["module"] == "海龜"
-    assert ["reached"] not in window.calls("log")
-    import tkinter  # noqa: F401  面板關掉之後擋就拿掉了
-
+    assert ["reached"] in window.calls("log"), window.calls("report")
+    assert not any(type(f).__name__ == "NoTk" for f in sys.meta_path)
 
 
 # 需求檔變了（「更新」換了 requirements/）→ 下次啟動重裝 lib/；沒有網路就先用現有的

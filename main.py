@@ -23,16 +23,6 @@ if TYPE_CHECKING:
 INSTALL_SIZE = "40 MB"  # 第一次啟動要下載多少，給人看的概數（macOS 實測裝完 36 MB）
 
 
-class NoTk:
-    """網頁面板開著的期間擋住 import tkinter（turtle 也會 import 它）。主執行緒被網頁面板的視窗系統佔著，
-    模組在別的執行緒上一開 tkinter 視窗，整個程序就被作業系統中止，連一句錯誤都來不及說（macOS 實測）；
-    擋在 import 這一步，它就只是一個一般的模組錯誤，訊息說怎麼辦。排在 sys.meta_path 最前面。"""
-
-    def find_spec(self, name, path=None, target=None):
-        if name in ("tkinter", "_tkinter"):
-            raise ImportError(T["tk_in_web"])
-
-
 def run_tk(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: str | None = None) -> None:
     """tkinter 面板：安全模式（safe，只掃 modules/），或網頁面板開不起來時的後備（掃完整範圍）。note 有值就先寫進訊息區。
     這個 Python 沒有 tkinter 時丟 ImportError。"""
@@ -65,16 +55,13 @@ def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str, not
         panel.submit(lambda: panel.log(note))  # 頁面就緒之後才送得出去，先排著
     if err is not None:
         panel.submit(lambda: panel.report(err))
-    guard = NoTk()
-    sys.meta_path.insert(0, guard)
     errlog.sink = lambda exc: panel.submit(lambda: core.report_internal(type(exc), exc, exc.__traceback__))
     try:
         panel.run()
     except panel.webview.WebViewException as exc:
         raise ImportError(str(exc)) from exc
     finally:
-        sys.meta_path.remove(guard)
-        errlog.sink = None  # 面板關了：別的執行緒的例外只進終端機與 logs/iplot.log  # 面板關了、或根本沒開起來：後備的 tkinter 面板在同一個程序裡，要 import 得到
+        errlog.sink = None  # 面板關了：別的執行緒的例外只進終端機與 logs/iplot.log
 
 
 def tk_or_exit(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: str | None = None) -> None:

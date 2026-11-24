@@ -8,6 +8,7 @@
 
 ### 新增
 - 每按一次另開一個程序（`core/worker.py`、`core/pipe.py`）：對話框、訊息區、重掃經管道交給面板；程序自己結束了變成一個錯誤，面板照常；C 程式庫直接寫的輸出進 `logs/worker.log`。
+- 網頁面板裡的模組可以用 turtle、tkinter 了：模組在自己的程序裡跑，不再擋 `import tkinter`。
 - `app.start(name)`：開始跑另一個模組、不等它。`api_version` 5 → 6，只加不減。
 - 模組頂層的 `MIN_API = <數字>`：iPLoT 的 `api_version` 不夠就不跑，說一句請按「更新」。
 - 隨附模組「頁面」0.1.0（新）：提供 `app.page`，在跑模組的那個程序裡開視窗。

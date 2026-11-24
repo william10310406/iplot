@@ -39,12 +39,12 @@ def test_panel_text_keys():
     """規格 §7：新面板的文字都在 T，值是中文。"""
     for k in ["menu_run", "menu_enter", "add_tile", "status_hint", "details", "hide_details", "ok", "cancel",
               "scanned", "icon_unusable", "installing", "install_done", "install_failed", "no_tk", "web_failed",
-              "running", "tk_in_web", "confirm_foreign", "cancelled", "page_unsupported", "refreshing", "refresh_failed"]:
+              "running", "confirm_foreign", "cancelled", "page_unsupported", "refreshing", "refresh_failed"]:
         assert T.get(k), k
     assert "{roots}" in T["scanned"] and "{count}" in T["scanned"] and "{title}" in T["icon_unusable"]
     assert "{size}" in T["installing"] and "{message}" in T["install_failed"] and "{message}" in T["web_failed"]
     assert "網路" in T["installing"] and "網路" in T["install_failed"], "裝不起來多半是沒網路：兩句都要講"
-    assert "{title}" in T["running"] and "--safe" in T["tk_in_web"]
+    assert "{title}" in T["running"]
     assert "{title}" in T["confirm_foreign"] and "{title}" in T["cancelled"]
     for key in ("web_failed", "install_failed"):
         assert "安全模式" not in T[key], f"{key}：後備面板不是安全模式（它掃完整範圍），這句話後面開的就是後備面板"
