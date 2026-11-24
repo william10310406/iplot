@@ -2,6 +2,7 @@
 
 import builtins
 import sys
+from pathlib import Path
 
 import pytest
 from conftest import make_module
