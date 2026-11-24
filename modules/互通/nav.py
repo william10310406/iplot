@@ -74,6 +74,23 @@ def from_provider(core, owner, panel):
     return found
 
 
+def own_cells(core, owner, panel):
+    """沒有 page.top 的提供者時自己畫：主控面板、父層、同一層的其他模組、子模組，順序跟「導覽列」一樣。
+    以前少了同一層，最上層的模組（沒有父層、多半也沒有子模組）那一排只剩「主控面板」（Discussion #9、#13）。"""
+    roots = core.roots()
+    up, kids = parent_of(owner, roots), scan.find_children(owner.folder, owner.root)
+    if up is not None:
+        same = scan.find_children(up.folder, owner.root)
+    else:
+        same = [m for g in scan.find_modules(roots) if g.root == owner.root for m in g.modules]
+    same = [m for m in same if m.folder != owner.folder and m.name != PANEL]  # 「主控面板」已經是第一格
+    found = [("panel", panel, PANEL, "", "")] if panel else []
+    if up:
+        found.append(("parent", up, PARENT.format(title=up.title), "", up.description))
+    found += [("sibling", m, m.title, m.icon or "", m.description) for m in same]
+    return found + [("child", m, m.title, m.icon or "", m.description) for m in kids]
+
+
 UP_FAILED = "它一開就結束了（原因記在 iPLoT 資料夾的 logs/separate.log）"
 
 
@@ -114,12 +131,8 @@ class Nav:
         tops = [m for m in core.all_modules() if m.name == PANEL]  # 在面板外，all_modules 一律是最上層
         panel = tops[0] if len(tops) == 1 and owner.name != PANEL else None
         found = from_provider(core, owner, panel)
-        if found is None:  # 核心 0.7 以前、或沒有「導覽列」模組：自己畫主控面板、父層、子模組
-            up, kids = parent_of(owner, core.roots()), scan.find_children(owner.folder, owner.root)
-            found = [("panel", panel, PANEL, "", "")] if panel else []
-            if up:
-                found.append(("parent", up, PARENT.format(title=up.title), "", up.description))
-            found += [("child", m, m.title, m.icon or "", m.description) for m in kids]
+        if found is None:  # 核心 0.7 以前、沒有「導覽列」模組、或沒允許它：自己畫，格子跟「導覽列」一樣（Discussion #13）
+            found = own_cells(core, owner, panel)
         self.targets = [target for _, target, *_ in found]
         self.cells = [{"k": k, "t": t, "i": i, "d": d} for k, _, t, i, d in found]
         self.choice = None

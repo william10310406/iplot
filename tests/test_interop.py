@@ -234,7 +234,7 @@ def test_own_version(load, tmp_path):
     assert boot.own_version(tmp_path) == "?"
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.2.0] - 2026-10-08\n\nx\n\n## [0.1.0]\n",
                                            encoding="utf-8")
-    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.5.0"
+    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.5.1"
 
 
 def test_boot_and_run_read_on_python_3_8():
@@ -1843,13 +1843,44 @@ def nav_for(load, home, *names, log=None, popen=None, environ=None):
     return load("nav").Nav(window, core, log or (lambda text: None), **kw), window, core
 
 
+def at(bar, title):
+    """格子裡標題是 title 的那一格的編號。"""
+    return [c["t"] for c in bar.cells].index(title)
+
+
 def test_nav_cells_have_the_panel_the_parent_and_the_children(load, home):
     nav_tree(home)
     bar, _, _ = nav_for(load, home, "課程", "一")
     assert bar.cells == [{"k": "panel", "t": "主控面板", "i": "", "d": ""},
                          {"k": "parent", "t": "↑ 課程作業", "i": "", "d": "說明"},
+                         {"k": "sibling", "t": "作業二", "i": "", "d": ""},
                          {"k": "child", "t": "G", "i": "", "d": ""}]
-    assert [t.name for t in bar.targets] == ["主控面板", "課程", "G"]
+    assert [t.name for t in bar.targets] == ["主控面板", "課程", "二", "G"]
+
+
+def test_nav_without_a_provider_still_has_the_same_level(load, home):
+    """沒有「導覽列」模組（或沒允許它）時自己畫的那一排也有同一層，跟「導覽列」畫的一樣（Discussion #13）：
+    最上層的模組以前只剩「主控面板」。主控面板不重複列，自己不列。"""
+    nav_tree(home)
+    bar, _, _ = nav_for(load, home, "孤")
+    assert [(c["k"], c["t"]) for c in bar.cells] == [("panel", "主控面板"), ("sibling", "課程作業")]
+    bar, _, _ = nav_for(load, home, "課程")
+    assert [(c["k"], c["t"]) for c in bar.cells] == [("panel", "主控面板"), ("sibling", "孤"), ("child", "作業一"),
+                                                      ("child", "作業二")]
+
+
+def test_nav_without_permission_for_the_workshop_bar_draws_the_same_cells_itself(load, home, monkeypatch):
+    """工作坊裝來的「導覽列」（有 .origin）沒被允許時，核心不給它提供 page.top：互通自己畫，格子跟允許時一樣。"""
+    from conftest import FakeView
+
+    nav_tree(home)
+    bar_module = home.parent / "導覽列"
+    shutil.copytree(UI_NAV_JS.parent, bar_module)
+    allowed = [(c["k"], c["t"]) for c in nav_for(load, home, "課程", "一")[0].cells]
+    (bar_module / ".origin").write_text("version = 0.1.0\n", encoding="utf-8")
+    monkeypatch.setattr(FakeView, "confirm", lambda self, prompt: self.confirmed.append(prompt) or False)
+    bar, _, core = nav_for(load, home, "課程", "一")
+    assert [(c["k"], c["t"]) for c in bar.cells] == allowed and "page.top" in core.view.confirmed[0]  # 問過、沒允許
 
 
 def test_nav_asks_the_page_top_provider_so_it_matches_the_panel_and_has_the_same_level(load, home):
@@ -1865,21 +1896,26 @@ def test_nav_asks_the_page_top_provider_so_it_matches_the_panel_and_has_the_same
                                                       ("child", "G")]
 
 
+def panel_cells(bar):
+    return [c for c in bar.cells if c["k"] == "panel"]
+
+
 def test_nav_panel_cell_only_when_the_top_level_has_exactly_one_and_it_is_not_the_page_itself(load, home):
     nav_tree(home)
-    assert [c["k"] for c in nav_for(load, home, "孤")[0].cells] == ["panel"]
-    assert nav_for(load, home, "主控面板")[0].cells == []  # 主控面板自己：沒有父層、沒有子模組、不指回自己
+    assert [c["t"] for c in panel_cells(nav_for(load, home, "孤")[0])] == ["主控面板"]
+    assert panel_cells(nav_for(load, home, "主控面板")[0]) == []  # 主控面板自己：不指回自己
+    assert "主控面板" not in [c["t"] for c in nav_for(load, home, "主控面板")[0].cells]
     make_module(home / "modules" / "課程", "主控面板")  # 底下另一個同名的不算：只看最上層
-    assert [c["k"] for c in nav_for(load, home, "孤")[0].cells] == ["panel"]
+    assert len(panel_cells(nav_for(load, home, "孤")[0])) == 1
     shutil.rmtree(home / "modules" / "主控面板")
-    assert nav_for(load, home, "孤")[0].cells == []
+    assert panel_cells(nav_for(load, home, "孤")[0]) == []
 
 
 def test_nav_has_no_panel_cell_when_the_top_level_has_two(load, home):
     nav_tree(home)
     (home / "modules" / "主控面板").rename(home / "modules" / "P1")
     make_module(home / "modules", "P1b")
-    assert nav_for(load, home, "孤")[0].cells == []
+    assert panel_cells(nav_for(load, home, "孤")[0]) == []
 
 
 def test_nav_injects_after_load_and_exposes_only_iplot_nav(load, home):
@@ -1905,12 +1941,12 @@ def test_nav_jump_starts_a_new_process_with_run_py_and_then_closes_the_page(load
     env = {"IPLOT_CALENDAR": "1", "A": "b"}
     bar, window, _ = nav_for(load, home, "課程", popen=lambda *a, **k: calls.append((a, k)) or window_state(window, calls),
                              environ=env)
-    window.exposed["_iplot_nav"](2)  # 0 主控面板、1 作業一、2 作業二
+    window.exposed["_iplot_nav"](at(bar, "作業二"))
     [((argv,), kw)] = calls
     assert argv == [sys.executable, str(INTEROP / "run.py"), str((home / "modules" / "課程" / "二").resolve())]
     assert kw["env"] == {"A": "b"} and kw["start_new_session"] is True
     assert kw["stdin"] == kw["stdout"] == subprocess.DEVNULL and kw["stderr"].name.endswith("separate.log")  # D160 第 3 條
-    assert window.destroyed and bar.choice == 2 and env == {"IPLOT_CALENDAR": "1", "A": "b"}
+    assert window.destroyed and bar.choice == at(bar, "作業二") and env == {"IPLOT_CALENDAR": "1", "A": "b"}
 
 
 def window_state(window, calls):
@@ -1935,7 +1971,7 @@ def test_nav_jump_that_cannot_start_says_so_and_keeps_the_page(load, home):
         raise OSError(errno.ENOENT, "No such file")
 
     bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=broken)
-    window.exposed["_iplot_nav"](1)
+    window.exposed["_iplot_nav"](at(bar, "作業一"))
     assert not window.destroyed and bar.choice is None
     assert said == ["打不開『作業一』：找不到檔案或資料夾。再按一次；還是不行就從 iPLoT 的面板打開它"]
 
@@ -1946,7 +1982,7 @@ def test_nav_jump_without_run_py_says_so_and_keeps_the_page(load, home, monkeypa
     said, calls = [], []
     bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=lambda *a, **k: calls.append(a))
     monkeypatch.setattr(load("nav"), "RUN", tmp_path / "沒有.py")
-    window.exposed["_iplot_nav"](1)
+    window.exposed["_iplot_nav"](at(bar, "作業一"))
     assert calls == [] and not window.destroyed and bar.choice is None
     assert said == ["打不開『作業一』：找不到 run.py。再按一次；還是不行就從 iPLoT 的面板打開它"]
 
@@ -1966,7 +2002,7 @@ def test_nav_jump_to_a_module_that_is_gone_says_so_and_keeps_the_page(load, home
     said, calls = [], []
     bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=lambda *a, **k: calls.append(a))
     shutil.rmtree(home / "modules" / "課程" / "一")
-    window.exposed["_iplot_nav"](1)
+    window.exposed["_iplot_nav"](at(bar, "作業一"))
     assert calls == [] and not window.destroyed and said == ["找不到模組『作業一』，可能已經被移除了"]
 
 
