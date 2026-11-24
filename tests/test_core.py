@@ -447,3 +447,19 @@ def test_an_unknown_reason_says_what_to_do_and_the_original_goes_to_the_log(home
     log = (home / "logs" / "iplot.log").read_text(encoding="utf-8")
     assert "Input/output error" in log and "Errno 5" in log and "A" in log
     assert os.strerror(errno.EIO) not in view.logs[-1]
+
+
+def test_call_here_runs_the_first_provider_in_this_process_and_returns_its_value(home, monkeypatch):
+    """D162：開機程式用 call_here 開面板。模組自己資料夾的檔 import 得到；沒有提供者回 None。"""
+    import sys
+
+    from conftest import FakeView
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.delitem(sys.modules, "helper", raising=False)
+    folder = make_module(home / "modules", "甲", 'PROVIDES = {"main": "start"}\nimport helper\n\n'
+                         "def run(app):\n    pass\n\ndef start(app, x):\n    return (helper.N, app.module.name, x)\n")
+    (folder / "helper.py").write_text("N = 7\n", encoding="utf-8")
+    core = Core(home, DEFAULT_CONFIG, FakeView())
+    core.rescan()
+    assert core.call_here("main", "x") == (7, "甲", "x")
+    assert core.call_here("沒有人提供") is None
