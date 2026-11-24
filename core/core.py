@@ -1,8 +1,10 @@
 """組裝與編排：持有設定、畫面與記憶，把面板上的動作接到底層的檔案。"""
 
 import contextlib
+import importlib.util
 import json
 import runpy
+import sys
 import threading
 import time
 import unicodedata
@@ -12,7 +14,7 @@ from typing import Any, Protocol
 from . import history, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
-from .errors import from_exception, reason
+from .errors import describe, from_exception, reason
 from .text import SYSTEM_MODULE, T
 from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result, Root, Scope
 
@@ -199,6 +201,25 @@ class Core:
         """交給第一個提供 role 的模組執行，回它的回傳值；沒有提供者回 None。"""
         found = self.providers(role)
         return self.run_role(found[0], role, args) if found else None
+
+    def call_here(self, role: str, *args: Any) -> Any:
+        """在這個程序裡直接執行第一個提供 role 的模組，交給它 app 與 args，回它的回傳值；沒有提供者回 None（D162）。
+        不另開程序、不接輸出、不改工作目錄：開機程式用它開面板，面板要佔著這個程序的主執行緒到視窗關掉。
+        模組資料夾放進 sys.path 最前面，它自己的檔照常 import 得到；載入或執行時的例外照樣丟給呼叫的人。"""
+        found = self.providers(role)
+        if not found:
+            return None
+        info = found[0]
+        spec = importlib.util.spec_from_file_location("iplot_host_" + role.replace(".", "_"), info.file)
+        module = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(info.folder))
+        spec.loader.exec_module(module)
+        return getattr(module, dict(info.provides)[role])(App(self, info), *args)
+
+    @staticmethod
+    def describe(error: ErrorInfo) -> str:
+        """錯誤的白話一句（面板顯示用，跟訊息區、記錄檔說的一樣）。"""
+        return describe(error)
 
     def each(self, role: str, *args: Any) -> list[tuple[ModuleInfo, Any]]:
         """交給每一個提供 role 的模組，依序執行；回（模組, 回傳值）。某一個壞了照常報錯，不影響其他的。"""

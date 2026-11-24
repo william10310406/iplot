@@ -109,6 +109,9 @@ def test_core_runner_is_loaded_while_a_module_runs(home, fake_core):
     assert run_module(info, App(fake_core, info)).output.strip() == "True"
 
 
-def test_panel_modules_keep_their_names():
-    """面板的程序裡 "ui.web" 或 "ui.tk" 在 sys.modules 裡（「主控面板」靠它判斷自己是不是在面板裡）。"""
-    assert importlib.util.find_spec("ui.web") is not None and importlib.util.find_spec("ui.tk") is not None
+def test_the_rescue_panel_keeps_its_name():
+    """後備的 tkinter 面板還在 ui/tk.py（開機程式的一部分）；網頁面板是「主控面板」提供的 main（D162），
+    模組在每按一次另開的程序裡跑，看不到面板的任何東西。"""
+    assert importlib.util.find_spec("ui.tk") is not None and importlib.util.find_spec("ui.web") is None
+
+

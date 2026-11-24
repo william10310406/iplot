@@ -30,10 +30,12 @@ import webbrowser
 from pathlib import Path
 
 import forum
+import lasterror
 import redact
 import report
 
 ICON = "💬"
+PROVIDES = {"panel.error": "on_panel_error"}  # 面板上的錯誤交給這裡（D110、D150、D162）
 HERE = Path(__file__).resolve().parent
 OUTBOX = HERE / "回報"  # 完整的回報（.txt）與 tkinter 面板的草稿（.md）：只放在這台電腦，不進 git、不進包
 BROWSER_FAILS = (webbrowser.Error, OSError, ValueError)  # 找不到瀏覽器、Windows 的 ShellExecute、3.14 對 - 開頭的網址
@@ -241,10 +243,21 @@ def _latest(app) -> tuple[report.Report, str]:
     return rep, LAST.format(when=last[2] or "時間不明", title=rep.title)
 
 
-def on_error(app, error):
+def on_panel_error(app, error, recent, pressed):
+    """角色 panel.error：面板上出了錯。pressed 是使用者按了那一列的「回報這個問題」，就開回報；沒按的話記成
+    「最近一次的錯誤」（logs/last-error.json），回 True 表示值得問「要回報嗎？」（面板自己節流）。"""
+    if pressed:
+        return on_error(app, error, recent)
+    if not lasterror.worth_reporting(error, app.module.name):
+        return False
+    lasterror.write(app.home, error, "\n".join(line for line in recent[-1:]), recent)
+    return True
+
+
+def on_error(app, error, recent=None):
     """面板上的「回報這個問題」（D110）：遮過的回報給人看、讓人改，再用預填的網址開瀏覽器（設計第 5.1、5.2 節）。
     頁面那一頭不碰 app：存了要指給人看的檔，等頁面關掉、回到這裡才 reveal。"""
-    rep = report.from_error(error, app, report.recent_for(app.home, error))
+    rep = report.from_error(error, app, report.recent_for(app.home, error) if recent is None else recent)
     if report.panel_kind() == "tkinter":
         return _by_file(app, rep, error.kind)
     saved = []

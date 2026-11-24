@@ -1,6 +1,6 @@
 """iPLoT 入口：python3 main.py [--safe]。版本檢查 → 選面板 → 進入事件迴圈（規格 §3）。
 
-預設開網頁面板（ui/web.py，用 lib/ 裡的 pywebview）。第一次啟動、或 lib/ 壞了，就用 pip 裝一次再重啟自己；
+預設開網頁面板（提供 main 的模組，隨附的是 modules/主控面板/，用 lib/ 裡的 pywebview，D162）。第一次啟動、或 lib/ 壞了，就用 pip 裝一次再重啟自己；
 裝不起來就退到 tkinter 面板（ui/tk.py，照常掃上一層與 ROOTS）並說明原因。--safe：直接開 tkinter 面板，只掃 modules/。
 
 core 與 ui 的 import 都放在函式裡、版本檢查之後：它們用了 3.10 的語法，在太舊的 Python 上一 import 就炸，
@@ -41,27 +41,28 @@ def run_tk(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: 
     panel.mainloop()
 
 
-def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str, note: str | None = None) -> None:
-    """網頁面板：視窗關掉才回傳。note 有值就寫進訊息區。
-    lib/ 裡沒有 pywebview、或它找不到能用的視窗套件（裝壞了）時丟 ImportError。"""
+def run_web(home: Path, config: Config, err: ErrorInfo | None, note: str | None = None) -> None:
+    """網頁面板：交給提供 main 的模組（隨附的「主控面板」），在這個程序裡開，視窗關掉才回傳（D162）。
+    每按一次另開一個程序跑模組（D161）。沒有提供者、或它開不起來（lib/ 裡沒有 pywebview、找不到能用的視窗套件）時
+    丟 ImportError：開機程式去裝、或退到後備的 tkinter 面板。"""
     from core.core import Core
     from ui import errlog
-    from ui.web import WebPanel
+    from ui.install import ConsoleView
 
-    panel = WebPanel(home, version, False)
-    core = Core(home, config, panel, separate=True)  # 每按一次另開一個程序跑，頁面開著也不卡（D161）
-    panel.attach(core)
-    if note is not None:
-        panel.submit(lambda: panel.log(note))  # 頁面就緒之後才送得出去，先排著
-    if err is not None:
-        panel.submit(lambda: panel.report(err))
-    errlog.sink = lambda exc: panel.submit(lambda: core.report_internal(type(exc), exc, exc.__traceback__))
+    core = Core(home, config, ConsoleView(), separate=True)  # 面板開起來之前，核心要說的話印在終端機
+    errlog.sink = lambda exc: core.report_internal(type(exc), exc, exc.__traceback__)
     try:
-        panel.run()
-    except panel.webview.WebViewException as exc:
-        raise ImportError(str(exc)) from exc
+        if not core.providers("main"):
+            return tk_or_exit(home, config, err, False, T["no_panel"])
+        core.call_here("main", core, note, err)
+    except ImportError:
+        raise
+    except Exception as exc:  # noqa: BLE001  面板是模組（D162）：它壞了不能讓 iPLoT 開不起來，退到後備面板
+        errlog.log(home, exc)
+        return tk_or_exit(home, config, err, False, T["panel_broken"].format(message=exc))
     finally:
         errlog.sink = None  # 面板關了：別的執行緒的例外只進終端機與 logs/iplot.log
+    return None
 
 
 def tk_or_exit(home: Path, config: Config, err: ErrorInfo | None, safe: bool, note: str | None = None) -> None:
@@ -154,7 +155,7 @@ def main() -> None:
     if "--safe" in sys.argv[1:]:
         return tk_or_exit(home, config, err, True, news)
     try:
-        run_web(home, config, err, __version__, "\n".join(filter(None, [news, refresh(home, config)])) or None)
+        run_web(home, config, err, "\n".join(filter(None, [news, refresh(home, config)])) or None)
     except ImportError as exc:
         bootstrap(home, config, err, str(exc), rebooted)
 

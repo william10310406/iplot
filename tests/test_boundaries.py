@@ -57,7 +57,7 @@ def test_no_chinese_string_constants_outside_text():
 
 
 def test_core_never_imports_webview():
-    """只有 ui/web.py 可以用 lib/ 裡的 pywebview；core/ 一行都不能 import 它。"""
+    """只有面板與「頁面」模組可以用 lib/ 裡的 pywebview；core/ 一行都不能 import 它。"""
     for p in sorted(CORE.glob("*.py")):
         for node in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
@@ -65,15 +65,15 @@ def test_core_never_imports_webview():
             assert not any(n.split(".")[0] in ("webview", "ui") for n in names), f"core/{p.name} import 了 {names}"
 
 
-# 面板本體（ui/index.html、app.js、style.css）：前端沒有自動測試，這裡只釘住它跟 Python 那一頭對得上
+# 面板本體（「主控面板」裡的 index.html、app.js、style.css，D162）：前端沒有自動測試，這裡只釘住它跟 Python 那一頭對得上
 
-UI = ROOT / "ui"
+UI = ROOT / "modules" / "主控面板"
 PAGE = ("index.html", "app.js", "style.css")
 JS_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 
 
 def _page(name):
-    assert (UI / name).exists(), f"ui/{name} 還沒有"
+    assert (UI / name).exists(), f"主控面板/{name} 還沒有"
     return (UI / name).read_text(encoding="utf-8")
 
 
@@ -82,7 +82,7 @@ def test_ui_has_no_external_urls():
     for name in PAGE:
         text = _page(name)
         for word in ("http://", "https://", "@import", "url(//"):
-            assert word not in text, f"ui/{name} 出現 {word}"
+            assert word not in text, f"主控面板/{name} 出現 {word}"
 
 
 def test_app_js_has_no_chinese_outside_comments():
@@ -92,7 +92,7 @@ def test_app_js_has_no_chinese_outside_comments():
 
 
 def test_app_js_uses_only_text_keys_that_exist():
-    from core.text import T
+    from panel_text import T
     used = set(re.findall(r"\bT\.([a-z_]+)\b", JS_COMMENT.sub("", _page("app.js"))))
     assert used and used <= set(T), used - set(T)
     assert {"menu_run", "menu_enter", "menu_edit", "menu_reveal", "menu_terminal", "menu_add_child", "add_tile",
@@ -102,7 +102,7 @@ def test_app_js_uses_only_text_keys_that_exist():
 
 def test_app_js_calls_exactly_the_bridge_methods():
     """頁面呼叫的 pywebview.api.<方法> 都是 Bridge 有的；Bridge 的方法（state 除外）頁面也都用到。"""
-    from ui.web import Bridge
+    from panel_web import Bridge
     bridge = {n for n in vars(Bridge) if not n.startswith("_")}
     called = set(re.findall(r"\bapi\(\)\.(\w+)\(", JS_COMMENT.sub("", _page("app.js"))))
     assert called <= bridge, called - bridge
@@ -110,8 +110,8 @@ def test_app_js_calls_exactly_the_bridge_methods():
 
 
 def test_app_js_defines_every_entry_python_calls():
-    """ui/web.py 用 evaluate_js 呼叫的 iplot.<名字>，app.js 都有定義，而且沒有多的。"""
-    web = (UI / "web.py").read_text(encoding="utf-8")
+    """panel_web.py 用 evaluate_js 呼叫的 iplot.<名字>，app.js 都有定義，而且沒有多的。"""
+    web = (UI / "panel_web.py").read_text(encoding="utf-8")
     called = set(re.findall(r"self\._(?:js|dialog)\(\"(\w+)\"", web))
     defined = set(re.findall(r"^iplot\.(\w+) = ", _page("app.js"), re.M))
     assert called == defined == {"init", "show", "log", "report", "ask", "confirm", "offer", "busy", "menu"}
@@ -120,7 +120,7 @@ def test_app_js_defines_every_entry_python_calls():
 def test_index_html_loads_style_then_custom_css_then_script():
     """custom.css 在 style.css 之後載入，使用者的覆寫才蓋得過去；JS 全在 app.js，HTML 裡沒有行內的事件處理。"""
     html = _page("index.html")
-    style, custom, script = (html.index(s) for s in ('href="style.css"', 'href="../custom.css"', 'src="app.js"'))
+    style, custom, script = (html.index(s) for s in ('href="style.css"', 'href="../../custom.css"', 'src="app.js"'))
     assert style < custom < script
     assert not re.search(r"\son\w+\s*=", html) and not re.search(r"<script(?![^>]*\bsrc=)", html)
     assert not CJK.search(re.sub(r"<!--.*?-->", "", html, flags=re.S)), "index.html 的文字也由 Python 送進去（註解除外）"

@@ -21,6 +21,13 @@ ROOT = Path(__file__).resolve().parent.parent
 PRE_GATE = ["main.py", "core/__init__.py", "core/text.py"]  # 版本防線之前就會被 import 的檔案
 
 
+@pytest.fixture(autouse=True)
+def bundled_panel(home):
+    """網頁面板是隨附的「主控面板」提供的 main（D162）：每個 iPLoT 資料夾都有一份。"""
+    from conftest import PANEL_DIR
+    shutil.copytree(PANEL_DIR, home / "modules" / "主控面板", ignore=shutil.ignore_patterns("__pycache__"))
+
+
 def load_main():
     spec = importlib.util.spec_from_file_location("iplot_main", ROOT / "main.py")
     module = importlib.util.module_from_spec(spec)
@@ -76,8 +83,8 @@ def boot(home, monkeypatch):
     b = types.SimpleNamespace(main=main, home=home, calls=[], web=None, tk=None, pip=None, notes=[], quick=[],
                               req=home / "requirements" / "web-mac.txt")
 
-    def run_web(home, config, err, version, note=None):
-        b.calls.append(("web", version))
+    def run_web(home, config, err, note=None):
+        b.calls.append(("web",))
         b.notes.append(note)
         if b.web is not None:
             raise b.web
@@ -129,7 +136,7 @@ def test_safe_without_tkinter_exits_1(boot, monkeypatch, capsys):
 
 def test_web_when_importable(boot, capsys):
     boot.main.main()
-    assert boot.calls == [("web", __version__)] and capsys.readouterr().out == ""
+    assert boot.calls == [("web",)] and capsys.readouterr().out == ""
 
 
 def test_lib_is_on_sys_path_behind_the_program_itself(boot):
@@ -230,7 +237,7 @@ def test_missing_system_module_falls_back_without_pip(boot, capsys):
 def test_config_error_reaches_the_panel(boot, monkeypatch):
     (boot.home / "config.py").write_text("ROOTS = [\n", encoding="utf-8")
     seen = []
-    monkeypatch.setattr(boot.main, "run_web", lambda home, config, err, version, note=None: seen.append(err))
+    monkeypatch.setattr(boot.main, "run_web", lambda home, config, err, note=None: seen.append(err))
     boot.main.main()
     assert seen[0].source == "config"
 
@@ -243,11 +250,11 @@ def test_run_web_opens_the_panel_and_reports_config_error_after_init(home, monke
     monkeypatch.setitem(sys.modules, "webview", fake)
     (home / "config.py").write_text("ROOTS = [\n", encoding="utf-8")
     config, err = load_config(home / "config.py")
-    load_main().run_web(home, config, err, "9.9")
+    load_main().run_web(home, config, err)
     [window] = fake.windows
     until(lambda: window.calls("show"))
     order = [j.split("(")[0] for j in window.js]
-    assert window.title == "iPLoT v9.9" and order[:2] == ["iplot.init", "iplot.report"]
+    assert window.title == f"iPLoT v{__version__}" and order[:2] == ["iplot.init", "iplot.report"]
     assert window.calls("report")[0][0]["source"] == "config"
 
 
@@ -261,14 +268,34 @@ def test_run_web_turns_a_webview_that_cannot_start_into_import_error(home, monke
 
     monkeypatch.setitem(sys.modules, "webview", Broken())
     with pytest.raises(ImportError, match="PyObjC"):
-        load_main().run_web(home, DEFAULT_CONFIG, None, "9.9")
+        load_main().run_web(home, DEFAULT_CONFIG, None)
+
+
+def test_run_web_without_a_panel_module_opens_the_rescue_panel_and_says_why(home, monkeypatch):
+    from core.types import DEFAULT_CONFIG
+    shutil.rmtree(home / "modules" / "主控面板")
+    main, seen = load_main(), []
+    monkeypatch.setattr(main, "tk_or_exit", lambda home, config, err, safe, note=None: seen.append((safe, note)))
+    main.run_web(home, DEFAULT_CONFIG, None)
+    assert seen == [(False, T["no_panel"])]
+
+
+def test_run_web_with_a_broken_panel_module_opens_the_rescue_panel_and_logs_it(home, monkeypatch):
+    from core.types import DEFAULT_CONFIG
+    (home / "modules" / "主控面板" / "iplot.py").write_text('PROVIDES = {"main": "start"}\ndef start(app, core, note, err):\n'
+                                                       '    raise RuntimeError("面板壞了")\n', encoding="utf-8")
+    main, seen = load_main(), []
+    monkeypatch.setattr(main, "tk_or_exit", lambda home, config, err, safe, note=None: seen.append((safe, note)))
+    main.run_web(home, DEFAULT_CONFIG, None)
+    assert seen == [(False, T["panel_broken"].format(message="面板壞了"))]
+    assert "RuntimeError: 面板壞了" in (home / "logs" / "iplot.log").read_text(encoding="utf-8")
 
 
 def test_run_web_without_pywebview_is_import_error(home, monkeypatch):
     from core.types import DEFAULT_CONFIG
     monkeypatch.setitem(sys.modules, "webview", None)  # import webview → ImportError
     with pytest.raises(ImportError):
-        load_main().run_web(home, DEFAULT_CONFIG, None, "9.9")
+        load_main().run_web(home, DEFAULT_CONFIG, None)
 
 
 def test_a_module_using_tkinter_under_the_web_panel_runs_in_its_own_process(home, monkeypatch):
@@ -287,7 +314,7 @@ def test_a_module_using_tkinter_under_the_web_panel_runs_in_its_own_process(home
     monkeypatch.setitem(sys.modules, "webview", fake)
     folder = make_module(home / "modules", "海龜", "import tkinter\nprint('reached')\n").resolve()
     main = load_main()
-    runner = threading.Thread(target=lambda: main.run_web(home, DEFAULT_CONFIG, None, "9.9"), daemon=True)
+    runner = threading.Thread(target=lambda: main.run_web(home, DEFAULT_CONFIG, None), daemon=True)
     runner.start()
     until(lambda: fake.windows and fake.windows[0].calls("show"))
     window = fake.windows[0]

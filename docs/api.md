@@ -95,6 +95,13 @@ def run(app):
 
 頁面視窗由提供 `app.page` 這個角色的隨附模組「頁面」開，最上面那一排照樣問 `page.top`。tkinter 面板（安全模式與備用面板）照舊在同一個程序裡跑、沒有頁面。
 
+## 面板也是模組（核心 0.9.0，D162）
+
+網頁面板是隨附模組「主控面板」：它宣告角色 `main`，iPLoT 開機時在自己的程序裡叫它。
+
+- `main`：`start(app, core, note=None, err=None)`，開面板、視窗關掉才回來。只有開機程式會叫，一般模組不用管。
+- `panel.error`：`on_panel_error(app, error, recent, pressed)`。面板上出了錯（不是你這個模組出的錯），先交給你看一眼，`pressed` 是 `False`：回 `True` 表示值得問「要回報嗎？」，面板會問（每個錯誤最多問一次，可以「不要再問」）；使用者按了「回報這個問題」，或答了要回報，會再交一次，`pressed` 是 `True`。`error` 是那一筆錯誤，`recent` 是那時候訊息區最後幾行。隨附的「回報與討論」提供它。
+
 ## 最小的模組
 
 ```python

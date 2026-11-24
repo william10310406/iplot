@@ -1,4 +1,5 @@
-"""主控面板：打開 iPLoT 的面板；已經開著就叫到最前面。任何模組寫 app.run("主控面板") 就會用到這裡。"""
+"""主控面板：打開 iPLoT 的面板；已經開著就叫到最前面。任何模組寫 app.run("主控面板") 就會用到這裡。
+面板本身也在這個資料夾（panel_web.py 與頁面的三個檔）：iPLoT 開起來時，開機程式在主程序裡執行這裡的 start（D162）。"""
 import errno
 import os
 import pathlib
@@ -29,6 +30,8 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
 # ── 互通 ──
 
 ICON = "🎛️"
+PROVIDES = {"main": "start"}  # 開機程式要的面板（D162）
+NEEDS = ("menu.module", "panel.error")  # 右鍵選單多的項目、錯誤那一列的「回報這個問題」（可有可無）
 # macOS 14 起，自己不在最前面的 App 叫別人到最前面會被拒絕；不是 App 的一般 python 程序叫就可以（2026-10-07 量過）。
 # 被拒絕時交給這一小段在子程序裡叫：argv 是 [-c, lib 的路徑, pid]
 HELPER = ("import sys\n"
@@ -180,6 +183,24 @@ def open_panel(app, home: pathlib.Path, *, modules=None, ps=_ps, lsof=_lsof, pop
     app.log("打開主控面板" if up else f"打不開主控面板：{UP_FAILED}。再雙擊一次")
     if platform != "darwin":
         app.log("這個系統還不會把開著的面板叫到最前面")
+
+
+def start(app, core, note=None, err=None):
+    """開機程式交來 app 與核心（指令集）：開網頁面板，視窗關掉才回來（D162）。note 是要先寫進訊息區的話，
+    err 是 config.py 的錯誤。lib/ 裡沒有 pywebview、或它找不到能用的視窗套件時丟 ImportError，開機程式會去裝、或退到後備面板。"""
+    from panel_web import WebPanel  # 這個資料夾的檔：開機程式把資料夾放在 sys.path 最前面
+
+    panel = WebPanel(app.home, app.version, False)
+    core.view = panel
+    panel.attach(core)
+    if note is not None:
+        panel.submit(lambda: panel.log(note))  # 頁面就緒之後才送得出去，先排著
+    if err is not None:
+        panel.submit(lambda: panel.report(err))
+    try:
+        panel.run()
+    except panel.webview.WebViewException as exc:
+        raise ImportError(str(exc)) from exc
 
 
 def run(app):

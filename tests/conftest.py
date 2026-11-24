@@ -13,6 +13,9 @@ from core.scan import module_info
 from core.types import DEFAULT_CONFIG
 
 DEFAULT_SRC = 'def run(app):\n    print("ok")\n'
+# 網頁面板在隨附的「主控面板」裡（D162）：它的檔照模組的規矩用 import panel_web 互相找，測試也這樣 import
+PANEL_DIR = Path(__file__).resolve().parents[1] / "modules" / "主控面板"
+sys.path.insert(0, str(PANEL_DIR))
 
 
 def make_module(parent, name, src=DEFAULT_SRC):
@@ -237,8 +240,9 @@ def _restore_excepthooks(monkeypatch):
 @pytest.fixture
 def panel(home):
     """接好 Core、跑過 run() 的 WebPanel：假的 webview，不開視窗；啟動時的重掃已經做完。"""
+    from panel_web import WebPanel
+
     from core.core import Core
-    from ui.web import WebPanel
 
     p = WebPanel(home, "0.4.0", False, webview=FakeWebview())
     p.offer.muted = True  # 自動問「要回報嗎？」會等頁面回答：測它的測試（test_offer.py）自己打開

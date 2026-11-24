@@ -39,22 +39,11 @@ T: dict[str, str] = {
     "menu_reveal": "在資料夾中顯示",
     "menu_terminal": "在終端機打開",
     "menu_add_child": "在這裡新增下一層模組…",
-    "menu_run": "執行",
-    "menu_enter": "進入下一層",
-    "add_tile": "新模組",
-    "status_hint": "單擊選一個模組看它的說明；雙擊執行。",
-    "details": "詳細",
-    "hide_details": "收起",
     "report_issue": "回報這個問題",
     "offer_report": "出錯了，要回報嗎？\n{sentence}\n\n回報之前會先給你看要送出的內容，可以改。",
     "offer_mute": "這次執行期間不要再問",
     "offer_yes": "回報",
     "offer_no": "不用",
-    "ok": "確定",
-    "cancel": "取消",
-    "scanned": "已掃描 {roots}，找到 {count} 個模組",
-    "list_sep": "、",
-    "icon_unusable": "『{title}』的圖示檔讀不到或超過 1 MB，先用預設圖示",
     "installing": "第一次啟動：正在安裝介面（需要網路，約 {size}）…",
     "install_done": "安裝完成，重新啟動中…",
     "install_failed": "介面安裝失敗：{message}\n安裝需要網路。再試一次：重新啟動 iPLoT。現在先改用備用面板",
@@ -65,9 +54,7 @@ T: dict[str, str] = {
     "refresh_failed": "介面的套件這次沒有換成新的：{message}\n先用現有的開；有網路之後重新啟動 iPLoT 會再試一次。",
     "confirm_foreign": "『{title}』是從外面裝進來的，第一次執行前確認：它是會在這台電腦上執行的程式，能讀寫你的檔案。要執行嗎？",
     "cancelled": "已取消執行『{title}』",
-    "nav_gone": "找不到模組『{title}』，可能已經被移除了",
     "page_unsupported": "這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用",
-    "running": "執行中：{title}…",
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",
@@ -75,6 +62,8 @@ T: dict[str, str] = {
     "snapshot_failed": "無法存上一版：{message}。這次照常執行，只是沒有留下可以復原的上一版",
     "config_type": "{name} 的型別不對，應該是 {expected}",
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
+    "no_panel": "找不到提供面板的模組，先用備用面板。隨附的面板模組可能被刪了：重新下載 iPLoT 就會回來。",
+    "panel_broken": "面板模組出錯了（{message}），先用備用面板。細節在 logs/iplot.log。",
     "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
     "start_failed": "iPLoT 沒辦法啟動。技術細節記在 iPLoT 資料夾裡的 logs/iplot.log。可以試試：關掉這個視窗再開一次；"
                     "還是不行，就用安全模式開（在終端機進到 iPLoT 資料夾，打 python3 main.py --safe），"
@@ -99,8 +88,6 @@ BUNDLED = frozenset({"主控面板", "互通", "作業系統", "回報與討論"
                      "開Terminal", "開工", "整理", "導覽列", "頁面"})
 # 碰作業系統的事（打開、編輯、顯示、終端機、垃圾桶）由 modules/ 裡叫這個名字的模組做（D50、D52）
 SYSTEM_MODULE = "作業系統"
-# 錯誤那一列的「回報這個問題」交給 modules/ 裡叫這個名字的模組的 on_error(app, error)（D110）
-REPORT_MODULE = "回報與討論"
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
 # 規則在 iPLoT 資料夾的 AGENTS.md（給 AI 助手：改這個檔之前先讀它）。重點：只透過 app 碰 iPLoT，不 import core；

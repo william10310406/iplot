@@ -1,5 +1,7 @@
-"""網頁面板：pywebview 開的原生視窗裡跑 ui/index.html。
+"""網頁面板：pywebview 開的原生視窗裡跑這個資料夾的 index.html（D162：面板是模組，核心不知道它）。
 
+只用開機程式交來的核心的公開方法（scope、enter、back、press、create、action、rescan、each、providers、describe、
+report_internal），不 import 核心的任何東西；ModuleInfo、ErrorInfo、Scope 是核心交來的資料，只讀欄位。
 WebPanel 實作 core.View，把 show／log／report／ask 翻成對頁面的呼叫（iplot.<名字>(…)）；
 Bridge 是頁面呼叫 Python 的入口，動作都排進單一工作執行緒交給 Core。沒有 server、沒有 port：
 頁面用 file:// 載入，JS 直接呼叫 Python（pywebview 的 js_api）。Core 不知道執行緒的存在。"""
@@ -8,18 +10,23 @@ import base64
 import contextlib
 import itertools
 import json
+import os
 import queue
 import threading
+import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from core.core import Core
-from core.errors import describe
-from core.scan import is_module, module_info
-from core.text import REPORT_MODULE, T
-from core.types import ErrorInfo, ModuleInfo, Scope
-from ui import errlog, menu, nav
+import panel_menu
+from panel_text import T
+
+Core = ModuleInfo = ErrorInfo = Scope = Any  # 核心交來的物件：這裡只讀欄位、呼叫公開方法，不 import 核心
+ERROR_ROLE = "panel.error"  # 錯誤那一列的「回報這個問題」與自動問「要回報嗎？」交給提供它的模組（D110、D150）
+HERE = Path(__file__).resolve().parent  # index.html、app.js、style.css 在這裡
+RECENT = 40          # 最近的訊息留幾行
+WINDOW = 600.0       # 同一種錯誤（類型、檔案、行號）幾秒內只問一次
 
 MAX_ICON = 1024 * 1024  # 圖示檔的上限：1 MB（D65）
 MIME = {".png": "image/png", ".svg": "image/svg+xml"}
@@ -69,19 +76,61 @@ def scope_json(scope: Scope, icon_for: Callable[[ModuleInfo], dict | None]) -> d
                     for m in g.modules]} for g in scope.groups]}
 
 
-def error_json(error: ErrorInfo) -> dict:
-    """ErrorInfo 變成給頁面的 JSON：白話那一句（sentence）與 traceback 分開，怎麼排由頁面決定。"""
+def error_json(error: ErrorInfo, sentence: str) -> dict:
+    """ErrorInfo 變成給頁面的 JSON：白話那一句（sentence，核心的 describe 算的）與 traceback 分開，怎麼排由頁面決定。"""
     return {"kind": error.kind, "message": error.message,
             "file": None if error.file is None else str(error.file), "line": error.line,
             "traceback": error.traceback_text, "source": error.source, "module": error.module,
-            "sentence": describe(error)}
+            "sentence": sentence}
+
+
+def is_module(folder: Path) -> bool:
+    """folder 是資料夾（不是符號連結），裡面有檔名剛好是 iplot.py 的檔案；讀不到就不是。
+    抄自 core/scan.py 的 is_module（tools/copies.json 登記）：面板不 import 核心。"""
+    with contextlib.suppress(OSError):  # APFS 不分大小寫，所以比對 listdir 的實際檔名，iPLoT.py 不算
+        return (not folder.is_symlink() and folder.is_dir()
+                and "iplot.py" in os.listdir(folder) and (folder / "iplot.py").is_file())
+    return False
+
+
+class Recent:
+    """訊息區最近的 RECENT 行（log 與 report 各記一行）：交給 panel.error 的提供者附在回報裡。"""
+
+    def __init__(self) -> None:
+        self._lines: deque[str] = deque(maxlen=RECENT)
+
+    def add(self, text: str) -> None:
+        self._lines.extend(str(text).splitlines() or [""])
+
+    def lines(self) -> list[str]:
+        return list(self._lines)
+
+
+class Offer:
+    """自動跳出「出錯了，要回報嗎？」該不該問（D150）：同一種錯誤 WINDOW 秒內只問一次；勾了「這次執行期間不要再問」
+    （muted）之後都不問。config.py 的錯誤（自己改壞的設定）、在 input() 的提問框按取消不問。哪些錯誤值得回報
+    （例如學生作業不算）由 panel.error 的提供者決定，不在這裡。只記在記憶體。"""
+
+    def __init__(self, window: float = WINDOW, clock: Callable[[], float] = time.monotonic) -> None:
+        self._window, self._clock = window, clock
+        self._asked: dict[tuple, float] = {}
+        self.muted = False
+
+    def due(self, error: ErrorInfo) -> bool:
+        if self.muted or error.source == "config" or error.kind == "InputCancelled":
+            return False
+        key, now = (error.kind, str(error.file), error.line), self._clock()
+        if now - self._asked.get(key, -self._window) < self._window:
+            return False
+        self._asked[key] = now
+        return True
 
 
 class Bridge:
     """頁面的 JS 用 pywebview.api.<方法> 呼叫的入口。除了 state 與 answer，都只把工作排進工作執行緒、
     立刻回傳。頁面傳來的 id、資料夾、動作名稱只認目前面板上有的，其餘一律當作「畫面過期了」重掃。錯誤的編號
-    （open_error、report_error）只認 errors 裡有的，其餘什麼都不做；report_error 找「回報與討論」不看面板，照路徑找
-    modules/ 底下的那一個（bundled：面板停在下一層時也找得到），不在了才重掃。
+    （open_error、report_error）只認 errors 裡有的，其餘什麼都不做；report_error 交給提供 panel.error 的模組，
+    沒有了就什麼都不做。
     面板放在 _panel：pywebview 會把公開屬性一路攤開進 pywebview.api，底線讓攤出去的只有下面這些方法。
     這是整潔，不是安全邊界；真正的邊界是頁面不載入任何外來的內容（零外部資源、模組的輸出一律當文字）。"""
 
@@ -141,17 +190,16 @@ class Bridge:
     def open_error(self, error_id: int) -> None:
         """「打開檔案」：用編輯器打開第 error_id 筆回報的檔案，跳到出錯的那一行。"""
         errors, core = self._panel.errors, self._panel.core
-        if isinstance(error_id, int) and 0 <= error_id < len(errors) and errors[error_id].file is not None:
-            error = errors[error_id]
+        if isinstance(error_id, int) and 0 <= error_id < len(errors) and errors[error_id][0].file is not None:
+            error = errors[error_id][0]
             self._panel.submit(lambda: core.action("edit", error.file, core.config.editor, error.line))
 
     def report_error(self, error_id: int) -> None:
-        """「回報這個問題」：第 error_id 筆回報交給「回報與討論」的 on_error(app, error)（D110）；那個模組不在了就重掃。"""
+        """「回報這個問題」：第 error_id 筆交給提供 panel.error 的模組，pressed 是 True（D110）。"""
         errors = self._panel.errors
         if isinstance(error_id, int) and 0 <= error_id < len(errors):
-            error = errors[error_id]
-            self._on(REPORT_MODULE, lambda core, info: self._panel.press(core, info, "on_error", (error,), quiet=True),
-                     self._panel.bundled)
+            error, recent = errors[error_id]
+            self._panel.submit(lambda: self._panel.hand_over(error, recent, True))
 
     def rescan(self) -> None:
         """重掃（視窗取得焦點時頁面會呼叫，D11）。"""
@@ -165,13 +213,17 @@ class Bridge:
 class WebPanel:
     """iPLoT 的主視窗（網頁版）：上面是麵包屑和一組組圖示，下面是狀態列和訊息區。實作 core.View。"""
 
-    def __init__(self, home: Path, version: str, safe: bool, webview: Any = None) -> None:
+    def __init__(self, home: Path, version: str, safe: bool, webview: Any = None,
+                 folder: Path = HERE) -> None:
         if webview is None:
-            import webview  # lib/ 裡的 pywebview：只有這個檔可以 import 它
-        self.home, self.version, self.safe, self.webview = home, version, safe, webview
+            try:
+                import webview  # lib/ 裡的 pywebview
+            except ImportError as exc:  # 沒有它 iPLoT 照樣開：開機程式接到 ImportError 就去裝，裝不了就開後備面板（R4）
+                raise ImportError(str(exc)) from exc
+        self.home, self.version, self.safe, self.webview, self.folder = home, version, safe, webview, folder
         self.core: Core | None = None
         self.window: Any = None
-        self.errors: list[ErrorInfo] = []  # 回報過的錯誤；頁面的「打開檔案」用編號指回來
+        self.errors: list[tuple[ErrorInfo, list[str]]] = []  # 回報過的錯誤與那時候最近的訊息；頁面用編號指回來
         self._jobs: queue.Queue = queue.Queue()
         self._worker: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -180,9 +232,8 @@ class WebPanel:
         self._closed = False
         self.menu_items: list[tuple[ModuleInfo, str, tuple]] = []  # 右鍵選單上模組提供的項目：（提供者, 函式名, (那一格,)）
         self._busy: list[str] = []  # 還在跑的模組（標題），按下的順序
-        self._pages: list = []  # 開著的頁面視窗（app.page）；已經有一頁開著，新的一頁不畫導覽列
         self._warned: set[Path] = set()
-        self.recent, self.offer = errlog.Recent(), errlog.Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
+        self.recent, self.offer = Recent(), Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
 
     def attach(self, core: Core) -> None:
         """接上 Core；之後頁面的動作都交給它。"""
@@ -192,7 +243,7 @@ class WebPanel:
         """開視窗，進入 pywebview 的事件迴圈（佔住主執行緒）；視窗關掉才回傳。"""
         title = T["title"].format(version=self.version) + (T["safe_mode"] if self.safe else "")
         self.window = self.webview.create_window(
-            title, url=(self.home / "ui" / "index.html").as_uri(), js_api=Bridge(self),
+            title, url=(self.folder / "index.html").as_uri(), js_api=Bridge(self),
             width=820, height=620, min_size=(480, 420))
         self.window.events.loaded += self._loaded
         self.window.events.closing += lambda: self._cancel(closed=True)
@@ -254,7 +305,7 @@ class WebPanel:
 
     def menu(self, core: Core, info: ModuleInfo) -> None:
         """右鍵選單上模組提供的項目（見 Bridge.menu）。"""
-        self.menu_items, labels = menu.items(core, info)
+        self.menu_items, labels = panel_menu.items(core, info)
         self._js("menu", str(info.folder), labels)
 
     def submit(self, job: Callable[[], object]) -> None:
@@ -268,11 +319,6 @@ class WebPanel:
     def find(self, id: str) -> ModuleInfo | None:
         """目前面板上資料夾是 id 的模組；不在面板上、或那個資料夾已經不是模組（被刪了）就回 None。"""
         return next((m for m in self.core.all_modules() if str(m.folder) == id and is_module(m.folder)), None)
-
-    def bundled(self, name: str) -> ModuleInfo | None:
-        """modules/ 底下叫 name 的模組（跟 Core.action 找「作業系統」一樣，不管面板停在哪一層）；不是模組就回 None。"""
-        folder = self.home / "modules" / name
-        return module_info(folder, (self.home / "modules").resolve(), "here") if is_module(folder) else None
 
     def root(self, path: str) -> Path | None:
         """目前面板上資料夾是 path 的那一組的資料夾；沒有這一組就回 None。"""
@@ -299,29 +345,43 @@ class WebPanel:
 
     def report(self, error: ErrorInfo) -> None:
         """訊息區顯示錯誤：白話一句，「打開檔案」與「詳細」由頁面排。頁面壞到顯示不了也不往外丟。
-        reportable 是 modules/回報與討論 在不在：在才有「回報這個問題」，也才自動問要不要回報（排在這件工作之後，D150）。
-        這一筆與最近的訊息寫進 logs/last-error.json，給那個模組的「回報問題」附上。"""
+        有模組提供 panel.error（而且不是它自己出的錯）才有「回報這個問題」；這一筆也排一件工作交給它看一眼（D150）。"""
         if error.kind == "InputCancelled":  # 在提問框按了取消：自己的動作，訊息區只說一行，不是錯誤（體驗 2-08b）
             self.log(T["module_cancelled"].format(module=error.module))
             return
-        self.errors.append(error)
-        self.recent.add(describe(error))
-        errlog.write(self.home, error, self.recent.lines())
-        reportable = is_module(self.home / "modules" / REPORT_MODULE)
+        sentence = self.core.describe(error)
+        self.recent.add(sentence)
+        self.errors.append((error, self.recent.lines()))
+        reportable = self.reporter(error) is not None
         with contextlib.suppress(self.webview.JavascriptException):
-            self._js("report", {**error_json(error), "id": len(self.errors) - 1, "reportable": reportable})
-        if reportable and self.offer.due(error):
-            self.submit(lambda: self._offer(error))
+            self._js("report", {**error_json(error, sentence), "id": len(self.errors) - 1, "reportable": reportable})
+        if reportable:
+            recent = self.errors[-1][1]
+            self.submit(lambda: threading.Thread(target=self.hand_over, args=(error, recent, False), daemon=True).start())
 
-    def _offer(self, error: ErrorInfo) -> None:
-        """「出錯了，要回報嗎？」：答回報就交給「回報與討論」的 on_error，跟按那一列的鈕一樣；勾了「這次執行期間不要
-        再問」就記下（只在記憶體）。關掉視窗、重新載入都算不用。"""
-        answer = self._dialog("offer", T["offer_report"].format(sentence=describe(error)))
+    def reporter(self, error: ErrorInfo) -> ModuleInfo | None:
+        """提供 panel.error 的第一個模組；它自己出的錯不交給它（不然它壞了就會一直轉）。"""
+        found = [m for m in self.core.providers(ERROR_ROLE) if m.name != error.module]
+        return found[0] if found else None
+
+    def hand_over(self, error: ErrorInfo, recent: list[str], pressed: bool) -> None:
+        """交給 panel.error 的提供者：pressed 是按了「回報這個問題」。沒按的時候它回 True 表示值得回報（例如它判斷
+        學生作業的錯誤不算），面板再看節流、問「出錯了，要回報嗎？」，答回報就再交一次、pressed 是 True。"""
+        info = self.reporter(error)
+        if info is None:
+            return
+        handler = dict(info.provides)[ERROR_ROLE]
+        if pressed:  # 它多半會開一頁：跟按下模組一樣另開執行緒等，工作執行緒不卡
+            self.press(self.core, info, handler, (error, recent, True), quiet=True)
+            return
+        result = self.core.press(info, handler, (error, recent, False), quiet=True)
+        if result.value is not True or not self.offer.due(error):
+            return
+        answer = self._dialog("offer", T["offer_report"].format(sentence=self.core.describe(error)))
         answer = answer if isinstance(answer, dict) else {}
         self.offer.muted = self.offer.muted or answer.get("mute") is True
-        info = self.bundled(REPORT_MODULE)
-        if answer.get("report") is True and info is not None:
-            self.press(self.core, info, "on_error", (error,), quiet=True)
+        if answer.get("report") is True:
+            self.press(self.core, info, handler, (error, recent, True), quiet=True)
 
     def _dialog(self, kind: str, *args: Any) -> Any:
         """推一個對話框給頁面，等頁面用 answer(編號, 值) 回來；視窗關掉、頁面重新載入都算取消（None）。"""
@@ -351,20 +411,6 @@ class WebPanel:
     def confirm(self, prompt: str) -> bool:
         """面板內的「確定／取消」對話框；按確定回 True。"""
         return self._dialog("confirm", prompt) is True
-
-    def page(self, title: str, html: str, api: object | None) -> None:
-        """開第二個視窗顯示一頁 HTML（app.page），那個視窗關掉才回傳；api 的公開方法給那一頁的 JS 呼叫。
-        在模組執行中開的、而且沒有別的頁面開著，就多一排導覽列（D153）；按了跳到別的模組，排在這次執行之後做。"""
-        window = self.webview.create_window(title, html=html, js_api=api, width=640, height=520)
-        done, bar = threading.Event(), None
-        if self.core.running and not self._pages:
-            bar = nav.make(window, self.core)
-        self._pages.append(window)
-        window.events.closed += done.set
-        done.wait()
-        self._pages.remove(window)
-        if bar:
-            self.submit(lambda: bar.jump(self.press))
 
     def choose_files(self) -> list[Path]:
         """原生的檔案選擇視窗（D67）；按取消回空清單。"""
