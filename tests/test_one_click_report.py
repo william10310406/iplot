@@ -331,6 +331,7 @@ def test_web_report_writes_last_error_with_recent_messages(live, home):
     make_module(home / "modules", "吵", "def run(app):\n    print('先印一行')\n    1 / 0\n")
     crash(panel, home, "吵")
     panel.wait()
+    until(lambda: (home / "logs" / "last-error.json").is_file())  # 交給 panel.error 的那一件在自己的執行緒
     data = json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))
     assert data["kind"] == "ZeroDivisionError" and "先印一行" in data["recent"]
     assert data["recent"][-1] == data["sentence"]
@@ -347,6 +348,37 @@ def test_bridge_thread_errors_reach_the_panel_through_the_sink(live, home, monke
     t.join()
     panel.wait()
     assert window.calls("report")[-1][0]["source"] == "core"
+
+
+# ── 真的「回報與討論」的 on_panel_error（repo 裡那一份，覆蓋率量得到）──
+
+LOUD = ErrorInfo("ZeroDivisionError", "division by zero", None, None, "Traceback …\n", "module", "吵")
+
+
+def test_on_panel_error_unpressed_writes_last_error_and_says_it_is_worth_asking(load, home):
+    from test_report import make_app
+    iplot = load("iplot")
+    assert iplot.on_panel_error(make_app(home), LOUD, ["先印一行", "吵：division by zero"], False) is True
+    data = json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))
+    assert data["kind"] == "ZeroDivisionError" and data["sentence"] == "吵：division by zero"
+
+
+def test_on_panel_error_skips_its_own_errors(load, home):
+    from test_report import make_app
+    iplot = load("iplot")
+    app = make_app(home)
+    own = other(module=app.module.name, file=None, line=None)
+    assert iplot.on_panel_error(app, own, ["x"], False) is False
+    assert not (home / "logs" / "last-error.json").exists()
+
+
+def test_on_panel_error_pressed_opens_the_report(load, home, monkeypatch):
+    from test_report import make_app
+    iplot = load("iplot")
+    seen = []
+    monkeypatch.setattr(iplot, "on_error", lambda app, error, recent=None: seen.append((error, recent)))
+    iplot.on_panel_error(make_app(home), LOUD, ["a"], True)
+    assert seen == [(LOUD, ["a"])]
 
 
 # ── tkinter 面板 ──

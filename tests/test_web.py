@@ -4,6 +4,7 @@
 import base64
 import dataclasses
 import shutil
+import sys
 import threading
 import time
 from pathlib import Path
@@ -700,3 +701,37 @@ def test_empty_icon_file_falls_back(home):
     logs = []
     assert icon_for(DEFAULT_INFO(folder), set(), logs.append) is None
     assert logs == [T["icon_unusable"].format(title="A")]
+
+
+def test_the_panel_modules_start_opens_the_panel_with_the_note_and_config_error(home, monkeypatch):
+    """「主控面板」的 start（角色 main，D162）：開面板、先寫 note、再報 config.py 的錯；repo 裡那一份，覆蓋率量得到。"""
+    import importlib.util
+    import types
+    fake = FakeWebview()
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    spec = importlib.util.spec_from_file_location("iplot_panel_start", PANEL_DIR / "iplot.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    core = Core(home, DEFAULT_CONFIG, None)
+    err = ErrorInfo("SyntaxError", "invalid syntax", home / "config.py", 1, "", "config", "")
+    module.start(types.SimpleNamespace(home=home, version="0.9.0"), core, "先說一句", err)
+    [window] = fake.windows
+    until(lambda: window.calls("log") and window.calls("report"))
+    assert core.view is not None and window.calls("log")[0][0] == "先說一句"
+    assert window.calls("report")[0][0]["source"] == "config"
+
+
+def test_the_panel_modules_start_turns_a_webview_that_cannot_start_into_import_error(home, monkeypatch):
+    import importlib.util
+    import types
+
+    class Broken(FakeWebview):
+        def start(self):
+            raise self.WebViewException("You must have either PyObjC or Qt installed")
+
+    monkeypatch.setitem(sys.modules, "webview", Broken())
+    spec = importlib.util.spec_from_file_location("iplot_panel_start", PANEL_DIR / "iplot.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with pytest.raises(ImportError, match="PyObjC"):
+        module.start(types.SimpleNamespace(home=home, version="0.9.0"), Core(home, DEFAULT_CONFIG, None), None, None)
