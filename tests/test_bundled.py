@@ -416,13 +416,14 @@ def test_the_iplot_header_hands_over_to_main_run(tmp_path):
     (home / "core").mkdir(parents=True)
     (home / "main.py").write_text("import sys\nprint(sys.argv[1:])\n", encoding="utf-8")
     mod = make_module(tmp_path / "我的模組", "甲", iplot_header() + "print('不該跑到這裡')\n")
+    env = {**{k: v for k, v in os.environ.items() if k != "IPLOT_DIRECT"}, "PYTHONIOENCODING": "utf-8"}  # Windows 的管道不是 utf-8
     done = subprocess.run([sys.executable, str(mod / "iplot.py"), "a.txt"], capture_output=True, text=True,
-                          encoding="utf-8", timeout=30, env={k: v for k, v in os.environ.items() if k != "IPLOT_DIRECT"})
+                          encoding="utf-8", timeout=30, env=env)
     assert done.stdout.strip() == str(["--run", str(mod), "a.txt"]) and done.returncode == 0
     alone = make_module(tmp_path / "別處" / "更遠", "乙", iplot_header() + "print('照一般腳本跑')\n")
     (home / "main.py").unlink()
     done = subprocess.run([sys.executable, str(alone / "iplot.py")], capture_output=True, text=True, encoding="utf-8",
-                          timeout=30)
+                          timeout=30, env=env)
     assert "照一般腳本跑" in done.stdout and "找不到 iPLoT" in done.stderr
 
 
