@@ -754,12 +754,14 @@ def test_web_student_error_keeps_the_button_but_does_not_ask(live, home):
     info = module_info(student, (home / "modules").resolve(), "child")
     panel.submit(lambda: panel.press(panel.core, info))
     panel.wait()
+    until(lambda: window.calls("report") and not panel.core.running)  # 按下與交給提供者看一眼都在自己的執行緒
     row = window.calls("report")[-1][0]
     assert row["kind"] == "ZeroDivisionError" and row["reportable"]  # 「回報這個問題」照樣在
     assert not offers(window)
     bridge = window.kw["js_api"]
     bridge.report_error(row["id"])  # 按那一列的鈕：照樣交給提供者
     panel.wait()
+    until(lambda: (home / "got.txt").is_file() and not panel.core.running)  # 還在跑的話，下面 crash 的重掃會延後
     assert (home / "got.txt").read_text() == "ZeroDivisionError\n"
     crash(panel, home)  # iPLoT 這邊的模組出錯：照常問
     answer_offer(panel, window, {"report": False, "mute": False})
