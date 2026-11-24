@@ -30,6 +30,7 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
 # ── 互通 ──
 
 ICON = "🔗"
+PROVIDES = {"run.outside": "outside"}  # iPLoT 0.9 起 main.py --run 用彈出式視窗跑模組（D163）
 # 用到的模組與角色（D160 R5）：跑完回去鈕回主控面板或行事曆、指令例子用開工、頁面上方那一排問 page.top
 NEEDS = ("主控面板", "行事曆", "開工", "page.top")
 HERE = pathlib.Path(__file__).resolve().parent
@@ -180,6 +181,14 @@ def run(app):
     sync.sync(app.home, app.config, python, HERE)
     data = status(app.home, app.config, python, HERE)
     app.page("互通", render(data), Api(app, app.home, app.config, python, HERE))
+
+
+def outside(app, core, info, files, problem, config_error):
+    """角色 run.outside（D163）：main.py --run 把找好的模組（找不到是 None 與 problem 那一句）交過來，
+    在彈出式視窗裡跑、跑完同步一次捷徑，回結束碼。沒有 pywebview 丟 ImportError，main.py 改在終端機跑。"""
+    import run as entry  # noqa: I001  這個資料夾的 run.py
+
+    return entry.outside(core, pathlib.Path(app.home), HERE, info, files, problem, config_error)
 
 
 def _separate(app) -> bool:

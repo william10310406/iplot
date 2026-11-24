@@ -1,7 +1,8 @@
-"""iPLoT 入口：python3 main.py [--safe]。版本檢查 → 選面板 → 進入事件迴圈（規格 §3）。
+"""iPLoT 入口：python3 main.py [--safe | --run <模組> [檔案…]]。版本檢查 → 選面板 → 進入事件迴圈（規格 §3）。
 
 預設開網頁面板（提供 main 的模組，隨附的是 modules/主控面板/，用 lib/ 裡的 pywebview，D162）。第一次啟動、或 lib/ 壞了，就用 pip 裝一次再重啟自己；
 裝不起來就退到 tkinter 面板（ui/tk.py，照常掃上一層與 ROOTS）並說明原因。--safe：直接開 tkinter 面板，只掃 modules/。
+--run：不開面板，在面板外跑一個模組（ui/cli.py，D163）。
 
 core 與 ui 的 import 都放在函式裡、版本檢查之後：它們用了 3.10 的語法，在太舊的 Python 上一 import 就炸，
 使用者得先看到「請裝新版 Python」那一句，而不是一段 traceback。
@@ -9,7 +10,6 @@ core 與 ui 的 import 都放在函式裡、版本檢查之後：它們用了 3.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import sys
 from pathlib import Path
@@ -98,16 +98,12 @@ def refresh(home: Path, config: Config) -> str | None:
 def bundle_news(home: Path, version: str) -> str | None:
     """「更新」之後的第一次啟動：隨附模組跟著換成這一版的（D156）。回要寫進訊息區的話；沒事、或出了意外都不擋啟動。"""
     from core import bundled
+    from ui import errlog
 
     try:
         return "\n".join(bundled.sync(home, version)) or None
-    except Exception:  # noqa: BLE001  這一步不能讓 iPLoT 開不起來；細節進 logs/iplot.log
-        import traceback
-
-        with contextlib.suppress(OSError):
-            (home / "logs").mkdir(exist_ok=True)
-            with (home / "logs" / "iplot.log").open("a", encoding="utf-8", errors="replace") as f:
-                f.write(f"{traceback.format_exc()}\n")
+    except Exception as exc:  # noqa: BLE001  這一步不能讓 iPLoT 開不起來；細節進 logs/iplot.log
+        errlog.log(home, exc)
         return None
 
 
@@ -152,6 +148,11 @@ def main() -> None:
     rebooted = os.environ.pop("IPLOT_BOOT", None) == "1"  # 這次啟動是不是剛裝完 lib/ 重啟的那一次
     config, err = load_config(home / "config.py")
     news = bundle_news(home, __version__)
+    if sys.argv[1:2] == ["--run"]:  # 在面板外跑一個模組（D163）：不開面板
+        from ui import cli
+
+        print(news or "", end="\n" if news else "", flush=True)
+        sys.exit(cli.run(home, config, err, sys.argv[2:]))
     if "--safe" in sys.argv[1:]:
         return tk_or_exit(home, config, err, True, news)
     try:

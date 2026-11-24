@@ -234,7 +234,7 @@ def test_own_version(load, tmp_path):
     assert boot.own_version(tmp_path) == "?"
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.2.0] - 2026-10-08\n\nx\n\n## [0.1.0]\n",
                                            encoding="utf-8")
-    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.5.1"
+    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.6.0"
 
 
 def test_boot_and_run_read_on_python_3_8():
@@ -929,6 +929,44 @@ def test_main_runs_a_module_quietly_and_returns_0(entry, home):
     w = entry.wv.windows[0]
     assert ["hi"] in w.calls("log") and not any("完成（" in c[0] for c in w.calls("log"))
     assert len(entry.synced) == 1 and w.title == "A"
+
+
+def test_main_on_a_core_with_main_run_hands_over_to_it(entry, home, monkeypatch):
+    """iPLoT 0.9 起（api_version 6，D163）：run.py 不自己開視窗，交給 main.py --run，結束碼照它的。"""
+    calls = []
+    code = entry.run.main(["A", "a.txt"], home=home, folder=entry.folder, cwd=home / "modules",
+                          call=lambda argv, cwd: calls.append((argv, cwd)) or 7)
+    assert code == 7 and calls == [([sys.executable, str(home / "main.py"), "--run", "A", "a.txt"], str(home / "modules"))]
+    assert entry.synced == [] and entry.wv.windows == []
+
+
+def test_outside_runs_the_module_it_was_handed_in_the_popup_and_syncs(entry, home):
+    """角色 run.outside 的那一頭：main.py --run 找好了模組，這裡只開小視窗、跑、同步一次。"""
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    core = started_core(home)
+    [info] = [m for m in core.all_modules() if m.name == "A"]
+    entry.run.sys.modules.pop("sync", None)
+    import importlib
+    importlib.import_module("sync").sync = lambda *a, **k: entry.synced.append(a) or []
+    assert entry.run.outside(core, home, entry.folder, info, [], None, None, webview=entry.wv) == 0
+    w = entry.wv.windows[0]
+    assert ["hi"] in w.calls("log") and w.title == "A" and len(entry.synced) == 1
+
+
+def test_outside_says_why_when_the_module_was_not_found(entry, home):
+    core = started_core(home)
+    assert entry.run.outside(core, home, entry.folder, None, [], "找不到模組『B』", None, webview=entry.wv) == 1
+    assert ["找不到模組『B』"] in entry.wv.windows[0].calls("log")
+
+
+def test_the_provider_hands_app_home_and_its_own_folder_to_outside(load, home, monkeypatch):
+    run = load("run")
+    seen = []
+    monkeypatch.setattr(run, "outside", lambda *a: seen.append(a) or 0)
+    button = load_button()
+    app = types.SimpleNamespace(home=str(home))
+    assert button.outside(app, "core", "info", ["f"], None, "err") == 0
+    assert seen == [("core", home, button.HERE, "info", ["f"], None, "err")]
 
 
 def test_main_module_error_returns_1(entry, home):

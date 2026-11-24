@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import subprocess
 import sys
 import time
 import unicodedata
@@ -20,6 +21,7 @@ from pathlib import Path
 import boot
 
 OK, FAILED, CANNOT_START = 0, 1, 2
+RUN_API = 6  # 有 main.py --run 的核心（iPLoT 0.9，D163）：run.py 只轉給它
 NOT_A_MODULE = "不是模組：{path}（資料夾裡沒有 iplot.py）"
 GONE = "找不到這個模組：{path}。它可能被改名或刪掉了；捷徑已經重新整理。"
 NO_TK = ("在面板外跑的模組不能開 tkinter 視窗（彈出式視窗用的是 pywebview）；"
@@ -93,7 +95,7 @@ def back_button(core, info, candidates):
 
 
 def main(argv: list[str], *, home: Path | None = None, folder: Path | None = None, webview=None,
-         cwd: Path | None = None) -> int:
+         cwd: Path | None = None, call=subprocess.call) -> int:
     """跑一次：確認 Python、核對核心版本、記下 Python，開小視窗跑模組，跑完同步一次。回結束碼。"""
     here = os.path.abspath(__file__)
     folder = folder or Path(here).parent
@@ -114,32 +116,60 @@ def main(argv: list[str], *, home: Path | None = None, folder: Path | None = Non
         boot.alert("互通", problem)
         return CANNOT_START
     boot.remember_python(folder, sys.executable)
+    if App.api_version >= RUN_API and webview is None:  # iPLoT 0.9 起：交給 main.py --run，它再把找好的模組交回 outside
+        return call([sys.executable, str(home / "main.py"), "--run", *argv], cwd=str(cwd or Path.cwd()))
     return _run(argv, home, folder, webview, cwd or Path.cwd())
 
 
 def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
     import nav  # noqa: I001  core 在 iPLoT 是第一方、在 iplot-modules 是第三方：兩邊的 isort 要的空行不一樣
-    import popup as popup_module
-    import sync
 
     from core.core import Core, load_config
 
-    for name in OURS:  # 模組自己有同名的 helper（例如 sync.py）時，import 得到的是它自己的
-        sys.modules.pop(name, None)
+    config, config_error = load_config(home / "config.py")
+    core = Core(home, config, None)
+    nav.track(core)  # 核心 0.5、0.6 沒有 Core.running：導覽列要知道是哪個模組開的頁面（D154）
+    popup = _popup(core, home, webview)
+    core.rescan()  # 在面板外一律是最上層
+    info, problem = resolve(core, argv[0], cwd)
+    files = [cwd / _expand(a) for a in argv[1:]]
+    guard = NoTk()
+    sys.meta_path.insert(0, guard)
+    try:
+        return _window(popup, core, home, folder, info, files, problem, config_error)
+    finally:
+        sys.meta_path.remove(guard)
+
+
+def outside(core, home: Path, folder: Path, info, files, problem, config_error, webview=None) -> int:
+    """iPLoT 0.9 起的入口（角色 run.outside，D163）：main.py --run 已經找好模組（info，找不到是 None 與 problem），
+    模組在自己的工作程序裡跑，所以不用擋 tkinter。沒有 pywebview 丟 ImportError，main.py 改在終端機跑。"""
+    return _window(_popup(core, home, webview), core, home, folder, info, files, problem, config_error)
+
+
+def _popup(core, home: Path, webview):
+    """彈出式視窗，接上 core（它之後要說的話都進這個視窗）。webview 是 None 就用 lib/ 裡的 pywebview。"""
+    import popup as popup_module
+
     real = webview is None
     if real:
         import webview  # lib/ 裡的 pywebview（boot.ensure_python 已經確認載得進來）
-    config, config_error = load_config(home / "config.py")
     dock = popup_module.mac_dock if real and sys.platform == "darwin" else None
     popup = popup_module.Popup(home, webview, dock=dock)
-    core = Core(home, config, popup)
+    core.view = popup
     popup.attach(core)
-    nav.track(core)  # 核心 0.5、0.6 沒有 Core.running：導覽列要知道是哪個模組開的頁面（D154）
-    core.rescan()  # 在面板外一律是最上層
-    info, problem = resolve(core, argv[0], cwd)
+    return popup
+
+
+def _window(popup, core, home: Path, folder: Path, info, files, problem, config_error) -> int:
+    """在小視窗裡跑 info，跑完同步一次捷徑，回結束碼。"""
+    import popup as popup_module
+    import sync
+
+    for name in OURS:  # 模組自己有同名的 helper（例如 sync.py）時，import 得到的是它自己的
+        sys.modules.pop(name, None)
     popup.title = info.title if info is not None else "互通"
     back = back_button(core, info, (popup_module.CALENDAR, popup_module.PANEL))
-    files = [cwd / _expand(a) for a in argv[1:]]
 
     def job() -> int:
         if config_error is not None:
@@ -157,18 +187,14 @@ def _run(argv: list[str], home: Path, folder: Path, webview, cwd: Path) -> int:
                 outcome = "cancelled"
         popup.done(outcome, time.perf_counter() - start, back=back)
         with contextlib.suppress(Exception):  # 同步出錯不能讓模組的結果變成錯的；它自己的問題寫在 .sync-error
-            sync.sync(home, config, boot.recorded_python(folder) or sys.executable, folder)
+            sync.sync(home, core.config, boot.recorded_python(folder) or sys.executable, folder)
         return code
 
-    guard = NoTk()
-    sys.meta_path.insert(0, guard)
     try:
         return popup.run(job)
-    except webview.WebViewException as exc:
+    except popup.webview.WebViewException as exc:
         boot.alert("互通", NO_POPUP.format(reason=exc))
         return CANNOT_START
-    finally:
-        sys.meta_path.remove(guard)
 
 
 def entry(argv: list[str]) -> int:

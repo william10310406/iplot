@@ -64,6 +64,13 @@ T: dict[str, str] = {
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
     "no_panel": "找不到提供面板的模組，先用備用面板。隨附的面板模組可能被刪了：重新下載 iPLoT 就會回來。",
     "panel_broken": "面板模組出錯了（{message}），先用備用面板。細節在 logs/iplot.log。",
+    "cli_usage": "用法：python3 main.py --run <模組資料夾、iplot.py 或名字> [檔案…]",
+    "cli_not_module": "不是模組：{path}（資料夾裡沒有 iplot.py）",
+    "cli_gone": "找不到這個模組：{path}。它可能被改名或刪掉了。",
+    "cli_yes_no": "（y／n）",
+    "cli_files": "要交給它的檔案（路徑，用空白隔開；直接按 Enter 是不選）",
+    "cli_folder": "要交給它的資料夾（路徑；直接按 Enter 是不選）",
+    "cli_window_failed": "在面板外跑的視窗開不起來（{message}），改在終端機跑。細節在 logs/iplot.log。",
     "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
     "start_failed": "iPLoT 沒辦法啟動。技術細節記在 iPLoT 資料夾裡的 logs/iplot.log。可以試試：關掉這個視窗再開一次；"
                     "還是不行，就用安全模式開（在終端機進到 iPLoT 資料夾，打 python3 main.py --safe），"
