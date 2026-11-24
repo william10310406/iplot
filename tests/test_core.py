@@ -455,11 +455,13 @@ def test_call_here_runs_the_first_provider_in_this_process_and_returns_its_value
 
     from conftest import FakeView
     monkeypatch.setattr(sys, "path", list(sys.path))
-    monkeypatch.delitem(sys.modules, "helper", raising=False)
-    folder = make_module(home / "modules", "甲", 'PROVIDES = {"main": "start"}\nimport helper\n\n'
+    folder = make_module(home / "modules", "甲", 'PROVIDES = {"main": "start"}\nimport callhere_helper as helper\n\n'
                          "def run(app):\n    pass\n\ndef start(app, x):\n    return (helper.N, app.module.name, x)\n")
-    (folder / "helper.py").write_text("N = 7\n", encoding="utf-8")
+    (folder / "callhere_helper.py").write_text("N = 7\n", encoding="utf-8")
     core = Core(home, DEFAULT_CONFIG, FakeView())
     core.rescan()
-    assert core.call_here("main", "x") == (7, "甲", "x")
+    try:
+        assert core.call_here("main", "x") == (7, "甲", "x")
+    finally:
+        sys.modules.pop("callhere_helper", None)  # 別的測試的模組也有叫 helper 的檔，不能拿到這一份
     assert core.call_here("沒有人提供") is None
