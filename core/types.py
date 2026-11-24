@@ -19,6 +19,7 @@ class Meta:
     error: str | None
     icon: str | None = None
     provides: tuple[tuple[str, str], ...] = ()  # 頂層 PROVIDES：（角色, 函式名）；核心不解讀角色（D159）
+    min_api: int = 0  # 頂層 MIN_API：要的指令集版本，比 app.api_version 新就不跑（D161）
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class ModuleInfo:
     icon: str | None = None
     icon_file: Path | None = None
     provides: tuple[tuple[str, str], ...] = ()
+    min_api: int = 0
 
 
 @dataclass(frozen=True)

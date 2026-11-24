@@ -17,6 +17,11 @@ T: dict[str, str] = {
     "config_error": "config.py 壞了，已用預設值啟動：{message}",
     "missing_handler": "iplot.py 沒有定義 {handler}(app)",
     "module_exit": "模組以 exit({code}) 結束",
+    "worker_died": "模組的程序意外結束（代碼 {code}）。細節在 logs/worker.log；再按一次試試，還是這樣請按「回報這個問題」",
+    "worker_failed": "開不了跑模組的程序：{message}。請重新啟動 iPLoT 再試",
+    "not_passable": "{title} 的回傳值傳不回 iPLoT（{kind} 不能在程序之間傳）。請改成回傳文字、數字、清單或字典",
+    "needs_api": "「{title}」要 iPLoT 的指令集第 {need} 版，這個 iPLoT 是第 {have} 版。請按「更新」換成新版的 iPLoT",
+    "no_page": "這裡開不了頁面（沒有提供頁面的模組）：{title}",
     "input_cancelled": "在提問時按了取消",
     "module_cancelled": "模組『{module}』已取消",
     "not_found": "找不到模組『{name}』",
@@ -93,7 +98,7 @@ T: dict[str, str] = {
 # 隨附的模組（核心的包帶的）：「更新」之後跟著換成新版的就是這些（D156）。0.9 跟著隨附同步一起搬進「更新」。
 # 「整理」模組有一份一樣的（不讓人在面板上改名或刪除，D155）；tests/test_modify.py 對照 git 的內容，兩份多一個、少一個都會紅
 BUNDLED = frozenset({"主控面板", "互通", "作業系統", "回報與討論", "工作坊", "打開核心原始碼", "更新", "行事曆", "重新啟動",
-                     "開Terminal", "開工", "整理", "導覽列"})
+                     "開Terminal", "開工", "整理", "導覽列", "頁面"})
 # 碰作業系統的事（打開、編輯、顯示、終端機、垃圾桶）由 modules/ 裡叫這個名字的模組做（D50、D52）
 SYSTEM_MODULE = "作業系統"
 # 錯誤那一列的「回報這個問題」交給 modules/ 裡叫這個名字的模組的 on_error(app, error)（D110）

@@ -62,9 +62,10 @@ def test_ask_and_choose_delegate(fake_core, info):
     assert app.choose_files() == [Path("/f")] and app.choose_folder() == Path("/d")
 
 
-def test_api_version_is_5(fake_core, info):
-    """3 加了 config、version、page；4 加了 parent、children（D152）；5 加了 call、each、providers 與轉接（D159）。"""
-    assert App(fake_core, info).api_version == 5
+def test_api_version_is_6(fake_core, info):
+    """3 加了 config、version、page；4 加了 parent、children（D152）；5 加了 call、each、providers 與轉接（D159）；
+    6 每按一次另開程序、加了 start 與 MIN_API（D161）。"""
+    assert App(fake_core, info).api_version == 6
 
 
 def test_children_are_the_modules_one_level_down(fake_core, info):

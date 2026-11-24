@@ -1,8 +1,8 @@
 {
  "說明": "行數上限（有效行，定義見 tests/test_budget.py）。只准降、不准升：比最新的 vX.Y.Z tag 高，就要在 tools/exceptions.json 有一筆還沒到期的例外寫著這個新數字（D160）。core 是 core/ 扣掉 text.py 的總和。",
- "core": 699,
+ "core": 872,
  "main.py": 136,
- "ui/web.py": 242,
+ "ui/web.py": 255,
  "ui/tk.py": 180,
  "ui/install.py": 80,
  "ui/errlog.py": 80,

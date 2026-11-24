@@ -15,9 +15,10 @@ if TYPE_CHECKING:
 class App:
     """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version 並寫進 CHANGELOG
     （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page；4 加了 parent、children；
-    5 加了 call、each、providers，以及「沒有的名字交給提供 app.<名字> 的模組」，見 D159）。version 是核心的版本字串。"""
+    5 加了 call、each、providers，以及「沒有的名字交給提供 app.<名字> 的模組」，見 D159；
+    6 每按一次另開一個程序跑，加了 start，模組可以寫 MIN_API，見 D161）。version 是核心的版本字串。"""
 
-    api_version: int = 5
+    api_version: int = 6
     version: str = __version__
 
     def __init__(self, core: Core, info: ModuleInfo) -> None:
@@ -109,6 +110,10 @@ class App:
         """執行另一個模組：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 LookupError，不猜。"""
         return self._core.run_by_name(name)
 
+    def start(self, name: ModuleInfo) -> None:
+        """開始跑另一個模組，不等它跑完（它在自己的程序裡跑，頁面開著也不卡）；要等結果用 run。"""
+        self._core.start(name)
+
     def rescan(self) -> None:
         """重新掃描並重畫面板；在模組執行中呼叫時，會等這次執行結束後才做。"""
         self._core.rescan()
@@ -123,8 +128,11 @@ class App:
 
     def page(self, title: str, html: str, api: object | None = None) -> None:
         """開一個視窗顯示一頁 HTML，關掉才回來；api 的公開方法給那一頁的 JS 用 pywebview.api.<方法> 呼叫。
+        模組在自己的程序裡跑時（D161），交給提供 app.page 的模組在這個程序開視窗，只卡住自己；
         tkinter 面板（安全模式與備用面板）沒有頁面，只在訊息區記一行。"""
-        self._core.view.page(title, html, api)
+        if getattr(self._core, "remote", None) is not None and self._core.providers("app.page"):
+            return self._core.call("app.page", title, html, api, self._info)
+        return self._core.view.page(title, html, api)
 
     def choose_files(self) -> list[Path]:
         """跳出檔案選擇視窗；按取消回空清單。"""

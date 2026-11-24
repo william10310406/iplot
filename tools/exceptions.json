@@ -21,6 +21,10 @@
   "why": "右鍵選單改問提供 menu.module 的模組（拿掉改名、刪除兩個入口），網頁面板多兩行",
   "replace_with": "0.9 面板搬出 ui/ 變成模組，ui/ 的上限一起拿掉", "remove_by": "0.9",
   "raises": {"ui/web.py": 242}},
+ {"id": "D161", "where": ["core/worker.py（新檔：開工作程序、管道的兩頭）", "core/pipe.py（新檔）", "core/core.py press、start", "core/app.py start、page", "ui/web.py press"],
+  "why": "每按一次另開一個程序跑模組，根治「頁面開著時按別的模組會卡住」（討論區 #8）：同一個程序一次只能跑一個模組，因為 runner 改整個程序共用的狀態",
+  "replace_with": "1.0 核心與面板搬進 modules/（實作計畫 2026-11-24 第 4 步），core/ 與 ui/ 的上限換成核心模組、面板模組自己的上限", "remove_by": "1.0",
+  "raises": {"core": 872, "ui/web.py": 255}},
  {"id": "D119", "where": ["core/create.py", "ui/tk.py", "ui/app.js"],
   "why": "修種子從零啟動的缺陷（父資料夾不存在時一併建立），不是為某個功能",
   "replace_with": "不需要回收；列在這裡是為了讓所有核心改動都在同一張表上", "remove_by": "不回收"}

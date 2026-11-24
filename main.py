@@ -59,7 +59,7 @@ def run_web(home: Path, config: Config, err: ErrorInfo | None, version: str, not
     from ui.web import WebPanel
 
     panel = WebPanel(home, version, False)
-    core = Core(home, config, panel)
+    core = Core(home, config, panel, separate=True)  # 每按一次另開一個程序跑，頁面開著也不卡（D161）
     panel.attach(core)
     if note is not None:
         panel.submit(lambda: panel.log(note))  # 頁面就緒之後才送得出去，先排著

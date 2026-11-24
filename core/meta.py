@@ -9,7 +9,7 @@ from .types import Meta
 
 
 def read_meta(file: Path) -> Meta:
-    """解析 file，取 docstring 第一段、TITLE、ICON、PROVIDES、有沒有 run 與 on_files；壞掉的檔案把錯誤放進 error。"""
+    """解析 file，取 docstring 第一段、TITLE、ICON、PROVIDES、MIN_API、有沒有 run 與 on_files；壞掉的檔案把錯誤放進 error。"""
     try:
         tree = ast.parse(file.read_text(encoding="utf-8-sig"), str(file))
     except SyntaxError as exc:
@@ -18,7 +18,7 @@ def read_meta(file: Path) -> Meta:
         return Meta(None, "", False, False, T["syntax_error"].format(line=exc.lineno, message=exc.msg))
     except (ValueError, OSError):  # 解碼失敗、3.10 的 NUL 位元組、讀不到
         return Meta(None, "", False, False, T["file_unreadable"])
-    consts, funcs, provides = {}, set(), ()  # 頂層的 TITLE = "…"、ICON = "…"：只認字串常數
+    consts, funcs, provides, min_api = {}, set(), (), 0  # 頂層的 TITLE = "…"、ICON = "…"：只認字串常數
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             funcs.add(node.name)
@@ -26,12 +26,14 @@ def read_meta(file: Path) -> Meta:
             pairs = list(zip(node.value.keys, node.value.values, strict=True))
             if all(_str(k) and _str(v) for k, v in pairs):
                 provides = tuple((k.value, v.value) for k, v in pairs)
+        elif _assigns(node, "MIN_API") and isinstance(node.value, ast.Constant) and type(node.value.value) is int:
+            min_api = node.value.value
         elif (_assigns(node, "TITLE") or _assigns(node, "ICON")) and _str(node.value):
             consts[node.targets[0].id] = node.value.value
     doc = ast.get_docstring(tree) or ""
     description = "\n".join(takewhile(str.strip, doc.splitlines()))
     return Meta(consts.get("TITLE"), description, "run" in funcs, "on_files" in funcs, None,
-                consts.get("ICON"), provides)
+                consts.get("ICON"), provides, min_api)
 
 
 def _assigns(node: ast.stmt, name: str) -> bool:

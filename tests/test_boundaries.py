@@ -20,10 +20,13 @@ def test_bottom_layer_never_imports_tkinter():
 
 def test_core_has_no_os_code():
     """碰作業系統的事放 modules/作業系統，核心連字都不能出現（含註解、docstring 與新模組的範本：
-    0.5.1 的範本回到 0.5.0，不再帶「互通」那一小段，所以不再有例外）。"""
+    0.5.1 的範本回到 0.5.0，不再帶「互通」那一小段，所以不再有例外）。
+    唯一的例外：core/worker.py 用 subprocess 開工作程序（D161）。開程序是「執行」本身，不分平台，只用 sys.executable。"""
     for p in sorted(CORE.glob("*.py")):
         src = p.read_text(encoding="utf-8")
         for word in FORBIDDEN:
+            if p.name == "worker.py" and word == "subprocess":
+                continue
             # 若有誤判（例如某個識別字剛好含 os.name），改用 re 加字界，不要放寬清單
             assert word not in src, f"core/{p.name} 出現 {word}"
 

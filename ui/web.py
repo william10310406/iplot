@@ -179,6 +179,7 @@ class WebPanel:
         self._waiting: dict[int, tuple[threading.Event, list]] = {}  # 等回答的對話框
         self._closed = False
         self.menu_items: list[tuple[ModuleInfo, str, tuple]] = []  # 右鍵選單上模組提供的項目：（提供者, 函式名, (那一格,)）
+        self._busy: list[str] = []  # 還在跑的模組（標題），按下的順序
         self._pages: list = []  # 開著的頁面視窗（app.page）；已經有一頁開著，新的一頁不畫導覽列
         self._warned: set[Path] = set()
         self.recent, self.offer = errlog.Recent(), errlog.Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
@@ -233,10 +234,23 @@ class WebPanel:
 
     def press(self, core: Core, info: ModuleInfo, handler: str = "run", args: tuple = (), quiet: bool = False) -> None:
         """執行模組，前後各告訴頁面一聲：輸出要等模組結束才進訊息區，執行期間頁面得看得出它還在跑。
-        也用來跑模組的某個 handler（回報這個問題）。"""
-        self._js("busy", info.title)
-        core.press(info, handler, args, quiet)
-        self._js("busy", None)
+        也用來跑模組的某個 handler（回報這個問題）。每按一次另開程序時（D161），另開一條執行緒等它，
+        工作執行緒馬上空出來：頁面開著的時候按別的模組也馬上開始跑。狀態列顯示還在跑的最後一個。"""
+        def wait() -> None:
+            with self._lock:
+                self._busy.append(info.title)
+            self._js("busy", info.title)
+            try:
+                core.press(info, handler, args, quiet)
+            finally:
+                with self._lock:
+                    self._busy.remove(info.title)
+                    last = self._busy[-1] if self._busy else None
+                self._js("busy", last)
+        if getattr(core, "separate", False):
+            threading.Thread(target=wait, daemon=True).start()
+        else:
+            wait()
 
     def menu(self, core: Core, info: ModuleInfo) -> None:
         """右鍵選單上模組提供的項目（見 Bridge.menu）。"""

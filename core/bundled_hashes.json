@@ -212,13 +212,15 @@
 },
 "整理": {
 "CHANGELOG.md": [
-"a806ba693153bea8080b46d4609bdb8f4a72cbfab5c166ff83666dbad9443251"
+"a806ba693153bea8080b46d4609bdb8f4a72cbfab5c166ff83666dbad9443251",
+"a03ca101bec505e1c4cce6afb21e630b453833cce920e99ff8999dd867d656dd"
 ],
 "LICENSE": [
 "aeed872b5d5403c775876f5459a2c7705e9ceb4e575fba6286c2d0e40d7b48a0"
 ],
 "iplot.py": [
-"a6bc0a7d636a9f95bce3727d3f9dd58fa1d2d3e3b10ad557aeb04c349183ab49"
+"a6bc0a7d636a9f95bce3727d3f9dd58fa1d2d3e3b10ad557aeb04c349183ab49",
+"6fc7f0c2ec5de34049ceb3226922ad68aaf48666523c1ab481f784bc5f975c2f"
 ]
 },
 "更新": {
@@ -300,6 +302,17 @@
 "0059b4a273745c1a83e2b301466f52bfd5d5fb14d7c1aa0e424dac88cd5a6d30"
 ]
 },
+"頁面": {
+"CHANGELOG.md": [
+"9939e3cf51a472b29af517cba3601e6fbaa784c4d311698da0c5c69d90162a46"
+],
+"LICENSE": [
+"aeed872b5d5403c775876f5459a2c7705e9ceb4e575fba6286c2d0e40d7b48a0"
+],
+"iplot.py": [
+"16839c8c337822776118f3f7e7fc7fcc9113396933aeb6dcdecfb1cd21234e13"
+]
+},
 ".introduced": {
 "主控面板": "0.5.1",
 "互通": "0.5.1",
@@ -313,6 +326,7 @@
 "行事曆": "0.5.1",
 "重新啟動": "0.5.0",
 "開Terminal": "0.5.0",
-"開工": "0.5.0"
+"開工": "0.5.0",
+"頁面": "0.8.0"
 }
 }

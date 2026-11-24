@@ -3,6 +3,7 @@
 import contextlib
 import json
 import runpy
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -60,10 +61,13 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
 
 
 class Core:
-    """iPLoT 的編排：重掃、進入／返回、按下、依名稱執行、依角色找模組（D159）、新增、回報核心錯誤。"""
+    """iPLoT 的編排：重掃、進入／返回、按下、依名稱執行、依角色找模組（D159）、新增、回報核心錯誤。
+    separate：每按一次另開一個工作程序跑（D161，網頁面板用）；remote：自己就是工作程序，對主程序發問的函式。"""
 
-    def __init__(self, home: Path, config: Config, view: View, safe: bool = False) -> None:
+    def __init__(self, home: Path, config: Config, view: View, safe: bool = False,
+                 separate: bool = False, remote: Any = None) -> None:
         self.home, self.config, self.view, self.safe = home, config, view, safe
+        self.separate, self.remote, self._blobs = separate, remote, {}  # _blobs：工作程序交回來的 memory（pickle 過）
         self.scope = Scope(("iPLoT",), ())
         self.memories: dict[Path, dict] = {}
         self._stack: list[ModuleInfo] = []
@@ -75,8 +79,10 @@ class Core:
         return scan.roots_from_config(self.home, ("modules",) if self.safe else self.config.roots)
 
     def rescan(self) -> None:
-        """重掃目前範圍並重畫；模組執行中只先記著，等執行結束才做。"""
-        if self.running:
+        """重掃目前範圍並重畫；模組執行中只先記著，等執行結束才做。工作程序裡交給主程序做。"""
+        if self.remote is not None:
+            return self.remote("rescan")
+        if self.running and not self.separate:
             self._pending = True
             return
         gone = [i for i, m in enumerate(self._stack) if not scan.is_module(m.folder)]
@@ -109,6 +115,11 @@ class Core:
         """執行模組：先存快照再交給 runner，結果寫進訊息區；執行中收到的重掃延到結束才做。
         quiet 只省掉「完成」那一行，快照、輸出、錯誤照舊。
         模組資料夾裡有空檔案 .unconfirmed（工作坊裝進來的）時先問一次：取消就不執行，確定就拿掉標記（D59）。"""
+        if info.min_api > App.api_version:  # 要的指令集比這個核心新：不跑，說要更新（D161）
+            message = T["needs_api"].format(title=info.title, need=info.min_api, have=App.api_version)
+            error = ErrorInfo("NeedsNewerIPLoT", message, info.file, None, "", "module", info.name)
+            self.view.report(error)
+            return Result(False, error, 0.0, "")
         marker = info.folder / ".unconfirmed"
         if marker.exists() and not self.view.confirm(T["confirm_foreign"].format(title=info.title)):
             self.view.log(T["cancelled"].format(title=info.title))
@@ -121,7 +132,11 @@ class Core:
                 history.snapshot(info.file, self.config.history_keep)
             except OSError as exc:
                 self.view.log(T["snapshot_failed"].format(message=self._why(exc)))
-            result = runner.run_module(info, App(self, info), handler, args)
+            if self.separate:
+                from . import worker  # worker 也 import 這個檔，放在這裡才不會循環
+                result = worker.spawn(self, info, handler, args)
+            else:
+                result = runner.run_module(info, App(self, info), handler, args)
             for line in result.output.splitlines():
                 self.view.log(line)
             if result.error:
@@ -130,10 +145,17 @@ class Core:
                 self.view.log(T["done"].format(title=info.title, seconds=result.duration))
             return result
         finally:
-            self.running.pop()
+            self.running.remove(info)
             if not self.running and self._pending:
                 self._pending = False
                 self.rescan()
+
+    def start(self, info: ModuleInfo) -> None:
+        """開始跑 info，不等它（D161）：工作程序裡交給主程序；主程序裡另開一條執行緒按下去。"""
+        if self.remote is not None:
+            return self.remote("start", info)
+        threading.Thread(target=self.press, args=(info,), daemon=True).start()
+        return None
 
     def run_by_name(self, name: str | ModuleInfo) -> Result:
         """執行另一個模組：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 LookupError，不猜。

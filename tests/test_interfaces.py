@@ -30,7 +30,8 @@ def test_version_and_api_version():
 
 
 @pytest.mark.parametrize(("fn", "expected"), [
-    (Core.__init__, [("self", EMPTY), ("home", EMPTY), ("config", EMPTY), ("view", EMPTY), ("safe", False)]),
+    (Core.__init__, [("self", EMPTY), ("home", EMPTY), ("config", EMPTY), ("view", EMPTY), ("safe", False),
+                     ("separate", False), ("remote", None)]),
     (Core.rescan, [("self", EMPTY)]),
     (Core.all_modules, [("self", EMPTY)]),
     (Core.roots, [("self", EMPTY)]),

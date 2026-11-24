@@ -1,6 +1,6 @@
 # `app`：模組看得到的全部
 
-- `api_version = 5`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加。
+- `api_version = 6`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加；6（核心 0.9.0）每按一次另開一個程序跑模組，加了 `app.start` 與模組頂層的 `MIN_API`（D161），一樣只加。
 - 每次執行都新建一個 `App` 傳給 `run(app)`（或 `on_files(app, paths)`）；`module` 與 `memory` 在建立時綁好。執行一次＝在面板上雙擊模組的圖示，或右鍵選「執行」；tkinter 面板是單擊按鈕。tkinter 面板在兩種時候出現：安全模式（`python3 main.py --safe`，只掃 `modules/`），以及網頁面板開不起來時的備用面板（照常掃上一層與 `ROOTS`，不是安全模式，D75）；下面說「tkinter 面板」就是指這兩種。下面說的「按下」都是指執行這一次。
 - `def run(app)` 可省略：沒有 `run` 時最外層程式碼就是按下的動作，不用 `app` 也能寫模組（見最後一節）。
 - 本表整理自 `core/app.py` 的 docstring；兩邊不一致時以 `core/app.py` 為準。
@@ -26,10 +26,11 @@
 | 角色 | `app.each(role: str, *args)` → `list[tuple[ModuleInfo, 回傳值]]` | 交給每一個提供 role 的模組，依掃描順序；某一個壞了照常報錯，不影響其他的。 |
 | 角色 | `app.providers(role: str)` → `tuple[ModuleInfo, ...]` | 提供 role 的模組，依掃描順序。 |
 | 角色 | `app.<名字>(…)` | `app` 上沒有的名字：有模組提供 `app.<名字>` 這個角色，就交給它；沒有就是 AttributeError，所以 `hasattr(app, "x")` 看得出有沒有。 |
+| 動作 | `app.start(name: str | ModuleInfo)` → `None` | 開始跑另一個模組，不等它：它在自己的程序裡跑，這邊馬上回來（D161，`api_version` 6）。要它的結果用 `app.run`。 |
 | 動作 | `app.rescan()` → `None` | 重新掃描並重畫面板；在模組執行中呼叫時，會等這次執行結束後才做。 |
 | 問人 | `app.ask(prompt: str, default: str = '')` → `str | None` | 跳出對話框問一個字串；按取消回 None。 |
 | 問人 | `app.confirm(prompt: str)` → `bool` | 跳出對話框問「確定／取消」；按確定回 True。 |
-| 問人 | `app.page(title: str, html: str, api: object | None = None)` → `None` | 開一個視窗顯示一頁 HTML，關掉才回來；api 的公開方法給那一頁的 JS 用 pywebview.api.<方法> 呼叫。tkinter 面板（安全模式與備用面板）沒有頁面，只在訊息區記一行。 |
+| 問人 | `app.page(title: str, html: str, api: object | None = None)` → `None` | 開一個視窗顯示一頁 HTML，關掉才回來（只擋自己：模組在自己的程序裡跑，面板上別的模組照樣能按，D161）；api 的公開方法給那一頁的 JS 用 pywebview.api.<方法> 呼叫。tkinter 面板（安全模式與備用面板）沒有頁面，只在訊息區記一行。 |
 | 問人 | `app.choose_files()` → `list[Path]` | 跳出檔案選擇視窗；按取消回空清單。 |
 | 問人 | `app.choose_folder()` → `Path | None` | 跳出資料夾選擇視窗；按取消回 None。 |
 
@@ -79,32 +80,20 @@ def run(app):
 - 從工作坊裝來的模組宣告角色，第一次會先問使用者允不允許；不允許的話，這次執行期間它不算提供者，下次啟動再問。隨附的與自己寫的不用問。
 - 現在有的角色：`os.open`、`os.edit`、`os.reveal`、`os.terminal`、`os.trash`、`os.requirements`、`os.webview_ready`（作業系統）；`menu.module`（整理：面板上右鍵選單多的項目，回 `[(文字, 函式名), …]`）；`page.top`（導覽列：頁面上方那一排）。
 
-## 有頁面的模組：在另開的視窗裡開
+## 每按一次另開一個程序（核心 0.9.0，D161）
 
-`app.page` 等到視窗關掉才回來，而網頁面板一次只跑一個模組：頁面開著的期間，面板上按別的模組都會排隊，關掉之後才一次跑出來。要避開，就讓頁面在另一個程序裡開（「互通」0.4.0 的 `separate.py`，D157）：在 `run` 裡、`app.page` 之前加兩行，再把下面的 `_separate` 整段貼到檔尾。
+網頁面板每按一次就另開一個程序跑那個模組。所以：
 
-```python
-import importlib.util
-from pathlib import Path
+- `app.page` 開著的時候，面板上按別的模組馬上就跑，不用等頁面關掉。以前要貼的 `_separate`（「互通」的 `separate.py`）不用再貼。
+- 模組改工作目錄、`sys.argv`、`input`、`sys.path`、`sys.modules` 只影響自己的程序。
+- `app.memory` 照樣跨次保留，但存的東西要能 pickle（數字、字串、清單、dict 都可以）；存不了的那一次不帶回去，下一次拿到的是上一次存得了的。
+- 模組的回傳值也要能 pickle，傳不回來就當作出錯，錯誤會說是哪個型別。
+- 程序自己結束了（例如 `os._exit`、C 程式庫當掉）變成一個錯誤，面板照常。
+- 寫到 stdout、stderr 的東西照樣進訊息區；C 程式庫直接寫的進 `logs/worker.log`。
+- `app.run`、`app.call` 在同一個程序裡跑對方；`app.start` 另開一個、不等它。
+- 要用 `api_version` 6 才有的東西，在 `iplot.py` 頂層寫 `MIN_API = 6`：舊的 iPLoT 按下去會說「請按『更新』」，不會跑到一半才壞。
 
-
-def run(app):
-    if not _separate(app):
-        return
-    app.page("我的頁面", "<h1>hi</h1>")
-
-
-def _separate(app) -> bool:
-    path = Path(app.home) / "modules" / "互通" / "separate.py"
-    if not path.is_file():
-        return True
-    spec = importlib.util.spec_from_file_location("iplot_interop_separate", path)
-    separate = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(separate)
-    return separate.here(app)
-```
-
-`separate.here(app)` 在網頁面板裡會經「互通」的 `run.py` 另開一個程序、回 `False`（這裡就結束）；在那個另開的程序裡回 `True`，照常開頁面。同一個模組已經開著時，把它叫到最前面、回 `False`。沒有「互通」、tkinter 面板、另開失敗時回 `True`，跟以前一樣在原地開。另開的程序裡 `app` 是互通的（對話框與訊息在小視窗），`app.rescan()` 重掃的是那個程序；面板在視窗回到前面時自己會重掃。模組資料夾裡會有一個 `.pid`（開著的那段時間），上傳之前不用管它：發佈工具只收 git 追蹤的檔。
+頁面視窗由提供 `app.page` 這個角色的隨附模組「頁面」開，最上面那一排照樣問 `page.top`。tkinter 面板（安全模式與備用面板）照舊在同一個程序裡跑、沒有頁面。
 
 ## 最小的模組
 
