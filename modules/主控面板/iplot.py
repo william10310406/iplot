@@ -155,8 +155,9 @@ def launch(home: pathlib.Path, python: str, popen=subprocess.Popen) -> bool:
 
 
 def open_panel(app, home: pathlib.Path, *, modules=None, ps=_ps, lsof=_lsof, popen=subprocess.Popen, activate=activate,
-               platform: str | None = None, me: int | None = None) -> None:
-    """三種情況：在面板的程序裡（叫自己到最前面）；在面板外、面板開著（叫它到最前面）；在面板外、面板沒開（開一個）。"""
+               platform: str | None = None, me: int | None = None, parent=os.getppid) -> None:
+    """四種情況：在面板的程序裡（叫自己到最前面）；面板開的工作程序裡（面板已經在最前面，說一句）；
+    在面板外、面板開著（叫它到最前面）；在面板外、面板沒開（開一個）。"""
     modules = sys.modules if modules is None else modules
     platform = platform or sys.platform
     if in_panel(modules):
@@ -165,6 +166,9 @@ def open_panel(app, home: pathlib.Path, *, modules=None, ps=_ps, lsof=_lsof, pop
         app.log("主控面板已經開著")
         return
     pid = find_panel(home, ps, lsof, me) if platform == "darwin" else None
+    if pid is not None and pid == parent():  # iPLoT 0.9 起每按一次另開程序（D161）：面板就是開這個程序的那一個，它本來就在最前面
+        app.log("主控面板已經開著")
+        return
     if pid is not None:
         app.log("主控面板已經開著，叫到最前面了" if activate(pid, platform) else "主控面板已經開著，但沒辦法把它叫到最前面。到 Dock 點一下 Python 的圖示")
         return

@@ -155,7 +155,9 @@ def here(app, *, modules=sys.modules, ps=_ps, popen=subprocess.Popen, activate=a
         shown = activate(pid, platform or sys.platform)
         app.log((ALREADY if shown else ALREADY_BEHIND).format(title=title))
         return False
-    if "ui.web" not in modules or "ui.tk" in modules:  # 不在網頁面板裡：另開的程序、捷徑，或 tkinter 面板（沒有頁面）
+    # 不在網頁面板裡：另開的程序、捷徑、tkinter 面板（沒有頁面），或 iPLoT 0.9 起面板每按一次開的工作程序（D161）。
+    # 最後那種是刻意就地開的：工作程序本來就跟面板分開，頁面開著也不擋面板，不用再經 run.py 另開一次
+    if "ui.web" not in modules or "ui.tk" in modules:
         if "ui.tk" not in modules:
             _claim(folder, at_exit)
         return True

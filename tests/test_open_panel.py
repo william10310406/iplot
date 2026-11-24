@@ -55,6 +55,13 @@ def test_in_panel_brings_itself_forward(panel_mod, home):
     assert activated == [None] and launched == [] and app.logs == ["主控面板已經開著"]
 
 
+def test_in_a_worker_the_panel_started_it_says_so_without_activating(panel_mod, home):
+    """iPLoT 0.9 起每按一次另開程序（D161）：工作程序裡沒有 ui.web，但開它的就是面板（202），面板本來就在最前面。
+    以前會去叫 202 到最前面，工作程序沒辦法叫別的程式，就說「沒辦法叫到最前面」（2026-11-24 Mac 驗收）。"""
+    app, activated, launched = go(panel_mod, home, ps=lambda: ps_for(home), parent=lambda: 202)
+    assert activated == [] and launched == [] and app.logs == ["主控面板已經開著"]
+
+
 def test_in_the_safe_mode_panel_too(panel_mod, home):
     assert panel_mod.in_panel({"ui.tk": object()}) and not panel_mod.in_panel({"core.runner": object()})
 
