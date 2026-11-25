@@ -34,7 +34,8 @@ def old_ref():
 
 def old_install(home, ref):
     """ref 那一版的 iPLoT（git archive，跟發出去的包一樣），解到 home。"""
-    with tarfile.open(fileobj=BytesIO(git("archive", ref, "core", "ui", "main.py", "requirements", "modules/更新", "modules/打開核心原始碼"))) as tar:
+    # Windows 的 git 會照 core.autocrlf 把 archive 裡的文字檔換成 CRLF；發出去的包是 LF 的，這裡也要 LF
+    with tarfile.open(fileobj=BytesIO(git("-c", "core.autocrlf=false", "archive", ref, "core", "ui", "main.py", "requirements", "modules/更新", "modules/打開核心原始碼"))) as tar:
         # filter 要 3.10.12 以後才有（CI 的 Windows／macOS 是 3.10.11）
         tar.extractall(home, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     (home / "config.py").write_text("", encoding="utf-8")
