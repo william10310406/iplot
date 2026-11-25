@@ -1,9 +1,9 @@
 # `app`：模組看得到的全部
 
-- `api_version = 6`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加；6（核心 0.9.0）每按一次另開一個程序跑模組，加了 `app.start` 與模組頂層的 `MIN_API`（D161），一樣只加。
+- `api_version = 7`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加；6（核心 0.9.0）每按一次另開一個程序跑模組，加了 `app.start` 與模組頂層的 `MIN_API`（D161），一樣只加；7（核心 1.0.0）加了 `app.top_modules`、`app.parent_of`、`app.children_of`、`app.panel`、`app.describe`，模組不用再 import 核心、不用猜自己在哪個面板（D164），還有 `app.restart`（D166），一樣只加。
 - 每次執行都新建一個 `App` 傳給 `run(app)`（或 `on_files(app, paths)`）；`module` 與 `memory` 在建立時綁好。執行一次＝在面板上雙擊模組的圖示，或右鍵選「執行」；tkinter 面板是單擊按鈕。tkinter 面板在兩種時候出現：安全模式（`python3 main.py --safe`，只掃 `modules/`），以及網頁面板開不起來時的備用面板（照常掃上一層與 `ROOTS`，不是安全模式，D75）；下面說「tkinter 面板」就是指這兩種。下面說的「按下」都是指執行這一次。
 - `def run(app)` 可省略：沒有 `run` 時最外層程式碼就是按下的動作，不用 `app` 也能寫模組（見最後一節）。
-- 本表整理自 `core/app.py` 的 docstring；兩邊不一致時以 `core/app.py` 為準。
+- 本表整理自 `modules/核心/core/app.py` 的 docstring；兩邊不一致時以 `modules/核心/core/app.py` 為準。
 
 | 組 | 成員 | 說明 |
 |---|---|---|
@@ -12,6 +12,10 @@
 | 身分 | `app.modules` → `tuple[ModuleInfo, ...]`（唯讀） | 目前範圍內所有模組的唯讀清單。 |
 | 身分 | `app.parent` → `ModuleInfo | None`（唯讀） | 這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 `app.run`。 |
 | 身分 | `app.children` → `tuple[ModuleInfo, ...]`（唯讀） | 這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 `app.run`。 |
+| 身分 | `app.top_modules()` → `tuple[ModuleInfo, ...]` | 每個根目錄最上層的模組，每次都重新看磁碟；不管面板現在停在哪一層（D164，`api_version` 7）。 |
+| 身分 | `app.parent_of(info)` → `ModuleInfo | None` | 任何一個模組的父層，規則跟 `app.parent` 一樣；例如導覽列替開頁面的模組畫「上一層」（D164）。 |
+| 身分 | `app.children_of(info)` → `tuple[ModuleInfo, ...]` | 任何一個模組的子模組，規則跟 `app.children` 一樣（D164）。 |
+| 身分 | `app.panel` → `str | None`（唯讀） | 開這個模組的面板說它是哪一種（「網頁」「tkinter」）；不是從面板開的（`python3 main.py --run`）是 None。不要自己看 `sys.modules` 猜（AGENTS.md 第 4 條，D164）。 |
 | 身分 | `app.config` → `Config`（唯讀） | config.py 讀出來的設定（唯讀）：roots、editor、history_keep、update_url、workshop_url。 |
 | 身分 | `app.version` → `str` | 核心的版本字串（這一版是 `"0.8.0"`）。跟 `api_version` 一樣是類別屬性，說明寫在 `App` 的 docstring 裡。 |
 | 狀態 | `app.memory` → `dict`（唯讀） | 這個模組自己的 dict，iPLoT 開著期間保留；跨次啟動要留的請寫成檔案放 module.folder。 |
@@ -27,6 +31,8 @@
 | 角色 | `app.providers(role: str)` → `tuple[ModuleInfo, ...]` | 提供 role 的模組，依掃描順序。 |
 | 角色 | `app.<名字>(…)` | `app` 上沒有的名字：有模組提供 `app.<名字>` 這個角色，就交給它；沒有就是 AttributeError，所以 `hasattr(app, "x")` 看得出有沒有。 |
 | 動作 | `app.start(name: str | ModuleInfo)` → `None` | 開始跑另一個模組，不等它：它在自己的程序裡跑，這邊馬上回來（D161，`api_version` 6）。要它的結果用 `app.run`。 |
+| 動作 | `app.describe(error)` → `str` | 一筆錯誤（有 kind、message、file、line、source、module）的白話一句，跟面板訊息區說的一樣（D164）。 |
+| 動作 | `app.restart()` → `None` | 請面板關掉、整個 iPLoT 從頭再來，啟動參數照舊（安全模式還是安全模式，D166）。不是面板開的（`python3 main.py --run`）丟 AttributeError。 |
 | 動作 | `app.rescan()` → `None` | 重新掃描並重畫面板；在模組執行中呼叫時，會等這次執行結束後才做。 |
 | 問人 | `app.ask(prompt: str, default: str = '')` → `str | None` | 跳出對話框問一個字串；按取消回 None。 |
 | 問人 | `app.confirm(prompt: str)` → `bool` | 跳出對話框問「確定／取消」；按確定回 True。 |
@@ -47,7 +53,7 @@
 - `app.open`、`edit`、`reveal`、`terminal`、`trash` 都是交給 `modules/作業系統` 做的；沒有那個模組時訊息區會記一行、動作不執行；要改這些行為改那個模組，見 `docs/07_接口與邊界.md`。路徑可以是相對的：以呼叫當下的工作目錄為準，執行期間那就是模組自己的資料夾，所以 `app.open(Path("notes.txt"))` 開的是模組資料夾裡的 `notes.txt`。這五個動作啟動外部程式之後不等它結束。動作失敗時（例如系統上沒有那個程式），錯誤顯示在面板上、記在「作業系統」模組名下，呼叫它的模組不會收到例外、會繼續執行，動作的回傳值是 `None`——要確認 `trash` 有沒有搬走，自己看 `path.exists()`。Windows 上的做法未經實機驗證。
 - 跨次執行要保留的東西放 `app.memory`；跨次啟動要保留的寫成檔案放 `app.module.folder`。
 - 在面板外執行（裝了工作坊模組「互通」之後：捷徑、一行指令、直接 `python3 iplot.py`，見 `docs/07_接口與邊界.md` 第 12 節）時，`app` 的用法完全一樣，差別只有這幾件：每一次都是一個新的程序，`app.memory` 每次都是空的、不跟開著的面板共用；`app.log`、`print` 與錯誤出現在彈出式視窗，不進面板的訊息區；`app.modules` 是最上層（面板外沒有「進到下一層」）；`input()`、`app.ask`、`app.confirm` 的對話框開在彈出式視窗裡；`app.page` 一樣另開一個視窗；`import tkinter` 一樣被擋。要叫出面板，寫 `app.run("主控面板")`（同名的工作坊模組，D82）。
-- 模組要讀設定用 `app.config`，不用自己去讀 `config.py`：`app.config.roots`、`.editor`、`.history_keep`、`.update_url`、`.workshop_url`，對應 `config.py` 的 `ROOTS`、`EDITOR`、`HISTORY_KEEP`、`UPDATE_URL`、`WORKSHOP_URL`。它是啟動時讀好的那一份，唯讀（改它的欄位會丟例外）；`config.py` 改了，要重新啟動 iPLoT 才會變。兩個網址沒設定時是 `None`；`config.py` 壞了或型別不對時，整份是預設值。隨附的「更新」讀 `app.config.update_url`、「工作坊」讀 `app.config.workshop_url`，沒設定就只說一句怎麼設定，不連網。`app.version` 是核心的版本字串，指的是正在執行的這一份。剛更新完、還沒重新啟動時，它還是舊的，磁碟上的檔案已經是新的；所以「更新」比新舊、在確認對話框裡說「現在是哪一版」、給舊版的備份資料夾命名，用的都是磁碟上 `core/__init__.py` 寫的版本（`modules/更新/update.py` 的 `installed_version`），讀不到才用 `app.version`。
+- 模組要讀設定用 `app.config`，不用自己去讀 `config.py`：`app.config.roots`、`.editor`、`.history_keep`、`.update_url`、`.workshop_url`，對應 `config.py` 的 `ROOTS`、`EDITOR`、`HISTORY_KEEP`、`UPDATE_URL`、`WORKSHOP_URL`。它是啟動時讀好的那一份，唯讀（改它的欄位會丟例外）；`config.py` 改了，要重新啟動 iPLoT 才會變。兩個網址沒設定時是 `None`；`config.py` 壞了或型別不對時，整份是預設值。隨附的「更新」讀 `app.config.update_url`、「工作坊」讀 `app.config.workshop_url`，沒設定就只說一句怎麼設定，不連網。`app.version` 是核心的版本字串，指的是正在執行的這一份。剛更新完、還沒重新啟動時，它還是舊的，磁碟上的檔案已經是新的；所以「更新」比新舊、在確認對話框裡說「現在是哪一版」、給舊版的備份資料夾命名，用的都是磁碟上核心的 `core/__init__.py` 寫的版本（1.0 起在 `modules/核心/`）（`modules/更新/update.py` 的 `installed_version`），讀不到才用 `app.version`。
 - 從「工作坊」裝進來的模組，第一次執行前會先問一次（D59、D73）。工作坊安裝、更新或覆蓋一個模組時，在放程式之前先在它的資料夾裡放一個空檔案 `.unconfirmed`；包裡與磁碟上（這個模組的資料夾底下）每一個有 `iplot.py` 的資料夾都放一個，所以進到下一層執行子模組，一樣會先問。磁碟上的也算：新的包只帶了下一層模組旁邊的 `helper.py`、沒帶它的 `iplot.py` 時，那個上一版裝的、已經確認過的資料夾也重新放標記，執行它一樣先問。裝到一半出錯、又沒能放回原樣時，留下來的每個有 `iplot.py` 的資料夾也都放（裡面可能有新下載的程式）。資料夾裡有這個檔的模組，執行之前先跳「確定／取消」：「『<顯示名稱>』是從外面裝進來的，第一次執行前確認：它是會在這台電腦上執行的程式，能讀寫你的檔案。要執行嗎？」。按取消：不執行、不存快照，訊息區記一行「已取消執行『<顯示名稱>』」，標記留著，下次還會問。按確定：拿掉標記、照常執行，之後不再問；標記拿不掉（例如資料夾是唯讀的）也照常執行，只是下次還會再問。這是核心在執行之前做的，模組自己不用寫任何東西；用 `app.run` 執行這樣的模組一樣會先問，按取消時拿到的 `Result` 是 `ok=False`、`error=None`。工作坊不覆蓋「作業系統」「更新」「工作坊」這三個 iPLoT 自己要用的隨附模組（清單上那一列沒有按鈕），所以「作業系統」不會因為工作坊帶上這個標記；它們要換新版，是自己把新的資料夾複製進 `modules/`。「作業系統」的資料夾裡真的有這個檔的話（例如從別處複製進來的資料夾裡本來就帶著一個），在確認之前，每次 `app.open`、`edit`、`reveal`、`terminal`、`trash` 都會先問，按取消就不做、回 `None`。核心只看這個檔在不在，不讀它的內容：不是經過工作坊、自己把別人的資料夾複製進來的模組沒有這個檔，不會問。
 - `exit()` / `sys.exit(0)` / `quit()` 是正常結束；代碼非零（`exit(1)`、`sys.exit("壞了")`）才算錯誤，面板顯示「模組以 exit(1) 結束」。兩種都不會關掉 iPLoT。
 - `app.module` 是 `ModuleInfo`：`name`（資料夾名稱）、`title`（`TITLE` 或 name）、`description`（docstring 第一段）、`folder`、`file`、`root`、`level`、`has_run`、`accepts_files`、`has_children`、`error`、`icon`（`ICON` 寫的字串，沒寫是 `None`）、`icon_file`（圖示檔的路徑，沒有是 `None`）。
@@ -78,9 +84,10 @@ def run(app):
 
 - 提供者的函式跟按下一樣執行（存快照、錯誤顯示在面板、一次一個排隊）。
 - 從工作坊裝來的模組宣告角色，第一次會先問使用者允不允許；不允許的話，這次執行期間它不算提供者，下次啟動再問。隨附的與自己寫的不用問。
+- 問的時候寫的是角色的名字：自己寫的與隨附的模組可以在頂層用 `ROLE_NAMES = {"menu.module": "右鍵選單裡的項目"}`（字面值）替角色取一個給人看的名字（D166），沒有人取的就寫角色字串本身。工作坊裝來的模組取的名字不算，免得它把自己說得無害。
 - 現在有的角色：`os.open`、`os.edit`、`os.reveal`、`os.terminal`、`os.trash`、`os.requirements`、`os.webview_ready`（作業系統）；`menu.module`（整理：面板上右鍵選單多的項目，回 `[(文字, 函式名), …]`）；`page.top`（導覽列：頁面上方那一排）。
 
-## 每按一次另開一個程序（核心 0.9.0，D161）
+## 每按一次另開一個程序（核心 1.0.0，D161）
 
 網頁面板每按一次就另開一個程序跑那個模組。所以：
 
@@ -94,6 +101,45 @@ def run(app):
 - 要用 `api_version` 6 才有的東西，在 `iplot.py` 頂層寫 `MIN_API = 6`：舊的 iPLoT 按下去會說「請按『更新』」，不會跑到一半才壞。
 
 頁面視窗由提供 `app.page` 這個角色的隨附模組「頁面」開，最上面那一排照樣問 `page.top`。tkinter 面板（安全模式與備用面板）照舊在同一個程序裡跑、沒有頁面。
+
+## 面板也是模組（核心 1.0.0，D162）
+
+網頁面板是隨附模組「主控面板」：它宣告角色 `main`，iPLoT 開機時在自己的程序裡叫它。
+
+- `main`：`start(app, core, note=None, err=None)`，開面板、視窗關掉才回來。只有開機程式會叫，一般模組不用管。
+- `run.outside`：`outside(app, core, info, files, problem, config_error)`，`python3 main.py --run <模組>` 在面板外跑一個模組時要的畫面（D163）。`info` 是找好的模組（找不到是 `None`，`problem` 是那一句），`files` 是要交給 `on_files` 的檔案；回結束碼。丟 `ImportError` 就改在終端機跑。隨附的「互通」提供它。
+- `home`：`run(app)`，使用者的「首頁」：面板外跑完的小視窗，回去鈕先回這裡，沒有人提供才回面板（`main`，D93、D165）。剛好一個模組提供時才算。隨附的「行事曆」提供它。
+- `os.app_name`：`app_name(app, name)`，這個程序在 Dock、⌘-Tab 上的名字（不改是「Python」，D166）；要在開第一個視窗之前叫，改到了回 `True`。隨附的「作業系統」提供它（macOS；其他系統回 `False`）。主控面板、頁面、互通的小視窗開視窗前會叫。
+- `os.activate`：`activate(app, pid)`，把另一個程序的視窗叫到最前面，叫到了回 `True`（D164）。隨附的「作業系統」提供它，跟 `os.open`、`os.trash` 那些放在一起；這個系統做不到就回 `False`，由你跟使用者說下一步。
+- `panel.error`：`on_panel_error(app, error, recent, pressed)`。面板上出了錯（不是你這個模組出的錯），先交給你看一眼，`pressed` 是 `False`：回 `True` 表示值得問「要回報嗎？」，面板會問（每個錯誤最多問一次，可以「不要再問」）；使用者按了「回報這個問題」，或答了要回報，會再交一次，`pressed` 是 `True`。`error` 是那一筆錯誤，`recent` 是那時候訊息區最後幾行。隨附的「回報與討論」提供它。
+
+## 直接執行 `iplot.py`：檔頭的那一小段（核心 1.0.0，D163）
+
+隨附模組的 `iplot.py` 檔頭有下面這一段：在編輯器裡直接執行 `python3 iplot.py`，它會往上找 iPLoT 的 `main.py`，交給 `python3 main.py --run` 跑（有「互通」就開小視窗，沒有就在終端機）；從 iPLoT 裡執行時不做事。自己的模組要直接執行，照抄這一段；`IPLOT_DIRECT=1` 就照一般腳本跑。比較舊的 iPLoT 沒有 `--run`，請用「互通」加上它自己的那一段。
+
+```python
+# ── iPLoT ── 直接執行這個檔（python3 iplot.py）時交給 iPLoT 跑（python3 main.py --run）；從 iPLoT 裡執行時這段不做事。不要可以整段刪掉
+import sys
+
+if __name__ == "__main__" and "core.runner" not in sys.modules:
+    import os
+    import subprocess
+    here = folder = os.path.dirname(os.path.abspath(__file__))
+    main = None
+    while main is None and folder != os.path.dirname(folder):  # 往上一層層找 iPLoT：模組在它裡面或旁邊都找得到
+        folder = os.path.dirname(folder)
+        try:
+            names = [""] + sorted(os.listdir(folder))
+        except OSError:
+            names = [""]
+        mains = (os.path.join(folder, n, "main.py") for n in names)
+        main = next((m for m in mains if os.path.isfile(m) and os.path.isdir(os.path.join(os.path.dirname(m), "core"))), None)
+    if main and not os.environ.get("IPLOT_DIRECT"):  # IPLOT_DIRECT=1：不交出去，照一般腳本跑（例如在編輯器裡除錯）
+        sys.exit(subprocess.call([sys.executable, main, "--run", here, *sys.argv[1:]]))
+    if not main:
+        print("找不到 iPLoT（模組要放在 iPLoT 資料夾裡或它旁邊），照一般的 python3 iplot.py 跑", file=sys.stderr)
+# ── iPLoT ──
+```
 
 ## 最小的模組
 

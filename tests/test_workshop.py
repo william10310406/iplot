@@ -168,6 +168,17 @@ def test_bundled_without_origin_is_unknown(workshop, mods, entry):
     assert workshop.read_origin(mods / "整理桌面") is None and workshop.state(entry, mods) == "unknown"
 
 
+def test_a_module_the_listing_marks_as_bundled_is_not_unknown(workshop, mods, entry):
+    """1.0 清單小問題 6：清單標了 bundled、這裡沒有 .origin 的（跟著 iPLoT 來的行事曆、導覽列……）：
+    是「隨附模組」，沒有「覆蓋」，不會換成工作坊上的那一份；從工作坊裝過的（有 .origin）照舊比版本。"""
+    make_module(mods, "整理桌面", "print('隨附的')\n")
+    marked = {**entry, "bundled": True}
+    assert workshop.state(marked, mods) == "bundled" and workshop.state(entry, mods) == "unknown"
+    with pytest.raises(ValueError, match="跟著 iPLoT 一起來的"):
+        workshop.install(marked, mods)
+    assert workshop.state({**entry, "bundled": "yes"}, mods) == "unknown"  # 只認 true
+
+
 def test_install_snapshots_existing_folder(workshop, mods, entry, src):
     """覆蓋前整個舊資料夾存成 .history/…-folder.zip（不含 .history/ 自己）；包裡沒有的舊檔案留著。"""
     folder = make_module(mods, "整理桌面", "print('我自己的')\n")
@@ -251,7 +262,7 @@ def test_render_shows_state_and_the_right_button(workshop, mods, entry):
     workshop.install(entry, mods)
     html = workshop.render([entry], mods, "{rows}")
     assert workshop.LABELS["installed"] in html and "<button" not in html, "已安裝：沒有按鈕"
-    assert ">更新<" in workshop.render([{**entry, "version": "2.0.0"}], mods, "{rows}")
+    assert ">換成新版<" in workshop.render([{**entry, "version": "2.0.0"}], mods, "{rows}")
     (mods / "整理桌面" / "helper.py").write_text("改過", encoding="utf-8")
     assert ">覆蓋<" in workshop.render([entry], mods, "{rows}")
 

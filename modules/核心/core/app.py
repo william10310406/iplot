@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,9 +17,10 @@ class App:
     """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version 並寫進 CHANGELOG
     （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page；4 加了 parent、children；
     5 加了 call、each、providers，以及「沒有的名字交給提供 app.<名字> 的模組」，見 D159；
-    6 每按一次另開一個程序跑，加了 start，模組可以寫 MIN_API，見 D161）。version 是核心的版本字串。"""
+    6 每按一次另開一個程序跑，加了 start，模組可以寫 MIN_API，見 D161；7 加了 top_modules、parent_of、children_of、panel、describe，
+    模組不用再 import 核心或猜自己在哪個面板，見 D164）。version 是核心的版本字串。"""
 
-    api_version: int = 6
+    api_version: int = 7
     version: str = __version__
 
     def __init__(self, core: Core, info: ModuleInfo) -> None:
@@ -62,12 +64,33 @@ class App:
     @property
     def parent(self) -> ModuleInfo | None:
         """這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 app.run。"""
-        return scan.parent_of(self._info, self._core.roots())
+        return self.parent_of(self._info)
 
     @property
     def children(self) -> tuple[ModuleInfo, ...]:
         """這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 app.run。"""
-        return tuple(scan.find_children(self._info.folder, self._info.root))
+        return self.children_of(self._info)
+
+    def top_modules(self) -> tuple[ModuleInfo, ...]:
+        """每個根目錄最上層的模組，每次都重新看磁碟；不管面板現在停在哪一層（app.modules 是面板現在那一層）。"""
+        return tuple(m for g in scan.find_modules(self._core.roots()) for m in g.modules)
+
+    def parent_of(self, info: ModuleInfo) -> ModuleInfo | None:
+        """任何一個模組的父層（跟 app.parent 一樣的規則）；例如導覽列替開頁面的模組畫「上一層」。"""
+        return scan.parent_of(info, self._core.roots())
+
+    def children_of(self, info: ModuleInfo) -> tuple[ModuleInfo, ...]:
+        """任何一個模組的子模組（跟 app.children 一樣的規則）。"""
+        return tuple(scan.find_children(info.folder, info.root))
+
+    @property
+    def panel(self) -> str | None:
+        """開這個模組的面板說它是哪一種（例如「網頁」「tkinter」）；不是從面板開的（python3 main.py --run）是 None。"""
+        return getattr(self._core.view, "name", None)  # 面板說自己是哪一種；工作程序裡是開它的那個面板的（D164）
+
+    def describe(self, error: Any) -> str:
+        """一筆錯誤（有 kind、message、file、line、source、module 的物件）的白話一句，跟面板訊息區說的一樣。"""
+        return self._core.describe(error)
 
     @property
     def config(self) -> Config:
@@ -97,6 +120,10 @@ class App:
     def reveal(self, path: Path) -> None:
         """在檔案總管裡顯示並選取這個檔案或資料夾。"""
         self._core.action("reveal", Path(path).absolute())
+
+    def restart(self) -> None:
+        """請面板關掉、整個 iPLoT 從頭再來，啟動參數照舊（D166）。不是面板開的（main.py --run）丟 AttributeError。"""
+        self._core.view.restart()
 
     def terminal(self, path: Path) -> None:
         """在終端機打開這個資料夾。"""
@@ -131,8 +158,16 @@ class App:
         模組在自己的程序裡跑時（D161），交給提供 app.page 的模組在這個程序開視窗，只卡住自己；
         tkinter 面板（安全模式與備用面板）沒有頁面，只在訊息區記一行。"""
         if getattr(self._core, "remote", None) is not None and self._core.providers("app.page"):
-            return self._core.call("app.page", title, html, api, self._info)
+            self._paging(True)
+            try:
+                return self._core.call("app.page", title, html, api, self._info)
+            finally:
+                self._paging(False)
         return self._core.view.page(title, html, api)
+
+    def _paging(self, opened: bool) -> None:
+        with contextlib.suppress(Exception):  # 面板的狀態列說「頁面開著」，不說「執行中」（D166）；沒有這個方法的面板不管
+            self._core.view.paging(self._info.title, opened)
 
     def choose_files(self) -> list[Path]:
         """跳出檔案選擇視窗；按取消回空清單。"""

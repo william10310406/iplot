@@ -1,8 +1,10 @@
-"""一鍵回報（M9、D150）：面板記最近的訊息與最近一次的錯誤（ui/errlog.py → logs/last-error.json）、自動問「出錯了，要回報嗎？」
+"""一鍵回報（M9、D150、D162）：面板記最近的訊息、把錯誤交給提供 panel.error 的模組（「回報與討論」的 lasterror.py 寫
+logs/last-error.json、決定值不值得問）、自動問「出錯了，要回報嗎？」
 （同一種錯誤只問一次、「這次執行期間不要再問」）、全域的例外處理，與「回報與討論」0.2.0 把它們放進回報（最近的訊息、
 「回報問題」附上最近一次的錯誤、「我當時在做什麼」、網址放不下時先拿掉最近的訊息）。不開瀏覽器、不連網。"""
 # ruff: noqa: F811  load、opened、web 是從 test_report 匯進來的 fixture，測試的參數同名是 pytest 的用法
 
+import dataclasses
 import getpass
 import importlib.util
 import json
@@ -26,9 +28,14 @@ from test_report import (  # noqa: F401
 )
 
 from core.core import Core
-from core.text import REPORT_MODULE, T
+from core.text import T
 from core.types import DEFAULT_CONFIG, ErrorInfo
 from ui import errlog
+
+REPORT_MODULE = "回報與討論"
+_spec = importlib.util.spec_from_file_location("iplot_lasterror", MODULE / "lasterror.py")
+lasterror = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(lasterror)
 
 ERR = ErrorInfo("KeyError", "'score'", Path("/x/科學計算/hk.py"), 2, "Traceback …\nKeyError: 'score'\n", "module", "科學計算")
 
@@ -79,11 +86,12 @@ def test_offer_muted_never_asks():
     assert not offer.due(ERR) and not offer.due(other(kind="ValueError"))
 
 
-def test_offer_skips_config_errors_and_the_reporters_own_errors():
+def test_offer_skips_config_errors_and_the_reporter_skips_its_own_errors():
     offer = errlog.Offer(clock=Clock())
     assert not offer.due(other(source="config", module=None))
-    assert not offer.due(other(module=REPORT_MODULE))
     assert offer.due(other(source="core", module=None))
+    assert not lasterror.worth_reporting(other(module=REPORT_MODULE), REPORT_MODULE)  # 它壞了不能蓋掉原本那一筆
+    assert lasterror.worth_reporting(ERR, REPORT_MODULE)
 
 
 def test_offer_skips_a_cancelled_question_but_asks_about_the_modules_own_eoferror():
@@ -93,7 +101,7 @@ def test_offer_skips_a_cancelled_question_but_asks_about_the_modules_own_eoferro
     assert offer.due(other(kind="EOFError", message=T["input_cancelled"]))
 
 
-# ── 最近的訊息與 logs/last-error.json（errlog.Recent、errlog.write）──
+# ── 最近的訊息與 logs/last-error.json（errlog.Recent、lasterror.write）──
 
 def test_recent_keeps_the_last_lines_and_splits_multiline_text():
     recent = errlog.Recent()
@@ -105,23 +113,17 @@ def test_recent_keeps_the_last_lines_and_splits_multiline_text():
 
 
 def test_write_puts_the_error_and_recent_lines_in_last_error_json(home):
-    errlog.write(home, ERR, ["a", "b"])
+    lasterror.write(home, ERR, "白話", ["a", "b"])
     data = json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))
     assert data["kind"] == "KeyError" and data["file"] == str(ERR.file) and data["line"] == 2
     assert data["recent"] == ["a", "b"] and data["sentence"] and data["time"]
     assert not (home / "logs" / "last-error.json.tmp").exists()
 
 
-def test_write_skips_the_reporters_own_errors(home):
-    errlog.write(home, ERR, ["原本那一筆"])
-    errlog.write(home, other(module=REPORT_MODULE, kind="TypeError"), ["回報與討論自己壞了"])
-    assert json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))["kind"] == "KeyError"
-
-
 def test_write_never_raises_when_logs_cannot_be_written(home):
     (home / "logs").write_text("不是資料夾", encoding="utf-8")  # logs 是一個檔：mkdir、寫檔都失敗
-    errlog.write(home, ERR, [])
-    errlog.write(home, other(message="\udce9"), ["\udce9"])  # 孤立的代理字元也不丟
+    lasterror.write(home, ERR, "白話", [])
+    lasterror.write(home, other(message="\udce9"), "白話", ["\udce9"])  # 孤立的代理字元也不丟
 
 
 # ── 全域的例外處理（errlog.install）──
@@ -167,19 +169,27 @@ def test_hooks_survive_an_unwritable_logs_folder(home, monkeypatch):
 # ── 網頁面板：自動問一次 ──
 
 def install_reporter(home, src):
-    """modules/回報與討論 換成一個假的：on_error 把收到的錯誤寫進 got.txt（或照 src 做別的）。"""
-    return make_module(home / "modules", REPORT_MODULE, src)
+    """modules/回報與討論 換成一個假的提供 panel.error 的模組：按了「回報」把收到的錯誤寫進 got.txt；沒按的時候
+    跟真的一樣問 lasterror（真的那一份抄過去）值不值得問、寫 last-error.json（或照 src 做別的）。"""
+    folder = make_module(home / "modules", REPORT_MODULE, src)
+    shutil.copy2(MODULE / "lasterror.py", folder / "lasterror.py")
+    return folder
 
 
-ON_ERROR = ("from pathlib import Path\n\ndef run(app):\n    pass\n\n"
-            "def on_error(app, error):\n    Path(app.home, 'got.txt').open('a').write(error.kind + '\\n')\n")
+ON_ERROR = ('PROVIDES = {"panel.error": "handle"}\nfrom pathlib import Path\nimport lasterror\n\n'
+            "def run(app):\n    pass\n\n"
+            "def handle(app, error, recent, pressed):\n"
+            "    if pressed:\n        Path(app.home, 'got.txt').open('a').write(error.kind + '\\n')\n        return None\n"
+            "    worth = lasterror.worth_reporting(error, app.module.name)\n"
+            "    if worth:\n        lasterror.write(app.home, error, recent[-1], recent)\n"
+            "    return worth\n")
 BAD = "def run(app):\n    1 / 0\n"
 
 
 @pytest.fixture
 def live(home):
     """跑過 run() 的 WebPanel，自動問「要回報嗎？」是開著的。回 (panel, window)。"""
-    from ui.web import WebPanel
+    from panel_web import WebPanel
 
     p = WebPanel(home, "0.6.2", False, webview=FakeWebview())
     p.attach(Core(home, DEFAULT_CONFIG, p))
@@ -245,6 +255,7 @@ def test_web_offer_asks_and_report_runs_on_error(live, home):
     install_reporter(home, ON_ERROR)
     crash(panel, home)
     answer_offer(panel, window, {"report": True, "mute": False})
+    until(lambda: (home / "got.txt").exists())  # 答了回報：在問的那條執行緒裡交給提供者
     assert (home / "got.txt").read_text() == "ZeroDivisionError\n"
     assert T["offer_report"].split("\n")[0] in offers(window)[0][1]
 
@@ -289,9 +300,10 @@ def test_web_no_offer_without_the_report_module(live, home):
 
 def test_web_reporter_crashing_does_not_ask_again_or_kill_the_panel(live, home):
     panel, window = live
-    install_reporter(home, "def run(app):\n    pass\n\ndef on_error(app, error):\n    raise RuntimeError('回報壞了')\n")
+    install_reporter(home, ON_ERROR.replace("    if pressed:\n", "    if pressed:\n        raise RuntimeError('回報壞了')\n"))
     crash(panel, home)
     answer_offer(panel, window, {"report": True, "mute": False})
+    until(lambda: len(window.calls("report")) == 2)
     reports = window.calls("report")
     assert [r[0]["kind"] for r in reports] == ["ZeroDivisionError", "RuntimeError"]
     assert len(offers(window)) == 1  # 回報與討論自己的錯誤不再問
@@ -316,9 +328,11 @@ def test_web_closing_the_window_while_asking_is_a_no(live, home):
 
 def test_web_report_writes_last_error_with_recent_messages(live, home):
     panel, window = live
+    install_reporter(home, ON_ERROR)
     make_module(home / "modules", "吵", "def run(app):\n    print('先印一行')\n    1 / 0\n")
     crash(panel, home, "吵")
     panel.wait()
+    until(lambda: (home / "logs" / "last-error.json").is_file())  # 交給 panel.error 的那一件在自己的執行緒
     data = json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))
     assert data["kind"] == "ZeroDivisionError" and "先印一行" in data["recent"]
     assert data["recent"][-1] == data["sentence"]
@@ -335,6 +349,37 @@ def test_bridge_thread_errors_reach_the_panel_through_the_sink(live, home, monke
     t.join()
     panel.wait()
     assert window.calls("report")[-1][0]["source"] == "core"
+
+
+# ── 真的「回報與討論」的 on_panel_error（repo 裡那一份，覆蓋率量得到）──
+
+LOUD = ErrorInfo("ZeroDivisionError", "division by zero", None, None, "Traceback …\n", "module", "吵")
+
+
+def test_on_panel_error_unpressed_writes_last_error_and_says_it_is_worth_asking(load, home):
+    from test_report import make_app
+    iplot = load("iplot")
+    assert iplot.on_panel_error(make_app(home), LOUD, ["先印一行", "吵：division by zero"], False) is True
+    data = json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))
+    assert data["kind"] == "ZeroDivisionError" and data["sentence"] == "吵：division by zero"
+
+
+def test_on_panel_error_skips_its_own_errors(load, home):
+    from test_report import make_app
+    iplot = load("iplot")
+    app = make_app(home)
+    own = other(module=app.module.name, file=None, line=None)
+    assert iplot.on_panel_error(app, own, ["x"], False) is False
+    assert not (home / "logs" / "last-error.json").exists()
+
+
+def test_on_panel_error_pressed_opens_the_report(load, home, monkeypatch):
+    from test_report import make_app
+    iplot = load("iplot")
+    seen = []
+    monkeypatch.setattr(iplot, "on_error", lambda app, error, recent=None: seen.append((error, recent)))
+    iplot.on_panel_error(make_app(home), LOUD, ["a"], True)
+    assert seen == [(LOUD, ["a"])]
 
 
 # ── tkinter 面板 ──
@@ -483,9 +528,9 @@ def test_fit_drops_recent_messages_before_cutting_the_traceback(load):
 
 def test_last_error_reads_what_the_panel_wrote(load, home):
     report = load("report")
-    errlog.write(home, ERR, ["一", "二"])
+    lasterror.write(home, ERR, "白話", ["一", "二"])
     error, recent, when = report.last_error(home)
-    assert error == ERR and recent == ["一", "二"] and when
+    assert dataclasses.astuple(error) == dataclasses.astuple(ERR) and recent == ["一", "二"] and when
 
 
 @pytest.mark.parametrize("content", ["", "不是 JSON", "[]", '{"kind": 1}', json.dumps({
@@ -505,7 +550,7 @@ def test_last_error_missing_is_none(load, home):
 
 def test_recent_for_only_attaches_the_matching_error(load, home):
     report = load("report")
-    errlog.write(home, ERR, ["那時候的訊息"])
+    lasterror.write(home, ERR, "白話", ["那時候的訊息"])
     assert report.recent_for(home, ERR) == ["那時候的訊息"]
     assert report.recent_for(home, other(kind="ValueError")) == []
 
@@ -515,7 +560,7 @@ def test_recent_for_only_attaches_the_matching_error(load, home):
 def test_menu_report_attaches_the_last_error(tmp_path, web):
     home = tmp_path / "iPLoT"
     home.mkdir()
-    errlog.write(home, ERR, ["那時候的訊息"])
+    lasterror.write(home, ERR, "白話", ["那時候的訊息"])
     view = FakeView()
     result, _ = press(home, view, "run")
     assert result.ok, result.error
@@ -549,7 +594,7 @@ def test_menu_report_survives_a_broken_last_error_file(tmp_path, web):
 def test_on_error_attaches_recent_messages_of_that_error(tmp_path, web):
     home = tmp_path / "iPLoT"
     home.mkdir()
-    errlog.write(home, ERR, ["那時候的訊息"])
+    lasterror.write(home, ERR, "白話", ["那時候的訊息"])
     view = FakeView()
     result, _ = press(home, view, "on_error", ERR)
     assert result.ok, result.error
@@ -575,15 +620,15 @@ def test_page_has_doing_copy_and_last(load):
 
 
 def test_reporter_version_is_the_changelogs_newest_section(load):
-    assert load("report").REPORTER == "0.2.2"
-    assert "## [0.2.2]" in (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert load("report").REPORTER == "0.4.1"
+    assert "## [0.3.0]" in (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
 
 
 def test_core_logic_is_untouched_by_m9():
     """D150：這一版不動核心邏輯（core/ 除了 text.py），只動 ui/、main.py 與模組；核心邏輯的行數不變（501）。
-    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505；2-10（新增模組先寫暫存檔再改名）加 5 行，是 510；審查 S4（OSError 的原文寫進 logs/iplot.log）加 6 行，是 516；0.7.0 的導覽列基礎（app.parent、app.children、scan.parent_of；Core.running 取代 _depth，行數不變，D152）加 12 行，是 528；0.7.1 面板上的改名與移到垃圾桶（`core/modify.py` 新檔 30 行、`Core.rename`／`Core.remove` 33 行，D155）加 63 行，是 591；0.7.2 隨附模組跟著更新（`core/bundled.py` 新檔 104 行，D156）加 104 行，是 695；0.8.0 依角色找模組（providers／call／each、app 的轉接、工作坊模組先問一次）加、改名與刪除搬進「整理」減、隨附同步能裝新加的模組加，D159，是 699；1.0 前的過渡：每按一次另開程序（core/worker.py、core/pipe.py、MIN_API、app.start，D161）加 173 行，是 872。"""
+    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505；2-10（新增模組先寫暫存檔再改名）加 5 行，是 510；審查 S4（OSError 的原文寫進 logs/iplot.log）加 6 行，是 516；0.7.0 的導覽列基礎（app.parent、app.children、scan.parent_of；Core.running 取代 _depth，行數不變，D152）加 12 行，是 528；0.7.1 面板上的改名與移到垃圾桶（`core/modify.py` 新檔 30 行、`Core.rename`／`Core.remove` 33 行，D155）加 63 行，是 591；0.7.2 隨附模組跟著更新（`core/bundled.py` 新檔 104 行，D156）加 104 行，是 695；0.8.0 依角色找模組（providers／call／each、app 的轉接、工作坊模組先問一次）加、改名與刪除搬進「整理」減、隨附同步能裝新加的模組加，D159，是 699；1.0 前的過渡：每按一次另開程序（core/worker.py、core/pipe.py、MIN_API、app.start，D161）加 173 行，是 872；網頁面板搬進 modules/主控面板/（開機程式叫面板的 call_here、面板不 import core 也能用的 describe，D162）加 15 行，是 887；模組不 import 核心、不猜面板（app 的 top_modules、parent_of、children_of、panel、describe，api_version 7）加、照名字找「作業系統」的過渡拿掉減，D164，是 894；1.0 清單的小問題（ROLE_NAMES、paging、app.restart，D166）加 14 行，是 908；1.0 隨附的名單改從雜湊表讀（D169）減 3 行，是 905；0.8 升上來時把沒改過的「打開核心原始碼」移到備份（雜湊表的 .retired，D171）加 15 行，是 920。"""
     from test_budget import core_logic
-    assert sum(core_logic().values()) == 872
+    assert sum(core_logic().values()) == 920
 
 
 
@@ -617,21 +662,21 @@ def test_student_homework_error_is_not_offered(home):
     _, student = course_tree(home)
     error = run_error(home, student)
     assert error.kind == "ZeroDivisionError" and error.file == student / "iplot.py"
-    assert errlog.student_homework(error)
-    assert not errlog.Offer(clock=Clock()).due(error)
+    assert lasterror.student_homework(error)
+    assert not lasterror.worth_reporting(error, REPORT_MODULE)
 
 
 def test_student_syntax_error_is_not_offered(home):
     _, student = course_tree(home, "import hk_page\ndef compute(case:\n")
     error = run_error(home, student)
-    assert error.kind == "SyntaxError" and errlog.student_homework(error)
+    assert error.kind == "SyntaxError" and lasterror.student_homework(error)
 
 
 def test_student_error_in_a_library_call_is_still_the_students(home):
     # 學生把 json.loads 用錯：traceback 最後一格在標準庫裡，模組資料夾裡最內層的那一格是學生的檔
     _, student = course_tree(home, "import hk_page\nimport json\njson.loads('{')\n")
     error = run_error(home, student)
-    assert error.kind == "JSONDecodeError" and errlog.student_homework(error)
+    assert error.kind == "JSONDecodeError" and lasterror.student_homework(error)
 
 
 def test_error_in_the_shell_next_to_the_student_is_offered(home):
@@ -639,7 +684,7 @@ def test_error_in_the_shell_next_to_the_student_is_offered(home):
     _, student = course_tree(home, "import hk_page\nhk_page.boom()\n")
     error = run_error(home, student)
     assert error.file == student / "hk_page.py"
-    assert not errlog.student_homework(error) and errlog.Offer(clock=Clock()).due(error)
+    assert not lasterror.student_homework(error) and lasterror.worth_reporting(error, REPORT_MODULE)
 
 
 def test_old_format_student_folder_is_offered(home):
@@ -649,27 +694,27 @@ def test_old_format_student_folder_is_offered(home):
     (student / "t2026fscSpace").mkdir()
     (student / "t2026fscSpace" / "HK5.txt").write_text("def HK5():\n    LF_subWIN\n", encoding="utf-8")
     error = run_error(home, student)
-    assert not errlog.student_homework(error) and errlog.Offer(clock=Clock()).due(error)
+    assert not lasterror.student_homework(error) and lasterror.worth_reporting(error, REPORT_MODULE)
 
 
 def test_same_shape_outside_a_course_is_offered(home):
     # 沒有 hk_tk.py 的上上層：不是科學計算的課，只是長得像
     folder = make_module(make_module(home / "modules", "別的", "def run(app):\n    pass\n"), "子", "x = 1 / 0\n")
     (folder / "hk_page.py").write_text("", encoding="utf-8")
-    assert not errlog.student_homework(run_error(home, folder))
+    assert not lasterror.student_homework(run_error(home, folder))
 
 
 def test_course_and_hk_level_errors_are_offered(home):
     course, _ = course_tree(home)
     (course / "HK5" / "iplot.py").write_text("x = 1 / 0\n", encoding="utf-8")  # 老師那一層（HKn 的墊片）
-    assert not errlog.student_homework(run_error(home, course / "HK5"))
+    assert not lasterror.student_homework(run_error(home, course / "HK5"))
     (course / "iplot.py").write_text("x = 1 / 0\n", encoding="utf-8")
-    assert not errlog.student_homework(run_error(home, course, "here"))
+    assert not lasterror.student_homework(run_error(home, course, "here"))
 
 
 def test_core_and_config_errors_are_never_student_homework():
-    assert not errlog.student_homework(other(source="core", module=None))
-    assert not errlog.student_homework(other(file=None))
+    assert not lasterror.student_homework(other(source="core", module=None))
+    assert not lasterror.student_homework(other(file=None))
 
 
 def test_symlinked_student_folder_is_offered(home, tmp_path):
@@ -680,7 +725,7 @@ def test_symlinked_student_folder_is_offered(home, tmp_path):
     except OSError:
         pytest.skip("這台不能建符號連結")
     error = other(file=link / "iplot.py", module="連結")
-    assert not errlog.student_homework(error)
+    assert not lasterror.student_homework(error)
 
 
 def test_student_rule_matches_science_courses_own(home, load):
@@ -691,13 +736,13 @@ def test_student_rule_matches_science_courses_own(home, load):
     spec.loader.exec_module(hk_tk)
     assert hk_tk._is_student(student, "HK5") and hk_tk._is_new_folder(student)
     assert hk_tk.course_root(student) == course.resolve()
-    assert errlog.student_homework(run_error(home, student))
+    assert lasterror.student_homework(run_error(home, student))
 
 
-def test_student_error_is_not_written_as_the_last_error(home):
-    errlog.write(home, ERR, ["原本那一筆"])
+def test_student_error_is_not_worth_reporting_so_it_is_not_written_as_the_last_error(home):
     _, student = course_tree(home)
-    errlog.write(home, run_error(home, student), ["學生的"])
+    assert not lasterror.worth_reporting(run_error(home, student), REPORT_MODULE)  # 提供者看了不值得就不寫
+    lasterror.write(home, ERR, "白話", ["原本那一筆"])
     assert json.loads((home / "logs" / "last-error.json").read_text(encoding="utf-8"))["recent"] == ["原本那一筆"]
 
 
@@ -710,12 +755,14 @@ def test_web_student_error_keeps_the_button_but_does_not_ask(live, home):
     info = module_info(student, (home / "modules").resolve(), "child")
     panel.submit(lambda: panel.press(panel.core, info))
     panel.wait()
+    until(lambda: window.calls("report") and not panel.core.running)  # 按下與交給提供者看一眼都在自己的執行緒
     row = window.calls("report")[-1][0]
     assert row["kind"] == "ZeroDivisionError" and row["reportable"]  # 「回報這個問題」照樣在
     assert not offers(window)
     bridge = window.kw["js_api"]
-    bridge.report_error(row["id"])  # 按那一列的鈕：照樣交給 on_error
+    bridge.report_error(row["id"])  # 按那一列的鈕：照樣交給提供者
     panel.wait()
+    until(lambda: (home / "got.txt").is_file() and not panel.core.running)  # 還在跑的話，下面 crash 的重掃會延後
     assert (home / "got.txt").read_text() == "ZeroDivisionError\n"
     crash(panel, home)  # iPLoT 這邊的模組出錯：照常問
     answer_offer(panel, window, {"report": False, "mute": False})

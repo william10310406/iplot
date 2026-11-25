@@ -13,12 +13,11 @@ from conftest import make_module
 
 from core import scan
 from core.core import Core
-from core.text import BUNDLED as CORE_BUNDLED
 from core.text import T as CORE_T
 from core.types import DEFAULT_CONFIG
 
 ROOT = Path(__file__).resolve().parents[1]
-FAKE_OS = ('import shutil\nfrom pathlib import Path\n\n'
+FAKE_OS = ('PROVIDES = {"os.trash": "trash"}\nimport shutil\nfrom pathlib import Path\n\n'
            'def trash(app, path):\n'
            '    bin_ = Path(app.home) / "fake-trash"\n'
            '    bin_.mkdir(exist_ok=True)\n'
@@ -255,11 +254,12 @@ def test_remove_without_the_system_module_leaves_the_folder_and_says_so(home, vi
     core = started(home, view)
     assert remove(core, find(core, "A")) is False
     assert folder.is_dir() and view.logs[-1] == T["remove_failed"].format(title="A")
-    assert T["no_system"].format(module="作業系統", name="trash") in view.logs
+    assert T["no_system"].format(role="os.trash") in view.logs
 
 
 def test_remove_when_the_trash_fails_reports_it_and_leaves_the_folder(home, view):
-    make_module(home / "modules", "作業系統", 'def trash(app, path):\n    raise OSError("垃圾桶滿了")\n')
+    make_module(home / "modules", "作業系統",
+                'PROVIDES = {"os.trash": "trash"}\n\ndef trash(app, path):\n    raise OSError("垃圾桶滿了")\n')
     folder = make_module(home / "modules", "A")
     core = started(home, view)
     assert remove(core, find(core, "A")) is False
@@ -288,4 +288,3 @@ def test_bundled_names_match_what_the_core_package_ships():
     tracked = {line.split("/")[1] for line in git.stdout.split("\0") if "/" in line}
     shipped = {name for name in tracked if not any(fnmatch.fnmatch(f"modules/{name}", pat.rstrip("/")) for pat in ignored)}
     assert shipped == set(BUNDLED), f"核心的包帶的是 {sorted(shipped)}；「整理」的 BUNDLED 是 {sorted(BUNDLED)}"
-    assert shipped == set(CORE_BUNDLED), f"核心的包帶的是 {sorted(shipped)}；core/text.py 的 BUNDLED 是 {sorted(CORE_BUNDLED)}"

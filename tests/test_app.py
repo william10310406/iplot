@@ -2,6 +2,7 @@ import dataclasses
 import re
 from pathlib import Path
 
+import pytest
 from conftest import make_module
 
 from core.app import App
@@ -62,10 +63,43 @@ def test_ask_and_choose_delegate(fake_core, info):
     assert app.choose_files() == [Path("/f")] and app.choose_folder() == Path("/d")
 
 
-def test_api_version_is_6(fake_core, info):
+def test_api_version_is_7(fake_core, info):
     """3 加了 config、version、page；4 加了 parent、children（D152）；5 加了 call、each、providers 與轉接（D159）；
-    6 每按一次另開程序、加了 start 與 MIN_API（D161）。"""
-    assert App(fake_core, info).api_version == 6
+    6 每按一次另開程序、加了 start 與 MIN_API（D161）；7 加了 top_modules、parent_of、children_of、panel、describe（D164）。"""
+    assert App(fake_core, info).api_version == 7
+
+
+def test_parent_of_and_children_of_work_for_any_module(fake_core, info):
+    """導覽列替開頁面的那個模組畫上一層、下一層：問的是別的模組，不是自己（D164）。"""
+    other = App(fake_core, info)
+    make_module(info.folder, "子")
+    [kid] = other.children_of(info)
+    assert other.parent_of(kid).folder == info.folder and other.parent_of(info) is None
+    assert App(fake_core, kid).children_of(kid) == ()
+
+
+def test_top_modules_reads_every_root_from_disk(fake_core, info):
+    app = App(fake_core, info)
+    make_module(fake_core.home / "modules", "新")
+    assert {"A", "新"} <= {m.name for m in app.top_modules()}
+    assert all(m.level != "child" for m in app.top_modules())
+
+
+def test_panel_and_describe_ask_the_core(fake_core, info):
+    fake_core.view.name = "網頁"
+    fake_core.describe = lambda error: "白話：" + error
+    app = App(fake_core, info)
+    assert app.panel == "網頁" and app.describe("壞了") == "白話：壞了"
+
+
+def test_restart_asks_the_panel(fake_core, info):
+    """app.restart（D166）：面板自己重新啟動；不是面板開的（沒有 restart）丟 AttributeError。"""
+    app = App(fake_core, info)
+    with pytest.raises(AttributeError):
+        app.restart()
+    fake_core.view.restart = lambda: fake_core.calls.append(("restart",))
+    app.restart()
+    assert ("restart",) in fake_core.calls
 
 
 def test_children_are_the_modules_one_level_down(fake_core, info):
