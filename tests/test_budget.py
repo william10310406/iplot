@@ -15,13 +15,15 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE = ROOT / "core"
+KERNEL = ROOT / "modules" / "核心"  # 1.0 起核心是一個模組（D167）
+CORE = KERNEL / "core"
+CORE_KEY = "modules/核心/core"  # limits.json 裡核心邏輯總和的那一項
 SKIP = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
         tokenize.ENCODING, tokenize.ENDMARKER}
 # 上限在 tools/limits.json，破例在 tools/exceptions.json（D160）：歷史記在 git 與 docs/03，不再記在這裡的註解
 LIMITS = {k: v for k, v in json.loads((ROOT / "tools" / "limits.json").read_text(encoding="utf-8")).items() if k != "說明"}
 EXCEPTIONS = json.loads((ROOT / "tools" / "exceptions.json").read_text(encoding="utf-8"))
-UI_BUDGETS = {k: v for k, v in LIMITS.items() if k.startswith("ui/")}
+UI_BUDGETS = {k: v for k, v in LIMITS.items() if k.startswith("modules/核心/ui/")}
 BLOCKS = (("/*", "*/"), ("<!--", "-->"))
 
 
@@ -82,7 +84,7 @@ def test_web_lines_definition(tmp_path):
     assert web_lines(f) == 4  # * { }、a { }、d { }、<p>
 
 
-CORE_LIMIT = LIMITS["core"]
+CORE_LIMIT = LIMITS[CORE_KEY]
 
 
 def _version(text: str) -> tuple[int, ...]:
@@ -90,15 +92,15 @@ def _version(text: str) -> tuple[int, ...]:
 
 
 def current_version() -> tuple[int, ...]:
-    found = re.search(r'__version__ = "([\d.]+)"', (ROOT / "core" / "__init__.py").read_text(encoding="utf-8"))
+    found = re.search(r'__version__ = "([\d.]+)"', (CORE / "__init__.py").read_text(encoding="utf-8"))
     return _version(found.group(1))
 
 
 def measured() -> dict[str, int]:
     """limits.json 每一項現在量到的行數；列了的檔不見了就是 None（測試會紅，不 skip）。"""
-    out = {"core": sum(core_logic().values())}
+    out = {CORE_KEY: sum(core_logic().values())}
     for name in LIMITS:
-        if name != "core":
+        if name != CORE_KEY:
             path = ROOT / name
             out[name] = (None if not path.exists()
                          else effective_lines(path) if path.suffix == ".py" else web_lines(path))
@@ -111,7 +113,7 @@ def test_core_logic_within_limit():
     assert total <= CORE_LIMIT, f"核心邏輯 {total} 行 > {CORE_LIMIT}：{logic}"
 
 
-@pytest.mark.parametrize("name", [k for k in LIMITS if k != "core"])
+@pytest.mark.parametrize("name", [k for k in LIMITS if k != CORE_KEY])
 def test_file_within_limit(name):
     """列在 limits.json 的檔不見了也算紅：改名、搬家要一起改上限表，上限才不會靜靜失效。"""
     n = measured()[name]
@@ -174,10 +176,10 @@ def test_exceptions_are_complete_and_not_expired():
             assert now < _version(e["remove_by"]), f"例外 {e['id']} 說 {e['remove_by']} 前回收，現在是 {'.'.join(map(str, now))}"
 
 
-# 0.8 過渡：核心還認得的模組名字，只能出現在 core/text.py 的這三個常數裡（0.9 隨附同步搬進「更新」、作業系統只靠 PROVIDES、
-# 回報改用角色之後拿掉）。其他地方——core/ 的其他檔——一個模組的名字都不能當成字串出現（D159）。
+# 核心的任何一個檔都不能把模組的名字當成字串（D159）。0.8 的三個過渡常數都拿掉了：SYSTEM_MODULE（D164）、
+# REPORT_MODULE（D162）、BUNDLED（D169，隨附的名單改從雜湊表的鍵讀）。
 # 只比「整個字串就是名字」與「modules/名字」：訊息裡的一般用字（「重新啟動 iPLoT」、「從工作坊裝來的」）不是在找模組
-TRANSITIONAL = {"BUNDLED"}  # SYSTEM_MODULE 1.0 拿掉（D164）、REPORT_MODULE 0.9 拿掉（D162）
+TRANSITIONAL: set[str] = set()
 
 
 def test_core_names_no_module_except_the_transitional_constants():
@@ -197,5 +199,6 @@ def test_core_names_no_module_except_the_transitional_constants():
 
 
 def test_panel_is_not_in_core():
-    """面板在 ui/：core/ 裡沒有 ui.py，核心邏輯才是「一個下午讀得完」的那一塊。"""
-    assert not (CORE / "ui.py").exists() and (ROOT / "ui" / "tk.py").exists()
+    """面板在 ui/：core/ 裡沒有 ui.py，核心邏輯才是「一個下午讀得完」的那一塊。iPLoT 資料夾裡沒有 core/、ui/（D167：只有發佈的包帶種子）。"""
+    assert not (CORE / "ui.py").exists() and (KERNEL / "ui" / "tk.py").exists()
+    assert not (ROOT / "core").exists() and not (ROOT / "ui").exists()

@@ -130,7 +130,7 @@ def test_a_provider_whose_window_cannot_open_falls_back_to_the_terminal(home, tm
 
 
 @pytest.mark.parametrize("news", [None, "隨附的模組換成新版了"])
-def test_main_run_dispatches_to_the_cli_without_opening_a_panel(monkeypatch, capsys, news):
+def test_main_run_dispatches_to_the_cli_without_opening_a_panel(monkeypatch, capsys, news, tmp_path):
     import test_main
     main = test_main.load_main()
     seen = []
@@ -139,6 +139,6 @@ def test_main_run_dispatches_to_the_cli_without_opening_a_panel(monkeypatch, cap
     monkeypatch.setattr(cli, "run", lambda home, config, err, argv: seen.append(argv) or 3)
     monkeypatch.setattr(main, "run_web", lambda *a, **kw: pytest.fail("不該開面板"))
     with pytest.raises(SystemExit) as stop:
-        main.main()
+        main.main(tmp_path, tmp_path)
     assert stop.value.code == 3 and seen == [["甲", "a.txt"]]
     assert capsys.readouterr().out == (f"{news}\n" if news else "")

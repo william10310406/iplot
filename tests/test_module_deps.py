@@ -30,7 +30,7 @@ def test_no_stale_allow_entries():
 
 
 def test_allow_entries_say_why_and_until_and_are_not_expired():
-    now = _version(re.search(r'__version__ = "([\d.]+)"', (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")).group(1))
+    now = _version(re.search(r'__version__ = "([\d.]+)"', (ROOT / "modules" / "核心" / "core" / "__init__.py").read_text(encoding="utf-8")).group(1))
     for entry in json.loads(deps.ALLOW.read_text(encoding="utf-8")):
         assert entry["why"] and entry["until"], entry
         if entry["until"] != "永久":

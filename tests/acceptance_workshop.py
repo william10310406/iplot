@@ -254,7 +254,7 @@ def main(argv):
     if keep and keep.exists() and (not keep.is_dir() or any(keep.iterdir())):  # 不刪別人的東西：只用新的或空的資料夾
         print(f"--keep 要給一個還不存在、或空的資料夾；{keep} 裡已經有東西，什麼都沒做")
         return 1
-    sys.path.insert(0, str(SRC))
+    sys.path.insert(0, str(SRC / "modules" / "核心"))
     from core.core import load_config
     config, err = load_config(SRC / "config.py")
     if err or not (config.update_url and config.workshop_url):

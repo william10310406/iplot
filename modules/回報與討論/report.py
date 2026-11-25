@@ -14,7 +14,7 @@ from pathlib import Path
 import forum
 import redact
 
-REPORTER = "0.4.0"  # 內文最後那一行的 HTML 註解帶的版本：跟 CHANGELOG.md 最上面那一節一樣（測試核）
+REPORTER = "0.4.1"  # 內文最後那一行的 HTML 註解帶的版本：跟 CHANGELOG.md 最上面那一節一樣（測試核）
 WHAT_HEAD = "### 發生了什麼"
 WHAT_ERROR = "（請寫一兩句：按了什麼、預期是什麼）"
 WHAT_BLANK = "（請寫：按了什麼、看到什麼、預期是什麼）"
@@ -226,7 +226,7 @@ def from_error(error, app, log=()) -> Report:
     elif lost:
         name = LOST
     else:
-        name = {"core": "核心", "config": "config.py"}.get(error.source, "iPLoT")
+        name = {"core": "iPLoT 核心", "config": "config.py"}.get(error.source, "iPLoT")
     sentence = app.describe(replace(error, module=LOST) if lost else error)
     text = body(WHAT_ERROR, environment(app, top, bool(hidden), error.source), sentence, error.traceback_text, log)
     return _masked("BUG", f"[回報] {name}：{error.kind}（iPLoT {app.version}）", text, ctx)

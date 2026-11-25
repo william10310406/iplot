@@ -101,7 +101,9 @@ def newer_workshop():
 def setup(tmp_path, tag, with_new_workshop, author="william10310406"):
     home = tmp_path / "iPLoT"
     home.mkdir()
-    archive = subprocess.run(["git", "archive", tag, "core"], cwd=ROOT, capture_output=True, check=True).stdout
+    moved = subprocess.run(["git", "cat-file", "-e", f"{tag}:modules/核心/core"], cwd=ROOT, capture_output=True).returncode == 0
+    tree = f"{tag}:modules/核心" if moved else tag  # 1.0 起核心在 modules/核心/（D167）
+    archive = subprocess.run(["git", "archive", tree, "core"], cwd=ROOT, capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-C", str(home)], input=archive, check=True)
     shutil.copytree(WORKSHOP, home / "modules" / "工作坊", ignore=shutil.ignore_patterns("__pycache__", ".history"))
     src = tmp_path / "site"
@@ -141,7 +143,7 @@ def test_the_workshop_updates_itself_first_on_every_core(tmp_path, tag):
     seen = press(home, url)
     folder = home / "modules" / "工作坊"
     assert seen["reports"] == [] and seen["pages"] == ["工作坊"], seen  # 清單只開一次，而且是新版開的
-    assert any("工作坊已自動更新：1.2.0 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
+    assert any("工作坊已自動更新：1.2.1 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
     assert b"NEW_VERSION_MARK" in (folder / "iplot.py").read_bytes()
     assert not (folder / ".unconfirmed").exists() and not (folder / ".origin").exists()
     assert list((folder / ".history").glob("*-folder.zip"))

@@ -1,11 +1,11 @@
 {
- "說明": "行數上限（有效行，定義見 tests/test_budget.py）。只准降、不准升：比最新的 vX.Y.Z tag 高，就要在 tools/exceptions.json 有一筆還沒到期的例外寫著這個新數字（D160）。core 是 core/ 扣掉 text.py 的總和。",
- "core": 908,
- "main.py": 129,
- "ui/tk.py": 185,
- "ui/install.py": 80,
- "ui/errlog.py": 49,
- "ui/menu.py": 20,
+ "說明": "行數上限（有效行，定義見 tests/test_budget.py）。只准降、不准升：比最新的 vX.Y.Z tag 高，就要在 tools/exceptions.json 有一筆還沒到期的例外寫著這個新數字（D160）。modules/核心/core 是核心的 core/ 扣掉 text.py 的總和。1.0 核心搬進 modules/核心/ 時照量到的數字重訂（D167）；根目錄的 main.py 是凍結的開機程式，不列上限、鎖 sha256（tools/frozen_boot.sha256）。",
+ "modules/核心/core": 920,
+ "modules/核心/ui/start.py": 153,
+ "modules/核心/ui/tk.py": 185,
+ "modules/核心/ui/install.py": 61,
+ "modules/核心/ui/errlog.py": 49,
+ "modules/核心/ui/menu.py": 11,
  "modules/主控面板/iplot.py": 127,
  "modules/主控面板/panel_web.py": 288,
  "modules/主控面板/panel_menu.py": 11,
@@ -13,5 +13,5 @@
  "modules/主控面板/index.html": 31,
  "modules/主控面板/app.js": 280,
  "modules/主控面板/style.css": 128,
- "ui/cli.py": 74
+ "modules/核心/ui/cli.py": 74
 }

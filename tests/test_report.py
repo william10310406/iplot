@@ -820,7 +820,7 @@ ERROR_KINDS = {"module": "NameError", "core": "KeyError", "config": "TypeError"}
 
 
 @pytest.mark.parametrize("source, module, want", [("module", "科學計算", "[回報] 科學計算：NameError（iPLoT 9.9.9）"),
-                                                  ("core", None, "[回報] 核心：KeyError（iPLoT 9.9.9）"),
+                                                  ("core", None, "[回報] iPLoT 核心：KeyError（iPLoT 9.9.9）"),
                                                   ("config", None, "[回報] config.py：TypeError（iPLoT 9.9.9）")])
 def test_from_error_title(load, tmp_path, monkeypatch, source, module, want):
     report = load("report")
