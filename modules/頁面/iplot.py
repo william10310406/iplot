@@ -2,7 +2,7 @@
 import json
 
 ICON = "🪟"
-# iPLoT 0.9 起每按一次另開一個程序跑模組（指令集第 6 版），app.page 交給提供它的模組在那個程序開視窗
+# iPLoT 1.0 起每按一次另開一個程序跑模組（指令集第 6 版），app.page 交給提供它的模組在那個程序開視窗
 PROVIDES = {"app.page": "page"}
 ROLE_NAMES = {"app.page": "模組打開的頁面視窗", "page.top": "頁面最上面的導覽列"}  # 「要允許嗎？」用（D166）
 # 用到的角色（D160 R5）：頁面上方那一排問提供 page.top 的模組（隨附的「導覽列」）

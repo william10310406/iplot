@@ -2,7 +2,8 @@
 照那個包把 modules/ 裡隨附的模組換成新版。只動「沒改過」的檔案：安裝的檔案的 sha256 是任何一版發出去過的
 （core/bundled_hashes.json）才換；不認得的就是使用者改過的，整個模組都不換，只說一句。工作坊裝來的（有 .origin）、
 包裡沒有的檔（資料、設定、.history、捷徑）、使用者刪掉的整個模組，一律不碰；
-這一版才新加的隨附模組（雜湊表的 .introduced 比上次處理過的版本新）本機沒有就裝上（D159）。"""
+這一版才新加的隨附模組（雜湊表的 .introduced 比上次處理過的版本新）本機沒有就裝上（D159）。
+哪些是隨附的，看雜湊表裡有哪些模組：核心自己不知道任何一個模組的名字（D169）。"""
 
 import contextlib
 import hashlib
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from . import scan
 from .errors import reason
-from .text import BUNDLED, T
+from .text import T
 
 MARKER = ".bundled-version"  # 記著哪一版核心已經處理過隨附模組；沒有這個檔的舊安裝，第一次會處理
 HASHES = Path(__file__).with_name("bundled_hashes.json")
@@ -27,7 +28,7 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def package_files(package: Path, version: str) -> dict[str, dict[str, bytes]]:
+def package_files(package: Path, version: str, names: set[str]) -> dict[str, dict[str, bytes]]:
     """包裡隨附模組的檔案：{模組名: {相對路徑: 內容}}。包不是這一版核心的（最上層不只一個資料夾、core/__init__.py 的版本不同）
     就回空的。路徑一律在 modules/<名稱>/ 底下，有 .. 或絕對路徑的丟掉。"""
     with zipfile.ZipFile(package) as z:
@@ -41,7 +42,7 @@ def package_files(package: Path, version: str) -> dict[str, dict[str, bytes]]:
         found: dict[str, dict[str, bytes]] = {}
         for name in z.namelist():
             parts = name.split("/")
-            if (len(parts) < 4 or parts[1] != "modules" or parts[2] not in BUNDLED or name.endswith("/")
+            if (len(parts) < 4 or parts[1] != "modules" or parts[2] not in names or name.endswith("/")
                     or ".." in parts or any(p in SKIP for p in parts)):
                 continue
             found.setdefault(parts[2], {})["/".join(parts[3:])] = z.read(name)
@@ -55,10 +56,10 @@ def sync(home: Path, version: str, known: dict | None = None) -> list[str]:
     with contextlib.suppress(OSError):
         if (before := marker.read_text(encoding="utf-8").strip()) == version:
             return []
-    if known is None:
-        known = json.loads(HASHES.read_text(encoding="utf-8"))
+    known = json.loads(HASHES.read_text(encoding="utf-8")) if known is None else known
+    names = {n for n in known if not n.startswith(".")} | set(known.get(".introduced", {}))  # 隨附的：表裡有的（D169）
     try:
-        files = package_files(package, version) if package.is_file() else {}
+        files = package_files(package, version, names) if package.is_file() else {}
     except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
         files = {}
     done, notes, retry = [], [], False
@@ -145,8 +146,5 @@ def _write(folder: Path, todo: dict[str, bytes], backup: Path) -> None:
     except OSError:
         for path, saved in changed:
             with contextlib.suppress(OSError):
-                if saved:
-                    path.write_bytes(saved.read_bytes())
-                else:
-                    path.unlink(missing_ok=True)
+                path.write_bytes(saved.read_bytes()) if saved else path.unlink(missing_ok=True)
         raise

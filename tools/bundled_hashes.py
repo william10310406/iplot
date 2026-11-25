@@ -24,9 +24,15 @@ SKIP = {"__pycache__", ".DS_Store", OUT.name}
 
 
 def bundled_names() -> list[str]:
-    text = (CORE / "text.py").read_text(encoding="utf-8")
-    block = re.search(r"BUNDLED = frozenset\(\{(.*?)\}\)", text, re.S).group(1)
-    return re.findall(r'"([^"]+)"', block)
+    """隨附的模組＝核心的包帶的：git 追蹤的 modules/ 底下、沒有標 export-ignore 的資料夾（D169：名單不寫在核心裡，
+    核心從這張表的鍵知道有哪些）。"""
+    listed = subprocess.run(["git", "ls-files", "-z", "modules"], cwd=ROOT, capture_output=True, text=True,
+                            encoding="utf-8", check=True).stdout.split("\0")
+    tops = sorted({path.split("/")[1] for path in listed if path.count("/") >= 2})
+    attrs = subprocess.run(["git", "check-attr", "-z", "export-ignore", "--", *(f"modules/{n}/" for n in tops)],
+                           cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout.split("\0")
+    ignored = {attrs[i].split("/")[1] for i in range(0, len(attrs) - 2, 3) if attrs[i + 2] == "set"}
+    return [n for n in tops if n not in ignored]
 
 
 def tags() -> list[str]:

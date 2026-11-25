@@ -81,11 +81,11 @@ import requests                  # 沒有退路、也沒宣告
 
 **7. 要別的模組的小工具，寧可抄一份也不要依賴它；抄的時候註明出處。**（人工；在 iPLoT 的 repo 裡由 `tests/test_copies.py` 擋：沒登記的抄本會紅）
 
-**8. 用到 `app` 在 `api_version` 4 以後才有的東西（`app.call`、`app.each`、`app.providers` 是 5，`app.start` 是 6），要嘛先 `hasattr(app, "call")` 判斷，要嘛頂層宣告 `MIN_API = 5`（iPLoT 0.9 起不夠新就不跑、會請使用者更新）。**（人工）
+**8. 用到 `app` 在 `api_version` 4 以後才有的東西（`app.call`、`app.each`、`app.providers` 是 5，`app.start` 是 6），要嘛先 `hasattr(app, "call")` 判斷，要嘛頂層宣告 `MIN_API = 5`（iPLoT 1.0 起不夠新就不跑、會請使用者更新）。**（人工）
 使用者的 iPLoT 不一定是最新版。
 
 **9. 每台電腦自己的東西（設定、快取、`.pid`、登入資訊）不准放進上傳的包。**（工作坊收件時退回）
-現在的做法：寫在模組資料夾的點檔或 `設定.json`，並在 `.gitignore` 加一行。0.9 起統一放 `.local/`。
+現在的做法：寫在模組資料夾的點檔或 `設定.json`，並在 `.gitignore` 加一行。1.0 起統一放 `.local/`。
 
 **10. 畫面上的文字寫給一般人看：中文、完整句子、說出下一步怎麼辦。錯誤要說清楚發生什麼、使用者可以做什麼。**（人工）
 
@@ -94,7 +94,7 @@ import requests                  # 沒有退路、也沒宣告
 ## 二、改 iPLoT 本身（維護者與幫維護者寫程式的 AI）
 
 **12. 功能加在模組，不加在核心。核心與面板不准出現任何模組的名字或角色的意思。**（R6，`tests/test_budget.py::test_core_names_no_module_except_the_transitional_constants` 與 `tests/test_module_deps.py::test_no_new_violations`）
-過渡用的三個常數（`modules/核心/core/text.py` 的 `BUNDLED`、`SYSTEM_MODULE`、`REPORT_MODULE`）在白名單上，1.0 前拿掉。
+0.8 的三個過渡常數（`BUNDLED`、`SYSTEM_MODULE`、`REPORT_MODULE`）1.0 都拿掉了：隨附的有哪些，核心從雜湊表的鍵讀（D169）。白名單上永久留著的只有工作坊叫「互通」那一筆與 `core.runner` 這個名字。
 
 **13. 行數上限只降不升。**（`tests/test_budget.py::test_limits_never_go_up`、`test_file_within_limit`）
 上限在 `tools/limits.json`（核心總和、`modules/核心/ui/` 各檔、主控面板各檔）。真的非升不可：同一個 PR 在 `tools/exceptions.json` 加一筆例外（D 編號、破在哪裡、為什麼、要換成什麼、`remove_by` 版本、`raises`）。

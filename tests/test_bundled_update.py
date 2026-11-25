@@ -5,6 +5,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import tarfile
@@ -15,7 +16,7 @@ import pytest
 
 import core
 from core import bundled
-from core.text import BUNDLED, T
+from core.text import T
 
 ROOT = Path(__file__).resolve().parents[1]
 V = "0.7.2"
@@ -257,8 +258,10 @@ def test_the_hash_table_covers_every_bundled_file_in_this_tree():
     assert not missing, f"core/bundled_hashes.json 少了：{missing}；執行 python3 tools/bundled_hashes.py"
 
 
-def test_the_tool_and_the_core_agree_on_which_modules_are_bundled():
-    assert set(tool().bundled_names()) == set(BUNDLED)
+def test_the_hash_table_lists_exactly_the_bundled_modules():
+    """D169：核心不寫隨附的名單，從雜湊表的鍵知道有哪些；表裡多一個、少一個都不行。"""
+    have = json.loads(bundled.HASHES.read_text(encoding="utf-8"))
+    assert {n for n in have if not n.startswith(".")} == set(tool().bundled_names()) == set(have[".introduced"])
 
 
 def test_real_0_7_1_install_upgrades_to_this_trees_files_and_keeps_data(tmp_path):

@@ -13,7 +13,6 @@ from conftest import make_module
 
 from core import scan
 from core.core import Core
-from core.text import BUNDLED as CORE_BUNDLED
 from core.text import T as CORE_T
 from core.types import DEFAULT_CONFIG
 
@@ -289,4 +288,3 @@ def test_bundled_names_match_what_the_core_package_ships():
     tracked = {line.split("/")[1] for line in git.stdout.split("\0") if "/" in line}
     shipped = {name for name in tracked if not any(fnmatch.fnmatch(f"modules/{name}", pat.rstrip("/")) for pat in ignored)}
     assert shipped == set(BUNDLED), f"核心的包帶的是 {sorted(shipped)}；「整理」的 BUNDLED 是 {sorted(BUNDLED)}"
-    assert shipped == set(CORE_BUNDLED), f"核心的包帶的是 {sorted(shipped)}；core/text.py 的 BUNDLED 是 {sorted(CORE_BUNDLED)}"
