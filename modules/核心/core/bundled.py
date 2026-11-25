@@ -2,7 +2,8 @@
 照那個包把 modules/ 裡隨附的模組換成新版。只動「沒改過」的檔案：安裝的檔案的 sha256 是任何一版發出去過的
 （core/bundled_hashes.json）才換；不認得的就是使用者改過的，整個模組都不換，只說一句。工作坊裝來的（有 .origin）、
 包裡沒有的檔（資料、設定、.history、捷徑）、使用者刪掉的整個模組，一律不碰；
-這一版才新加的隨附模組（雜湊表的 .introduced 比上次處理過的版本新）本機沒有就裝上（D159）。
+這一版才新加的隨附模組（雜湊表的 .introduced 比上次處理過的版本新）本機沒有就裝上（D159）；
+拿掉的（.retired）本機那一份沒改過就移到備份（D171）。
 哪些是隨附的，看雜湊表裡有哪些模組：核心自己不知道任何一個模組的名字（D169）。"""
 
 import contextlib
@@ -91,12 +92,31 @@ def sync(home: Path, version: str, known: dict | None = None) -> list[str]:
                 notes.append(T["bundled_failed"].format(name=name, message=reason(exc)))
             else:
                 done.append(name)
+    retired = [n for n in sorted(known.get(".retired", {})) if _retire(home / "modules" / n, known[".retired"][n], backup)]
+    if retired:
+        notes.append(T["bundled_retired"].format(names="、".join(retired), backup=backup.relative_to(home).as_posix()))
     if done:
         notes.insert(0, T["bundled_updated"].format(names="、".join(done), backup=backup.relative_to(home).as_posix()))
     if not retry:
         with contextlib.suppress(OSError):
             marker.write_text(version + "\n", encoding="utf-8")
     return notes
+
+
+def _retire(folder: Path, entry: dict, backup: Path) -> bool:
+    """這一版拿掉的隨附模組（雜湊表的 .retired，D171）：本機那一份每個檔都是發出去過的原樣，才整個移到 backup；
+    改過的、工作坊裝來的（.origin）、移不動的都留著（下次啟動不再試，只是多一格舊按鈕）。"""
+    if not scan.is_module(folder) or (folder / ".origin").exists():
+        return False
+    files = (p for p in folder.rglob("*") if p.is_file() and not any(x[0] == "." or x in SKIP for x in p.relative_to(folder).parts))
+    if any(_sha(p.read_bytes()) not in entry["files"].get(p.relative_to(folder).as_posix(), ()) for p in files):
+        return False
+    try:
+        backup.mkdir(parents=True, exist_ok=True)
+        shutil.move(folder, backup / folder.name)
+    except OSError:
+        return False
+    return True
 
 
 def _version(text: str) -> tuple[int, ...]:

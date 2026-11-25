@@ -32,6 +32,7 @@ T: dict[str, str] = {
     "already_exists": "『{name}』已經是模組了",
     "ask_name": "新模組的名稱",
     "bundled_updated": "隨附模組已換成這一版的：{names}。換下來的舊檔案備份在 {backup}",
+    "bundled_retired": "這一版不再隨附「{names}」，你沒改過它，已經移到 {backup}。想留著就把它搬回 modules/",
     "bundled_modified": "隨附模組『{name}』的程式你改過，這次沒有換，你的版本照舊留著。新版在 {package} 裡的 modules/{name}/：想用新版，把它複製過去（你改過的先自己留一份）",
     "bundled_failed": "隨附模組『{name}』沒換成新版：{message}。已經放回原來的檔案，下次啟動會再試一次",
     "open_file": "打開檔案",

@@ -505,5 +505,24 @@
 "開Terminal": "0.5.0",
 "開工": "0.5.0",
 "頁面": "1.0.0"
+},
+".retired": {
+"打開核心原始碼": {
+"since": "1.0.0",
+"files": {
+"CHANGELOG.md": [
+"e09d9bcb3c9a009084e5f2f63408e4212c45870d4244e1ac56d08395b1103674",
+"9963d5bea996959d031dab4e88fa34c1cee22de8cc7d769a01833823293cf34d"
+],
+"LICENSE": [
+"aeed872b5d5403c775876f5459a2c7705e9ceb4e575fba6286c2d0e40d7b48a0"
+],
+"iplot.py": [
+"b729462672eb6b9ac5ea6a1865fc7b9931e50e4c792943c4d0f53cd8b0e5e60f",
+"d6e54e0b0928edcb44490f2e5d99937847b474247737916890a2587f801be518",
+"b8573de9f06e75d5b63bfdec0411d1ebfe1e3e89c4f5aa5216bf47ac48e255b6"
+]
+}
+}
 }
 }

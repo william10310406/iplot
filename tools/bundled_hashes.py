@@ -21,6 +21,9 @@ CORE = ROOT / "modules" / "核心" / "core"  # 1.0 起核心是隨附模組「�
 OUT = CORE / "bundled_hashes.json"
 # 這張表自己不進表（它每一版都變、表裡放不進自己的雜湊）：core/bundled.py 一律照包裡的換
 SKIP = {"__pycache__", ".DS_Store", OUT.name}
+# 拿掉的隨附模組：{名稱: 哪一版拿掉}。表裡的 ".retired" 留著它每一版發出去過的雜湊，新的核心第一次啟動時，
+# 本機那一份沒改過才移到 .backup/（D171）；改過的、工作坊裝來的不碰。
+RETIRED = {"打開核心原始碼": "1.0.0"}
 
 
 def bundled_names() -> list[str]:
@@ -70,6 +73,24 @@ def from_tree(names: list[str]) -> dict[tuple[str, str], str]:
     return {key: hashlib.sha256(data).hexdigest() for key, data in tree_files(names).items()}
 
 
+def retired_hashes(name: str) -> dict[str, list[str]]:
+    """拿掉的模組在 git 歷史裡每一個 commit 的每個檔的雜湊（沒有 tag 的 clone 也收得齊；多收了沒發出去的版本只是比較寬）。"""
+    commits = subprocess.run(["git", "log", "--format=%H", "--", f"modules/{name}"], cwd=ROOT, capture_output=True,
+                             text=True, check=True).stdout.split()
+    found: dict[str, list[str]] = {}
+    for commit in commits:
+        listed = subprocess.run(["git", "ls-tree", "-r", "-z", "--name-only", commit, "--", f"modules/{name}/"], cwd=ROOT,
+                                capture_output=True, text=True, encoding="utf-8", check=True).stdout.split("\0")
+        for path in filter(None, listed):
+            parts = path.split("/")
+            if not SKIP & set(parts):
+                data = subprocess.run(["git", "show", f"{commit}:{path}"], cwd=ROOT, capture_output=True, check=True).stdout
+                digest = hashlib.sha256(data).hexdigest()
+                if digest not in (hashes := found.setdefault("/".join(parts[2:]), [])):
+                    hashes.append(digest)
+    return dict(sorted(found.items()))
+
+
 def current_version() -> str:
     text = (CORE / "__init__.py").read_text(encoding="utf-8")
     return re.search(r"""__version__\s*=\s*["']([^"']+)["']""", text).group(1)
@@ -92,7 +113,10 @@ def build(extra_tags: bool = True) -> dict[str, dict]:
             hashes = table.setdefault(name, {}).setdefault(rel, [])
             if digest not in hashes:
                 hashes.append(digest)
-    return {**{n: dict(sorted(table[n].items())) for n in sorted(table)}, ".introduced": dict(sorted(introduced.items()))}
+    have = json.loads(OUT.read_text(encoding="utf-8")).get(".retired", {}) if OUT.is_file() else {}
+    retired = {n: have.get(n) or {"since": since, "files": retired_hashes(n)} for n, since in sorted(RETIRED.items())}
+    return {**{n: dict(sorted(table[n].items())) for n in sorted(table)}, ".introduced": dict(sorted(introduced.items())),
+            ".retired": retired}
 
 
 def main() -> int:

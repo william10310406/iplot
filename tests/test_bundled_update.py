@@ -291,3 +291,41 @@ def test_real_0_7_1_install_upgrades_to_this_trees_files_and_keeps_data(tmp_path
         assert (home / "modules" / rel).read_bytes() == content
     if old_mac != current[("作業系統", "mac.py")]:
         assert any("作業系統" in n for n in notes)
+
+
+def retired(table: dict, **modules: dict[str, list[bytes]]) -> dict:
+    """雜湊表的 .retired（D171）：這一版拿掉的隨附模組，與它每一版發出去過的雜湊。"""
+    table[".retired"] = {name: {"since": V, "files": known(x=files)["x"]} for name, files in modules.items()}
+    return table
+
+
+BUTTON = "def run(app):\n    app.log('舊按鈕')\n".encode()
+
+
+def test_a_retired_module_nobody_changed_is_moved_to_the_backup(home):
+    """0.8 升 1.0：「打開核心原始碼」由「核心」取代，沒改過的那一份移到 .backup/，不留一格打開舊種子的按鈕。"""
+    folder = module(home, "舊按鈕", {"iplot.py": BUTTON, "LICENSE": b"MIT\n", ".history/1.json": b"{}"})
+    notes = bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [b"# older\n", BUTTON], "LICENSE": [b"MIT\n"]}))
+    assert not folder.exists()
+    [backup] = (home / ".backup").glob(f"{V}-bundled-*")
+    assert (backup / "舊按鈕" / "iplot.py").read_bytes() == BUTTON and (backup / "舊按鈕" / ".history" / "1.json").is_file()
+    assert notes == [T["bundled_retired"].format(names="舊按鈕", backup=backup.relative_to(home).as_posix())]
+
+
+@pytest.mark.parametrize("extra", [{"iplot.py": b"# \xe6\x94\xb9\xe9\x81\x8e\n"}, {"mine.py": b"x = 1\n"}, {".origin": b"{}"}])
+def test_a_retired_module_that_was_changed_added_to_or_came_from_the_workshop_stays(home, extra):
+    folder = module(home, "舊按鈕", {"iplot.py": BUTTON, **extra})
+    assert bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [BUTTON]})) == []
+    assert (folder / "iplot.py").is_file()
+
+
+def test_a_retired_module_that_is_already_gone_says_nothing(home):
+    assert bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [BUTTON]})) == []
+
+
+def test_the_real_table_retires_the_old_open_source_button_with_its_0_8_hashes():
+    entry = json.loads(bundled.HASHES.read_text(encoding="utf-8"))[".retired"]["打開核心原始碼"]
+    old = subprocess.run(["git", "show", "9e85f44:modules/打開核心原始碼/iplot.py"], cwd=ROOT, capture_output=True)
+    if old.returncode:
+        pytest.skip("git 歷史裡沒有 0.8 的「打開核心原始碼」（淺 clone）")
+    assert entry["since"] == "1.0.0" and sha(old.stdout) in entry["files"]["iplot.py"]

@@ -34,7 +34,7 @@ def old_ref():
 
 def old_install(home, ref):
     """ref 那一版的 iPLoT（git archive，跟發出去的包一樣），解到 home。"""
-    with tarfile.open(fileobj=BytesIO(git("archive", ref, "core", "ui", "main.py", "requirements", "modules/更新"))) as tar:
+    with tarfile.open(fileobj=BytesIO(git("archive", ref, "core", "ui", "main.py", "requirements", "modules/更新", "modules/打開核心原始碼"))) as tar:
         # filter 要 3.10.12 以後才有（CI 的 Windows／macOS 是 3.10.11）
         tar.extractall(home, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     (home / "config.py").write_text("", encoding="utf-8")
@@ -83,6 +83,8 @@ def test_an_0_8_install_updated_with_its_own_updater_starts_and_moves_into_modul
     kernel = home / "modules" / "核心"
     assert (kernel / "ui" / "start.py").is_file(), "第一次啟動（種子開的）把「核心」裝進 modules/"
     assert not (kernel / ".local").exists(), "用種子開的那一次不記 .good"
+    assert not (home / "modules" / "打開核心原始碼").exists(), "0.8 的「打開核心原始碼」沒改過：移到備份，不留一格打開種子的舊按鈕（D171）"
+    assert list((home / ".backup").glob(f"{__version__}-bundled-*/打開核心原始碼/iplot.py"))
 
     second = boot(home, "--run", "甲")
     assert f"甲跑了 {__version__}" in second.stdout, second.stdout + second.stderr
