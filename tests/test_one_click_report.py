@@ -620,7 +620,7 @@ def test_page_has_doing_copy_and_last(load):
 
 
 def test_reporter_version_is_the_changelogs_newest_section(load):
-    assert load("report").REPORTER == "0.4.0"
+    assert load("report").REPORTER == "0.4.1"
     assert "## [0.3.0]" in (MODULE / "CHANGELOG.md").read_text(encoding="utf-8")
 
 
