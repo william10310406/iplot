@@ -17,7 +17,7 @@ def _notes(version="0.5.2"):
 
 def test_version_is_string():
     import core
-    assert core.__version__.startswith("0.8.0")
+    assert core.__version__.startswith("1.0.0")
 
 
 def test_0_5_2_notes_carry_the_two_manual_steps():
@@ -189,3 +189,12 @@ def test_0_7_4_notes_say_only_the_workshop_updates_itself():
 def test_docs_08_repeats_the_0_7_4_notes():
     doc = (ROOT / "docs" / "08_操作說明-0.7.4.md").read_text(encoding="utf-8")
     assert _notes("0.7.4") in doc
+
+
+def test_1_0_0_notes_say_what_happens_after_the_update():
+    """「更新」的確認框：三到五行、沒有反引號；「核心」「頁面」自動裝上、「打開核心原始碼」被取代、壞了會退回（D167、D168）。"""
+    notes = _notes("1.0.0")
+    assert 3 <= len(notes.splitlines()) <= 5
+    assert "`" not in notes
+    for part in ("「核心」「頁面」", "「打開核心原始碼」", "重新啟動", "退回上一次開得起來的", "0.8.x 的人直接按「確定」"):
+        assert part in notes, part

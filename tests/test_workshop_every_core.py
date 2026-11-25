@@ -143,7 +143,7 @@ def test_the_workshop_updates_itself_first_on_every_core(tmp_path, tag):
     seen = press(home, url)
     folder = home / "modules" / "工作坊"
     assert seen["reports"] == [] and seen["pages"] == ["工作坊"], seen  # 清單只開一次，而且是新版開的
-    assert any("工作坊已自動更新：1.2.0 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
+    assert any("工作坊已自動更新：1.2.1 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
     assert b"NEW_VERSION_MARK" in (folder / "iplot.py").read_bytes()
     assert not (folder / ".unconfirmed").exists() and not (folder / ".origin").exists()
     assert list((folder / ".history").glob("*-folder.zip"))

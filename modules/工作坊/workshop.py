@@ -30,7 +30,7 @@ SKIP = {".history", ".origin", ".unconfirmed", "__pycache__", ".ds_store"}
 NETWORK = (OSError, http.client.HTTPException)  # 連不上、逾時、連到一半斷掉、伺服器沒回話
 LABELS = {"absent": "未安裝", "installed": "已安裝", "update": "可更新", "modified": "已修改", "unknown": "版本未知",
           "bundled": "隨附模組"}
-BUTTONS = {"absent": "安裝", "update": "更新", "modified": "覆蓋", "unknown": "覆蓋"}  # 已安裝、隨附模組的沒有按鈕
+BUTTONS = {"absent": "安裝", "update": "換成新版", "modified": "覆蓋", "unknown": "覆蓋"}  # 已安裝、隨附模組的沒有按鈕
 # iPLoT 自己要用的隨附模組：工作坊不覆蓋（覆蓋之後帶著 .unconfirmed，右鍵動作每次先問、啟動時要安裝介面卻沒辦法回答）
 BUNDLED = ("作業系統", "更新", "工作坊")
 BUNDLED_NOTE = "這是跟著 iPLoT 一起來的隨附模組，工作坊不覆蓋它；按「更新」換成新版的 iPLoT 時，它會一起換成新版。"

@@ -626,9 +626,9 @@ def test_reporter_version_is_the_changelogs_newest_section(load):
 
 def test_core_logic_is_untouched_by_m9():
     """D150：這一版不動核心邏輯（core/ 除了 text.py），只動 ui/、main.py 與模組；核心邏輯的行數不變（501）。
-    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505；2-10（新增模組先寫暫存檔再改名）加 5 行，是 510；審查 S4（OSError 的原文寫進 logs/iplot.log）加 6 行，是 516；0.7.0 的導覽列基礎（app.parent、app.children、scan.parent_of；Core.running 取代 _depth，行數不變，D152）加 12 行，是 528；0.7.1 面板上的改名與移到垃圾桶（`core/modify.py` 新檔 30 行、`Core.rename`／`Core.remove` 33 行，D155）加 63 行，是 591；0.7.2 隨附模組跟著更新（`core/bundled.py` 新檔 104 行，D156）加 104 行，是 695；0.8.0 依角色找模組（providers／call／each、app 的轉接、工作坊模組先問一次）加、改名與刪除搬進「整理」減、隨附同步能裝新加的模組加，D159，是 699；1.0 前的過渡：每按一次另開程序（core/worker.py、core/pipe.py、MIN_API、app.start，D161）加 173 行，是 872；網頁面板搬進 modules/主控面板/（開機程式叫面板的 call_here、面板不 import core 也能用的 describe，D162）加 15 行，是 887；模組不 import 核心、不猜面板（app 的 top_modules、parent_of、children_of、panel、describe，api_version 7）加、照名字找「作業系統」的過渡拿掉減，D164，是 894；1.0 清單的小問題（ROLE_NAMES、paging、app.restart，D166）加 14 行，是 908。"""
+    體驗打磨 2-02 之後多了 3 行（core/errors.py 的 reason：OSError 變成中文原因），所以現在是 504；2-08 的 InputCancelled 再加 1 行，是 505；2-10（新增模組先寫暫存檔再改名）加 5 行，是 510；審查 S4（OSError 的原文寫進 logs/iplot.log）加 6 行，是 516；0.7.0 的導覽列基礎（app.parent、app.children、scan.parent_of；Core.running 取代 _depth，行數不變，D152）加 12 行，是 528；0.7.1 面板上的改名與移到垃圾桶（`core/modify.py` 新檔 30 行、`Core.rename`／`Core.remove` 33 行，D155）加 63 行，是 591；0.7.2 隨附模組跟著更新（`core/bundled.py` 新檔 104 行，D156）加 104 行，是 695；0.8.0 依角色找模組（providers／call／each、app 的轉接、工作坊模組先問一次）加、改名與刪除搬進「整理」減、隨附同步能裝新加的模組加，D159，是 699；1.0 前的過渡：每按一次另開程序（core/worker.py、core/pipe.py、MIN_API、app.start，D161）加 173 行，是 872；網頁面板搬進 modules/主控面板/（開機程式叫面板的 call_here、面板不 import core 也能用的 describe，D162）加 15 行，是 887；模組不 import 核心、不猜面板（app 的 top_modules、parent_of、children_of、panel、describe，api_version 7）加、照名字找「作業系統」的過渡拿掉減，D164，是 894；1.0 清單的小問題（ROLE_NAMES、paging、app.restart，D166）加 14 行，是 908；1.0 隨附的名單改從雜湊表讀（D169）減 3 行，是 905；0.8 升上來時把沒改過的「打開核心原始碼」移到備份（雜湊表的 .retired，D171）加 15 行，是 920。"""
     from test_budget import core_logic
-    assert sum(core_logic().values()) == 908
+    assert sum(core_logic().values()) == 920
 
 
 
