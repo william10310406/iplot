@@ -4,8 +4,9 @@ import json
 ICON = "🪟"
 # iPLoT 0.9 起每按一次另開一個程序跑模組（指令集第 6 版），app.page 交給提供它的模組在那個程序開視窗
 PROVIDES = {"app.page": "page"}
+ROLE_NAMES = {"app.page": "模組打開的頁面視窗", "page.top": "頁面最上面的導覽列"}  # 「要允許嗎？」用（D166）
 # 用到的角色（D160 R5）：頁面上方那一排問提供 page.top 的模組（隨附的「導覽列」）
-NEEDS = ("page.top",)
+NEEDS = ("page.top", "os.app_name")
 MIN_API = 6
 HELLO = "頁面：其他模組打開頁面（例如行事曆、工作坊）時，視窗是這裡開的。頁面開著的時候，面板上照樣可以按別的模組。"
 NO_WINDOW = "開不了頁面視窗：{why}。到工作坊重新安裝 iPLoT 的介面（重新啟動 iPLoT 會自動補裝）後再試"
@@ -23,6 +24,7 @@ def page(app, title, html, api=None, owner=None):
     except ImportError as exc:
         app.log(NO_WINDOW.format(why=exc))
         return
+    app.call("os.app_name", owner.title if owner is not None else title)  # Dock 上寫模組的名字，不是「Python」（D166）
     window = webview.create_window(title, html=html, js_api=api, width=640, height=520)
     top = app.call("page.top", owner) if owner is not None else None
     chosen = []

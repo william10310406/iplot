@@ -25,7 +25,7 @@ from .types import ErrorInfo, ModuleInfo, Result
 # 工作程序的入口：argv[1] 是 core 所在的資料夾。拿掉 -c 放進來的 ''，工作目錄裡的同名檔才不會蓋掉標準庫
 ENTRY = "import sys; sys.path[:] = [sys.argv[1]] + [p for p in sys.path if p]; from core import worker; worker.main()"
 # 工作程序可以要主程序做的事：面板的對話框與訊息區、重掃、開始跑另一個模組（不等它）
-SERVED = ("log", "report", "ask", "confirm", "choose_files", "choose_folder", "rescan", "start")
+SERVED = ("log", "report", "ask", "confirm", "choose_files", "choose_folder", "rescan", "start", "paging", "restart")
 
 
 # ── 主程序這一頭 ──

@@ -2,6 +2,7 @@ import dataclasses
 import re
 from pathlib import Path
 
+import pytest
 from conftest import make_module
 
 from core.app import App
@@ -89,6 +90,16 @@ def test_panel_and_describe_ask_the_core(fake_core, info):
     fake_core.describe = lambda error: "白話：" + error
     app = App(fake_core, info)
     assert app.panel == "網頁" and app.describe("壞了") == "白話：壞了"
+
+
+def test_restart_asks_the_panel(fake_core, info):
+    """app.restart（D166）：面板自己重新啟動；不是面板開的（沒有 restart）丟 AttributeError。"""
+    app = App(fake_core, info)
+    with pytest.raises(AttributeError):
+        app.restart()
+    fake_core.view.restart = lambda: fake_core.calls.append(("restart",))
+    app.restart()
+    assert ("restart",) in fake_core.calls
 
 
 def test_children_are_the_modules_one_level_down(fake_core, info):

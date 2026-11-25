@@ -1361,6 +1361,21 @@ def test_popup_html_puts_the_name_on_the_button():
 
 # ── 頁面開著的時候，小視窗不冒出來、關它不結束程序；選完檔案藏回去（M5 設計第 15 節第 2 條） ──
 
+def test_a_page_opened_in_the_modules_own_process_keeps_the_popup_hidden(popup):
+    """iPLoT 1.0 的頁面在模組自己的程序裡開（D161），開著的期間核心會告訴小視窗（paging，D166）：不因「跑太久」出來。"""
+    p, seen = popup.p, []
+
+    def job():
+        p.paging("頁", True)
+        time.sleep(p.busy_after + 0.2)
+        seen.append(popup.wv.windows[0].shown)
+        p.paging("頁", False)
+        return 0
+
+    p.run(job)
+    assert seen == [False]
+
+
 def test_a_page_open_longer_than_busy_after_never_shows_the_popup(popup):
     p = popup.p
     t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))

@@ -31,8 +31,9 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
 
 ICON = "🔗"
 PROVIDES = {"run.outside": "outside"}  # main.py --run 用彈出式視窗跑模組（D163）
+ROLE_NAMES = {"run.outside": "在面板外打開模組的小視窗", "home": "小視窗跑完要回去的地方"}  # 「要允許嗎？」用（D166）
 # 用到的角色（D160 R5）：跑完的回去鈕回提供 home 的（行事曆）或面板（main）；碰作業系統的（os.*）不做捷徑
-NEEDS = ("home", "main")
+NEEDS = ("home", "main", "os.app_name")
 MIN_API = 7  # app.top_modules、app.children_of（D164）
 HERE = pathlib.Path(__file__).resolve().parent
 NEWER = "互通 1.0 要 iPLoT 1.0 以上：請按「更新」換成新版的 iPLoT。"

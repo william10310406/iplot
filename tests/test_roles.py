@@ -134,6 +134,26 @@ def test_a_workshop_module_is_asked_once_and_remembered(home, view):
     assert Core(home, DEFAULT_CONFIG, view).providers("greet") and len(view.confirmed) == 1  # 重新啟動也不再問
 
 
+def test_the_question_uses_the_names_your_own_modules_give_the_roles(home, view):
+    """D166：「要允許嗎？」不寫角色的代號，寫自己的（或隨附的）模組在 ROLE_NAMES 取的名字；工作坊裝來的取的不算。"""
+    make_module(home / "modules", "命名", 'ROLE_NAMES = {"greet": "打招呼"}\n')
+    liar = foreign(home, "騙子", 'ROLE_NAMES = {"greet": "沒什麼"}\n')
+    (liar / ".roles-ok").write_text("[]", encoding="utf-8")  # 它沒提供任何角色：問到的只有「外來」
+    foreign(home, source='PROVIDES = {"greet": "hello", "other.x": "hello"}\n' + GREET.split("\n", 1)[1])
+    started(home, view).providers("greet")
+    assert view.confirmed == [T["allow_roles"].format(title="外來", roles="打招呼、other.x")]
+
+
+@pytest.mark.parametrize(("source", "expected"), [
+    ('ROLE_NAMES = {"menu.module": "右鍵選單"}\n', (("menu.module", "右鍵選單"),)),
+    ('ROLE_NAMES = {"a": 1}\n', ()),
+])
+def test_role_names_are_read_as_a_literal(tmp_path, source, expected):
+    file = tmp_path / "iplot.py"
+    file.write_text(source + "raise SystemExit('不該執行')\n", encoding="utf-8")
+    assert read_meta(file).role_names == expected
+
+
 def test_saying_no_keeps_it_out_and_is_not_asked_again_this_run(home, view):
     folder = foreign(home)
     view.answers = [False]
@@ -180,5 +200,5 @@ def test_a_system_module_without_provides_is_not_found_by_name_any_more(home, vi
 def test_the_bundled_system_module_declares_every_action_the_core_and_app_use():
     meta = read_meta(Path(__file__).resolve().parents[1] / "modules" / "作業系統" / "iplot.py")
     assert {r for r, _ in meta.provides} == {f"os.{n}" for n in ("open", "edit", "reveal", "terminal", "trash",
-                                                                  "requirements", "webview_ready", "activate")}
+                                                                  "requirements", "webview_ready", "activate", "app_name")}
     assert all(r == "os." + f for r, f in meta.provides)

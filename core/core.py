@@ -188,7 +188,9 @@ class Core:
         with contextlib.suppress(OSError):
             if ok.read_text(encoding="utf-8") == stamp:
                 return True
-        roles = "、".join(role for role, _ in info.provides)
+        tops = (m for g in scan.find_modules(self.roots()) for m in g.modules if not (m.folder / ".origin").exists())
+        named = {r: n for m in tops for r, n in m.role_names}
+        roles = "、".join(named.get(role, role) for role, _ in info.provides)  # 用角色的那一個寫的名字（D166）
         if info.folder in self._declined or not self.view.confirm(T["allow_roles"].format(title=info.title, roles=roles)):
             self._declined.add(info.folder)
             return False

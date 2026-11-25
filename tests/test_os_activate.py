@@ -68,3 +68,29 @@ def test_hands_over_to_a_plain_helper_when_refused(monkeypatch):
 def test_the_module_provides_it():
     from core.meta import read_meta
     assert ("os.activate", "activate") in read_meta(FOLDER / "iplot.py").provides
+
+
+# ── os.app_name（D166）：Dock 上的名字不是「Python」 ──
+
+@pytest.mark.parametrize("name", ["win", "linux"])
+def test_other_systems_leave_the_name_alone(name):
+    assert load(name).app_name(None, "行事曆") is False
+
+
+def test_app_name_sets_the_bundle_name_before_the_first_window(monkeypatch):
+    info = {"CFBundleName": "Python"}
+    bundle = types.SimpleNamespace(localizedInfoDictionary=lambda: None, infoDictionary=lambda: info)
+    monkeypatch.setitem(sys.modules, "Foundation", types.SimpleNamespace(NSBundle=types.SimpleNamespace(
+        mainBundle=lambda: bundle)))
+    assert load("mac").app_name(None, "行事曆") is True and info["CFBundleName"] == "行事曆"
+
+
+def test_app_name_without_pyobjc_says_it_cannot(monkeypatch):
+    monkeypatch.setitem(sys.modules, "Foundation", None)
+    assert load("mac").app_name(None, "行事曆") is False
+
+
+def test_the_os_module_provides_app_name():
+    from core.meta import read_meta
+    meta = read_meta(FOLDER / "iplot.py")
+    assert ("os.app_name", "app_name") in meta.provides and "os.app_name" in dict(meta.role_names)

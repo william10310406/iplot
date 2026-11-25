@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -120,6 +121,10 @@ class App:
         """在檔案總管裡顯示並選取這個檔案或資料夾。"""
         self._core.action("reveal", Path(path).absolute())
 
+    def restart(self) -> None:
+        """請面板關掉、整個 iPLoT 從頭再來，啟動參數照舊（D166）。不是面板開的（main.py --run）丟 AttributeError。"""
+        self._core.view.restart()
+
     def terminal(self, path: Path) -> None:
         """在終端機打開這個資料夾。"""
         self._core.action("terminal", Path(path).absolute())
@@ -153,8 +158,16 @@ class App:
         模組在自己的程序裡跑時（D161），交給提供 app.page 的模組在這個程序開視窗，只卡住自己；
         tkinter 面板（安全模式與備用面板）沒有頁面，只在訊息區記一行。"""
         if getattr(self._core, "remote", None) is not None and self._core.providers("app.page"):
-            return self._core.call("app.page", title, html, api, self._info)
+            self._paging(True)
+            try:
+                return self._core.call("app.page", title, html, api, self._info)
+            finally:
+                self._paging(False)
         return self._core.view.page(title, html, api)
+
+    def _paging(self, opened: bool) -> None:
+        with contextlib.suppress(Exception):  # 面板的狀態列說「頁面開著」，不說「執行中」（D166）；沒有這個方法的面板不管
+            self._core.view.paging(self._info.title, opened)
 
     def choose_files(self) -> list[Path]:
         """跳出檔案選擇視窗；按取消回空清單。"""

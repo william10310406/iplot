@@ -200,11 +200,12 @@ const make = (tag) => ({tag, style: {}, children: [], on: {}, textContent: "",
   append(...c) { this.children.push(...c); }, prepend(...c) { this.children.unshift(...c); },
   addEventListener(t, f) { this.on[t] = f; }, attachShadow(o) { this.mode = o.mode; return (this.shadow = make("#shadow")); },
   set innerHTML(v) { throw new Error("innerHTML"); }});
-const run = (cells, meta, twice) => {
+const run = (cells, meta, twice, display) => {
   const body = make("body"), calls = [];
   global.document = {body, createElement: make,
     querySelector: (s) => s.startsWith("meta") ? (meta && s === 'meta[name="iplot-nav"][content="off"]' ? {} : null) : body.children.find((c) => c.tag === "iplot-nav") || null};
   global.window = {pywebview: {api: {_iplot_nav: (i) => calls.push(i)}}};
+  if (display) global.window.getComputedStyle = (el) => ({display: el === body ? display : "block"});
   const fn = eval(fs.readFileSync(process.argv[1], "utf8"));
   fn(cells);
   if (twice) fn(cells);
@@ -219,7 +220,7 @@ const run = (cells, meta, twice) => {
 const cells = JSON.parse(process.argv[2]);
 console.log(JSON.stringify({plain: run(cells, false, false), off: run(cells, true, false), twice: run(cells, false, true),
   separators: run(cells, false, false).seps, without_panel_separators: run(cells.slice(1), false, false).seps,
-  empty: run([], false, false)}));
+  empty: run([], false, false), flex: run(cells, false, false, "flex").style, block: run(cells, false, false, "block").style}));
 """
 
 
@@ -239,9 +240,20 @@ def test_nav_js_draws_one_closed_shadow_bar_with_text_only_and_calls_the_index(h
     assert got["without_panel_separators"] == 1 and got["empty"]["count"] == 0  # 沒有任何格子就不畫
     assert got["off"]["count"] == 0  # <meta name="iplot-nav" content="off">
     assert got["twice"]["count"] == 1  # 同一頁載入兩次也只有一排
+    assert got["flex"].endswith("position: fixed; left: 0; right: 0") and "fixed" not in got["block"]  # 內容置中的頁面（1.0 清單小問題 4）
 
 
 def test_nav_js_has_no_globals_and_no_inner_html():
     text = (NAV / "nav.js").read_text(encoding="utf-8")
     assert text.lstrip().startswith(("//", "(")) and "innerHTML" not in text and "outerHTML" not in text
     assert "document.write" not in text and "eval(" not in text
+
+
+def test_the_page_window_asks_for_the_owners_name_in_the_dock(monkeypatch, home):
+    """D166：Dock 上寫開頁面的模組的名字（行事曆），不是「Python」；要在開視窗之前問。"""
+    make_module(home / "modules", "系統", 'PROVIDES = {"os.app_name": "name"}\n'
+                'def name(app, n):\n    (app.home / "named.txt").write_text(n, encoding="utf-8")\n')
+    owner = make_module(home / "modules", "行事曆", 'TITLE = "我的行事曆"\n')
+    from core.scan import module_info
+    open_page(monkeypatch, home, module_info(owner, (home / "modules").resolve(), "here"))
+    assert (home / "named.txt").read_text(encoding="utf-8") == "我的行事曆"

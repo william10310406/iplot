@@ -1,5 +1,6 @@
 """主控面板：打開 iPLoT 的面板；已經開著就叫到最前面。任何模組寫 app.run("主控面板") 就會用到這裡。
 面板本身也在這個資料夾（panel_web.py 與頁面的三個檔）：iPLoT 開起來時，開機程式在主程序裡執行這裡的 start（D162）。"""
+import contextlib
 import errno
 import os
 import pathlib
@@ -30,7 +31,9 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
 
 ICON = "🎛️"
 PROVIDES = {"main": "start"}  # 開機程式要的面板（D162）
-NEEDS = ("menu.module", "panel.error", "os.activate")  # 右鍵選單多的項目、錯誤那一列的「回報這個問題」、叫面板到最前面
+# 工作坊裝來的模組要提供這些角色時，「要允許嗎？」用這些名字說（D166）
+ROLE_NAMES = {"main": "iPLoT 的主畫面", "menu.module": "右鍵選單裡的項目", "panel.error": "面板上的錯誤要不要回報"}
+NEEDS = ("menu.module", "panel.error", "os.activate", "os.app_name")  # 右鍵選單多的項目、錯誤那一列的「回報這個問題」、叫面板到最前面
 MIN_API = 7  # app.panel（D164）
 REASONS = {errno.ENOENT: "找不到 Python 或 iPLoT 的 main.py", errno.EACCES: "沒有權限", errno.EPERM: "沒有權限",
            errno.ENOMEM: "記憶體不夠", errno.EAGAIN: "系統現在開不了新的程式"}
@@ -142,11 +145,13 @@ def open_panel(app, home: pathlib.Path, *, ps=_ps, lsof=_lsof, popen=subprocess.
         app.log("這個系統還不會把開著的面板叫到最前面")
 
 
-def start(app, core, note=None, err=None):
+def start(app, core, note=None, err=None, *, execv=os.execv):
     """開機程式交來 app 與核心（指令集）：開網頁面板，視窗關掉才回來（D162）。note 是要先寫進訊息區的話，
     err 是 config.py 的錯誤。lib/ 裡沒有 pywebview、或它找不到能用的視窗套件時丟 ImportError，開機程式會去裝、或退到後備面板。"""
     from panel_web import WebPanel  # 這個資料夾的檔：開機程式把資料夾放在 sys.path 最前面
 
+    with contextlib.suppress(Exception):  # Dock 上寫「iPLoT」，不是「Python」（D166）；要在開視窗之前，做不到也照開
+        core.call_here("os.app_name", "iPLoT")
     panel = WebPanel(app.home, app.version, False)
     core.view = panel
     panel.attach(core)
@@ -158,6 +163,9 @@ def start(app, core, note=None, err=None):
         panel.run()
     except panel.webview.WebViewException as exc:
         raise ImportError(str(exc)) from exc
+    if panel.restarting:  # 按了「重新啟動」（app.restart，D166）：整個 iPLoT 從頭再來，啟動參數照舊
+        os.chdir(app.home)
+        execv(sys.executable, [sys.executable, str(pathlib.Path(app.home) / "main.py"), *sys.argv[1:]])
 
 
 def run(app):

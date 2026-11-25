@@ -276,6 +276,10 @@ class Popup:
         """小視窗裡的「確定／取消」；按確定回 True。"""
         return self._dialog("confirm", prompt) is True
 
+    def paging(self, title: str, opened: bool) -> None:
+        """模組在自己的程序裡開了（opened）或關了頁面（iPLoT 1.0，D166）：開著的期間小視窗不因「跑太久」出來。"""
+        self._paging = opened
+
     def page(self, title: str, html: str, api: object | None) -> None:
         """另開一個 640×520 的視窗顯示一頁 HTML（app.page），關掉才回來；不會因此把小視窗叫出來。iPLoT 1.0 的頁面在模組
         自己的程序裡由「頁面」模組開（D161），走到這裡的只有沒有那個模組的時候；導覽列也是那邊畫。

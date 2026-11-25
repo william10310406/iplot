@@ -23,6 +23,10 @@
   "why": "1.0 要模組不 import 核心、不猜自己在哪個面板（R2、R3 清到 0）：導覽列、行事曆、回報與討論、主控面板原本靠 core.scan、core.errors、sys.modules 拿到的，改由 app 給；同時拿掉照名字找「作業系統」的過渡（減 4 行）",
   "replace_with": "1.0 核心搬進 modules/，core/ 的上限換成核心模組自己的上限", "remove_by": "1.0",
   "raises": {"core": 894}},
+ {"id": "D166", "where": ["core/meta.py 讀 ROLE_NAMES", "core/types.py Meta、ModuleInfo 的 role_names", "core/core.py「要允許嗎？」用 ROLE_NAMES 的名字", "core/app.py 頁面開著時告訴面板（paging）、app.restart", "ui/tk.py、主控面板的 restart", "主控面板開視窗前問 os.app_name"],
+  "why": "1.0 清單的小問題 2、7：「要允許嗎？」直接寫 menu.module 這種代號，一般人看不懂（角色的意思核心不能知道，規則 12，名字由自己的與隨附的模組寫）；頁面在工作程序裡開著，面板的狀態列一直說「執行中」；「重新啟動」在工作程序裡 execv 只換掉工作程序、也不帶 --safe，要請面板自己重新啟動（app.restart）",
+  "replace_with": "1.0 核心搬進 modules/，core/ 的上限換成核心模組自己的上限", "remove_by": "1.0",
+  "raises": {"core": 908, "ui/tk.py": 185, "modules/主控面板/iplot.py": 127, "modules/主控面板/panel_web.py": 288}},
  {"id": "D119", "where": ["core/create.py", "ui/tk.py", "ui/app.js"],
   "why": "修種子從零啟動的缺陷（父資料夾不存在時一併建立），不是為某個功能",
   "replace_with": "不需要回收；列在這裡是為了讓所有核心改動都在同一張表上", "remove_by": "不回收"}

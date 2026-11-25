@@ -1,6 +1,6 @@
 # `app`：模組看得到的全部
 
-- `api_version = 7`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加；6（核心 0.9.0）每按一次另開一個程序跑模組，加了 `app.start` 與模組頂層的 `MIN_API`（D161），一樣只加；7（核心 1.0.0）加了 `app.top_modules`、`app.parent_of`、`app.children_of`、`app.panel`、`app.describe`，模組不用再 import 核心、不用猜自己在哪個面板（D164），一樣只加。
+- `api_version = 7`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加；6（核心 0.9.0）每按一次另開一個程序跑模組，加了 `app.start` 與模組頂層的 `MIN_API`（D161），一樣只加；7（核心 1.0.0）加了 `app.top_modules`、`app.parent_of`、`app.children_of`、`app.panel`、`app.describe`，模組不用再 import 核心、不用猜自己在哪個面板（D164），還有 `app.restart`（D166），一樣只加。
 - 每次執行都新建一個 `App` 傳給 `run(app)`（或 `on_files(app, paths)`）；`module` 與 `memory` 在建立時綁好。執行一次＝在面板上雙擊模組的圖示，或右鍵選「執行」；tkinter 面板是單擊按鈕。tkinter 面板在兩種時候出現：安全模式（`python3 main.py --safe`，只掃 `modules/`），以及網頁面板開不起來時的備用面板（照常掃上一層與 `ROOTS`，不是安全模式，D75）；下面說「tkinter 面板」就是指這兩種。下面說的「按下」都是指執行這一次。
 - `def run(app)` 可省略：沒有 `run` 時最外層程式碼就是按下的動作，不用 `app` 也能寫模組（見最後一節）。
 - 本表整理自 `core/app.py` 的 docstring；兩邊不一致時以 `core/app.py` 為準。
@@ -32,6 +32,7 @@
 | 角色 | `app.<名字>(…)` | `app` 上沒有的名字：有模組提供 `app.<名字>` 這個角色，就交給它；沒有就是 AttributeError，所以 `hasattr(app, "x")` 看得出有沒有。 |
 | 動作 | `app.start(name: str | ModuleInfo)` → `None` | 開始跑另一個模組，不等它：它在自己的程序裡跑，這邊馬上回來（D161，`api_version` 6）。要它的結果用 `app.run`。 |
 | 動作 | `app.describe(error)` → `str` | 一筆錯誤（有 kind、message、file、line、source、module）的白話一句，跟面板訊息區說的一樣（D164）。 |
+| 動作 | `app.restart()` → `None` | 請面板關掉、整個 iPLoT 從頭再來，啟動參數照舊（安全模式還是安全模式，D166）。不是面板開的（`python3 main.py --run`）丟 AttributeError。 |
 | 動作 | `app.rescan()` → `None` | 重新掃描並重畫面板；在模組執行中呼叫時，會等這次執行結束後才做。 |
 | 問人 | `app.ask(prompt: str, default: str = '')` → `str | None` | 跳出對話框問一個字串；按取消回 None。 |
 | 問人 | `app.confirm(prompt: str)` → `bool` | 跳出對話框問「確定／取消」；按確定回 True。 |
@@ -83,6 +84,7 @@ def run(app):
 
 - 提供者的函式跟按下一樣執行（存快照、錯誤顯示在面板、一次一個排隊）。
 - 從工作坊裝來的模組宣告角色，第一次會先問使用者允不允許；不允許的話，這次執行期間它不算提供者，下次啟動再問。隨附的與自己寫的不用問。
+- 問的時候寫的是角色的名字：自己寫的與隨附的模組可以在頂層用 `ROLE_NAMES = {"menu.module": "右鍵選單裡的項目"}`（字面值）替角色取一個給人看的名字（D166），沒有人取的就寫角色字串本身。工作坊裝來的模組取的名字不算，免得它把自己說得無害。
 - 現在有的角色：`os.open`、`os.edit`、`os.reveal`、`os.terminal`、`os.trash`、`os.requirements`、`os.webview_ready`（作業系統）；`menu.module`（整理：面板上右鍵選單多的項目，回 `[(文字, 函式名), …]`）；`page.top`（導覽列：頁面上方那一排）。
 
 ## 每按一次另開一個程序（核心 0.9.0，D161）
@@ -107,6 +109,7 @@ def run(app):
 - `main`：`start(app, core, note=None, err=None)`，開面板、視窗關掉才回來。只有開機程式會叫，一般模組不用管。
 - `run.outside`：`outside(app, core, info, files, problem, config_error)`，`python3 main.py --run <模組>` 在面板外跑一個模組時要的畫面（D163）。`info` 是找好的模組（找不到是 `None`，`problem` 是那一句），`files` 是要交給 `on_files` 的檔案；回結束碼。丟 `ImportError` 就改在終端機跑。隨附的「互通」提供它。
 - `home`：`run(app)`，使用者的「首頁」：面板外跑完的小視窗，回去鈕先回這裡，沒有人提供才回面板（`main`，D93、D165）。剛好一個模組提供時才算。隨附的「行事曆」提供它。
+- `os.app_name`：`app_name(app, name)`，這個程序在 Dock、⌘-Tab 上的名字（不改是「Python」，D166）；要在開第一個視窗之前叫，改到了回 `True`。隨附的「作業系統」提供它（macOS；其他系統回 `False`）。主控面板、頁面、互通的小視窗開視窗前會叫。
 - `os.activate`：`activate(app, pid)`，把另一個程序的視窗叫到最前面，叫到了回 `True`（D164）。隨附的「作業系統」提供它，跟 `os.open`、`os.trash` 那些放在一起；這個系統做不到就回 `False`，由你跟使用者說下一步。
 - `panel.error`：`on_panel_error(app, error, recent, pressed)`。面板上出了錯（不是你這個模組出的錯），先交給你看一眼，`pressed` 是 `False`：回 `True` 表示值得問「要回報嗎？」，面板會問（每個錯誤最多問一次，可以「不要再問」）；使用者按了「回報這個問題」，或答了要回報，會再交一次，`pressed` 是 `True`。`error` 是那一筆錯誤，`recent` 是那時候訊息區最後幾行。隨附的「回報與討論」提供它。
 

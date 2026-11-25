@@ -1,6 +1,8 @@
 """tkinter 面板：安全模式（--safe）與網頁面板開不起來時的後備。薄的一層：只負責畫按鈕、
 把動作交給 Core，不做任何決定。"""
 
+import os
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
@@ -37,7 +39,7 @@ class Panel:
 
     def __init__(self, version: str, safe: bool) -> None:
         self.root = _make_root(safe)
-        self.title, self.name = T["title"].format(version=version), "tkinter"  # name：app.panel（D164）
+        self.title, self.name, self.restarting = T["title"].format(version=version), "tkinter", False  # app.panel（D164）
         self.root.title(self.title + (T["safe_mode"] if safe else ""))
         self.root.geometry("420x600")
         self.core: Core | None = None
@@ -62,8 +64,16 @@ class Panel:
         self.root.report_callback_exception = core.report_internal
 
     def mainloop(self) -> None:
-        """進入 tkinter 的事件迴圈。"""
+        """進入 tkinter 的事件迴圈。按了「重新啟動」（app.restart，D166）：迴圈結束後整個 iPLoT 從頭再來，--safe 照舊。"""
         self.root.mainloop()
+        if self.restarting:
+            os.chdir(self.core.home)
+            os.execv(sys.executable, [sys.executable, str(self.core.home / "main.py"), *sys.argv[1:]])
+
+    def restart(self) -> None:
+        """app.restart：結束事件迴圈，mainloop 接著重新啟動。"""
+        self.restarting = True
+        self.root.quit()
 
     def _focus(self, event: tk.Event) -> None:
         if event.widget is self.root and self.core:

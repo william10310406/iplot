@@ -276,7 +276,25 @@ def test_kaigong_runs_with_fake_core(fake_core, quiet):
     assert ("action", "terminal", fake_core.home) in fake_core.calls and fake_core.view.logs
 
 
-def test_restart_calls_execv(fake_core, quiet):
+def test_restart_asks_the_panel_to_restart(fake_core):
+    """iPLoT 1.0 起模組在自己的程序裡跑（D161）：重新啟動交給面板（app.restart），--safe 照舊（D166）。"""
+    asked = []
+    fake_core.view.restart = lambda: asked.append(True)
+    assert run_bundled("重新啟動", fake_core).ok and asked == [True]
+
+
+def test_restart_outside_a_panel_says_where_to_press_it(fake_core):
+    assert run_bundled("重新啟動", fake_core).ok  # FakeView 沒有 restart：像 main.py --run 的小視窗
+    assert "從 iPLoT 的面板按「重新啟動」" in fake_core.view.logs[-1]
+
+
+@pytest.fixture
+def old_app(monkeypatch):
+    """比 1.0 舊的 iPLoT：app 沒有 restart，模組自己 execv。"""
+    monkeypatch.delattr(App, "restart")
+
+
+def test_restart_calls_execv(fake_core, quiet, old_app):
     assert run_bundled("重新啟動", fake_core).ok
     [(kind, argv)] = [c for c in quiet if c[0] == "execv"]
     assert argv[-1] == str(fake_core.home / "main.py")
@@ -289,7 +307,7 @@ def test_open_core_and_terminal(fake_core, quiet):
     assert ("action", "terminal", fake_core.home) in fake_core.calls
 
 
-def test_restart_execs_from_home_not_module_folder(fake_core, monkeypatch):
+def test_restart_execs_from_home_not_module_folder(fake_core, monkeypatch, old_app):
     # 腳本語意（D47）下執行期間的工作目錄是模組資料夾；execv 換掉程序前要先回 iPLoT 資料夾
     seen = []
     monkeypatch.setattr(os, "execv", lambda exe, argv: seen.append(os.getcwd()))
@@ -431,7 +449,7 @@ def test_changed_workshop_modules_say_so_in_their_changelog(name):
     assert top.startswith("## [0.5.1] - ") and "加上「互通」的那一小段：可以直接 python3 iplot.py。" in top.split("## [0.5.0]")[0]
 
 
-def test_restart_that_cannot_exec_says_what_to_do_and_is_not_a_module_error(fake_core, monkeypatch):
+def test_restart_that_cannot_exec_says_what_to_do_and_is_not_a_module_error(fake_core, monkeypatch, old_app):
     """體驗 5-06：換不了程序（例如 Python 被搬走了），一句人話：沒有重新啟動、關掉 iPLoT 再開一次；
     不是「OSError，[Errno 2] …」的模組錯誤，面板留著。"""
     def refuse(exe, argv):
@@ -509,3 +527,10 @@ def test_mac_treats_a_path_it_cannot_check_as_existing(launches, tmp_path, monke
     m.reveal(app, tmp_path / "x.txt")
     assert [a for a, _ in launches] == [["open", str(tmp_path / "x.txt")], ["open", "-R", str(tmp_path / "x.txt")]]
     assert app.logs == []
+
+
+@pytest.mark.parametrize("folder", sorted(p.parent.name for p in MODULES.glob("*/iplot.py")))
+def test_every_bundled_module_has_a_changelog_with_a_version(folder):
+    """規則 11：改了模組就在它的 CHANGELOG.md 最上面加一節（1.0 清單小問題 9：重新啟動、開Terminal、更新以前沒有）。"""
+    text = (MODULES / folder / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert re.search(r"^## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}$", text, re.M), folder

@@ -142,3 +142,18 @@ def activate(app, pid, run=subprocess.run):
     except (OSError, subprocess.SubprocessError):
         return False
     return done.returncode == 0
+
+
+def app_name(app, name):
+    """這個程序在 Dock、⌘-Tab、選單列上的名字（不改是「Python」，D166）。要在開第一個視窗之前叫；改到了回 True。
+    沒有 PyObjC（lib/ 裡的 pywebview 會帶）就回 False。"""
+    try:
+        from Foundation import NSBundle
+    except ImportError:
+        return False
+    bundle = NSBundle.mainBundle()
+    info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+    if info is None:
+        return False
+    info["CFBundleName"] = str(name)
+    return True

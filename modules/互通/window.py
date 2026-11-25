@@ -46,6 +46,8 @@ def outside(app, core, folder: Path, info, files, problem, config_error, webview
 
     popup = popup_for(core, Path(app.home), webview)
     popup.title = info.title if info is not None else "互通"
+    with contextlib.suppress(Exception):  # Dock 上寫模組的名字，不是「Python」（D166）；要在開視窗之前，做不到也照開
+        core.call_here("os.app_name", popup.title)
     back = back_to(core, info)
 
     def job() -> int:
