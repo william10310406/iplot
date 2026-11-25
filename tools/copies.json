@@ -244,7 +244,7 @@
  {
   "places": [
    "modules/主控面板/panel_menu.py:items",
-   "ui/menu.py:items"
+   "modules/核心/ui/menu.py:items"
   ],
   "same": true,
   "why": "右鍵選單上模組提供的項目（menu.module）：網頁面板在「主控面板」裡、後備的 tkinter 面板在 ui/，面板不 import 核心也不 import ui（D162）；1.0 後備面板跟開機程式一起凍結時再看要不要留兩份"
@@ -252,7 +252,7 @@
  {
   "places": [
    "modules/主控面板/panel_web.py:due",
-   "ui/errlog.py:due"
+   "modules/核心/ui/errlog.py:due"
   ],
   "same": true,
   "why": "自動問「要回報嗎？」的節流（D150）：網頁面板與後備的 tkinter 面板各一份，理由同上（D162）"

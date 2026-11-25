@@ -34,7 +34,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "modules" / "核心"))  # 1.0 起核心在這裡（D167）
 from core.meta import read_meta  # noqa: E402
 
 # 不進模組的包：各台電腦自己的東西（跟 modules/工作坊/workshop.py 的 SKIP 一樣；比對時不分大小寫）
@@ -228,6 +228,28 @@ def top_level(zip_path: Path) -> list[str]:
     return sorted(names)
 
 
+KERNEL = "modules/核心"  # 1.0 起核心在這裡（D167）
+SEEDS = ("core", "ui")  # 種子：包的最上層也放一份，0.8 的「更新」換的就是這兩個資料夾；核心壞掉時開機程式用它
+
+
+def add_seeds(zip_path: Path, prefix: str) -> list[str]:
+    """包裡 modules/核心/ 的 core/、ui/ 在最上層再放一份（D167），回放了哪幾個。舊版的包（核心本來就在最上層）不動。"""
+    with zipfile.ZipFile(zip_path) as z:
+        names = z.namelist()
+    have = [seed for seed in SEEDS if any(n.startswith(f"{prefix}{KERNEL}/{seed}/") for n in names)]
+    if not have or any(n.startswith(f"{prefix}{seed}/") for seed in SEEDS for n in names):
+        return []
+    with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as z:
+        for n in names:
+            seed = n[len(f"{prefix}{KERNEL}/"):]
+            if n.startswith(f"{prefix}{KERNEL}/") and seed.split("/")[0] in SEEDS and not n.endswith("/"):
+                info = z.getinfo(n)
+                copy = zipfile.ZipInfo(prefix + seed, info.date_time)
+                copy.external_attr, copy.compress_type = info.external_attr, zipfile.ZIP_DEFLATED
+                z.writestr(copy, z.read(n))
+    return have
+
+
 def main(argv: list[str], root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description="產生核心 zip、update.json、模組 zip、index.json、index.html、.nojekyll")
     parser.add_argument("--version", required=True, help="核心版本，例如 0.5.0")
@@ -270,7 +292,9 @@ def main(argv: list[str], root: Path = ROOT) -> int:
             return 1
     out.mkdir(parents=True, exist_ok=True)
     git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True)  # noqa: E731
-    shown = git("show", f"{ref}:core/__init__.py")
+    shown = git("show", f"{ref}:{KERNEL}/core/__init__.py")
+    if shown.returncode != 0:  # 1.0 以前的版本：核心在最上層
+        shown = git("show", f"{ref}:core/__init__.py")
     if shown.returncode != 0:
         print(f"讀不到 {ref} 這個版本（還沒打 tag 的話加 --ref HEAD）：" + shown.stderr.strip())
         return 1
@@ -284,6 +308,7 @@ def main(argv: list[str], root: Path = ROOT) -> int:
         partial.unlink(missing_ok=True)
         print("git archive 失敗：" + archive.stderr.strip())
         return 1
+    add_seeds(partial, f"iPLoT-v{version}/")
     partial.replace(core_zip)
     notes = changelog_notes(root / "CHANGELOG.md", version)
     update = update_data(core_zip, version, _url(args.base_url, core_zip.name), notes)

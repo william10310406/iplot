@@ -218,7 +218,8 @@
 "6124f15363d2ab2054c8e635a1c68102e6656b6b69e7ae684bb71a1832c32da6",
 "13ef5f2654a090dd894724d71b0d3e17921e0ef74f3494837e4d36cef0854656",
 "adbaa2f2ed74efc0d908a2ac8b345e8ba2d74d391c232ef574acdeb1318d0cdf",
-"0b5b91352c45337ff9969aec1786118b1c337a90fb4e615dbc6677f38f50fd03"
+"0b5b91352c45337ff9969aec1786118b1c337a90fb4e615dbc6677f38f50fd03",
+"558461b3a36a63d2f734e1505ce1fc25f8c08de85638a0ccf6ac9f71424f6e70"
 ]
 },
 "導覽列": {
@@ -277,20 +278,6 @@
 "daa25c4ff046d548ae6d61e779f6e591d5d8bc994c8bac86287648bc15f49ac3"
 ]
 },
-"打開核心原始碼": {
-"CHANGELOG.md": [
-"9963d5bea996959d031dab4e88fa34c1cee22de8cc7d769a01833823293cf34d",
-"e09d9bcb3c9a009084e5f2f63408e4212c45870d4244e1ac56d08395b1103674"
-],
-"LICENSE": [
-"aeed872b5d5403c775876f5459a2c7705e9ceb4e575fba6286c2d0e40d7b48a0"
-],
-"iplot.py": [
-"b8573de9f06e75d5b63bfdec0411d1ebfe1e3e89c4f5aa5216bf47ac48e255b6",
-"d6e54e0b0928edcb44490f2e5d99937847b474247737916890a2587f801be518",
-"b729462672eb6b9ac5ea6a1865fc7b9931e50e4c792943c4d0f53cd8b0e5e60f"
-]
-},
 "整理": {
 "CHANGELOG.md": [
 "a806ba693153bea8080b46d4609bdb8f4a72cbfab5c166ff83666dbad9443251",
@@ -301,7 +288,8 @@
 ],
 "iplot.py": [
 "a6bc0a7d636a9f95bce3727d3f9dd58fa1d2d3e3b10ad557aeb04c349183ab49",
-"6fc7f0c2ec5de34049ceb3226922ad68aaf48666523c1ab481f784bc5f975c2f"
+"6fc7f0c2ec5de34049ceb3226922ad68aaf48666523c1ab481f784bc5f975c2f",
+"26c5a11b2fe5a1dca168e3c011bef1a0477950d253ccd28eae97f60af623807b"
 ]
 },
 "更新": {
@@ -316,6 +304,77 @@
 "update.py": [
 "267bbc0cb4b5bc3d10da59ab38430686e08c32830678a3fb851b75091845f2ca",
 "3eeeb3c68de3d57e10c1536b1dc97eec09fe349a89879d83c25ed6d7f5b104ef"
+]
+},
+"核心": {
+"CHANGELOG.md": [
+"bfec37a4281d9c8de8a16cb35ae95050d180053092502e67ac6ef99290fb716a"
+],
+"core/__init__.py": [
+"59b03b18a644845cd1aa0f4ec4fd2c1ed3a2c391e877dd19998f92dcacee616f"
+],
+"core/app.py": [
+"f7515a1341daac61bf60c079b9e1f3e6e5bfe8e0f41cd8e1192f24ca95d7fa88"
+],
+"core/bundled.py": [
+"249b7e7075f97e326b4a191b78434ab6c2623a89ece4be26bfaa19dfebad57d6"
+],
+"core/core.py": [
+"23091b28eb0cf1bae398d7bafd89b24c6fc3ac0384adff34c6797f982afa78d0"
+],
+"core/create.py": [
+"8350177ca18fc821a0135c62b24e350f22ce49a9f60b67f67d6179cd2b354437"
+],
+"core/errors.py": [
+"14a90263dcbff1277df84dc54d23483265dfe596086925fd2c27b8e067013c76"
+],
+"core/history.py": [
+"89abc699cf0b3f4f521933ef4d363494b8174c02fd4ab7b909b9f1579c90da13"
+],
+"core/meta.py": [
+"072941fb64d71a531786cee1ea15455b15170194161fc6ab3e5e7eeb3a1254e5"
+],
+"core/pipe.py": [
+"8a2351dd269e1b0a154a1548a2aa53fd4e84fcbbe087319b9f08e097f02d78be"
+],
+"core/runner.py": [
+"c1d56b7fc81baba4b6a55a55ce081db9c75e010ea8455892473616d95d99f1d2"
+],
+"core/scan.py": [
+"6adae459f04d99ade6ae40e96b1dd88d6b548540288dba23ab803ae2362df282"
+],
+"core/text.py": [
+"4db90a1278a10c3edd84fb7928bb73454f617e9acac9e43a7826414bccec1fc0"
+],
+"core/types.py": [
+"984dc9163cd75570750cc46581eee93b4b2c5a212ccc77575ead30335022ccf1"
+],
+"core/worker.py": [
+"9a7100b418b7688c4b07664e5fc297ae2d29470b9bf9677c4c22fd262722392d"
+],
+"iplot.py": [
+"71c075d01df4cd30ab521b8d3b328e4ac6d809bcc952b9fd1058a43c497323c1"
+],
+"ui/__init__.py": [
+"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+],
+"ui/cli.py": [
+"719ff7d1eefeb3829e235cff806cda867317755b01e311ea0af2f17e6ce4f6d0"
+],
+"ui/errlog.py": [
+"54f3b325f8b9b5803ef51fd5cc89706b51c028a66c43cec82d645397fd434568"
+],
+"ui/install.py": [
+"a3cb8759a10f9c907647755590d13d3b5b310dd3b1cd2b1c8652c88cee9c7e4d"
+],
+"ui/menu.py": [
+"ea25a5b4e3bf2add97ecb0a87be487d4e142dd6476ce43590be889a13d944394"
+],
+"ui/start.py": [
+"3d7ce96dc4cbbffeb7eed1c673ca4a6e8532e37683480d5188613f66df9b94d2"
+],
+"ui/tk.py": [
+"2302c548bbbdab6926fb4e8ebd7af9545ca4f07eac628bd1be0c61fcfcfce54a"
 ]
 },
 "行事曆": {
@@ -423,9 +482,9 @@
 "回報與討論": "0.6.0",
 "導覽列": "0.8.0",
 "工作坊": "0.5.0",
-"打開核心原始碼": "0.5.0",
 "整理": "0.8.0",
 "更新": "0.5.0",
+"核心": "0.8.0",
 "行事曆": "0.5.1",
 "重新啟動": "0.5.0",
 "開Terminal": "0.5.0",

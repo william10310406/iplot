@@ -17,7 +17,8 @@
   iplot.py 頂層的 NEEDS = ("角色或模組名", ...) 裡。
 - R11 另開程序把錯誤輸出丟掉：任何呼叫帶 stderr=subprocess.DEVNULL（D160 第 3 條）。另開的程序失敗了要有人知道：
   接到 logs/separate.log，並確認它起來了（行事曆、主控面板的 _spawn，互通的 separate.here）。
-- R6 核心與面板（core/、ui/、main.py）出現模組的名字。
+- R6 核心與面板（modules/核心/ 的 core/、ui/）出現模組的名字。這兩個資料夾是核心本身，不當成模組的程式碼查；
+  「核心」模組自己的 iplot.py 照一般模組查。iPLoT 資料夾的 main.py 是凍結的開機程式（D167），它本來就要知道核心在哪。
 iplot-modules 收件時跑同一份（tools/check_deps.py 與 tools/deps_allow.json 逐字抄過去）：維護者的模組有新的違規就退回，
 別人的只警告（AGENTS.md 第一節）。
 白名單在 tools/deps_allow.json：每一筆是現在已經有的違規，寫著預定哪一版拿掉。tests/test_module_deps.py 擋兩件事：
@@ -32,6 +33,12 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOW = ROOT / "tools" / "deps_allow.json"
 ENVIRONMENT = {"core.runner", "ui.web", "ui.tk"}
 STDLIB = set(sys.stdlib_module_names) | {"__future__"}
+KERNEL = ROOT / "modules" / "核心"  # 核心本身（D167）
+
+
+def kernel_files() -> list[Path]:
+    """核心本身的程式：R6 查這些，R1～R5 不查（它們就是核心）。"""
+    return sorted([*(KERNEL / "core").glob("*.py"), *(KERNEL / "ui").glob("*.py")])
 
 
 def module_names() -> set[str]:
@@ -117,10 +124,11 @@ def _role(node: ast.AST) -> str | None:
 def scan_module(top: Path, names: set[str]) -> list[tuple[str, str, str]]:
     """一個模組（modules/ 底下最上層的資料夾）的違規：（規則, 相對路徑, 是什麼）。"""
     found, requires, declared = [], None, needs(top)
+    kernel = set(kernel_files()) if top == KERNEL else set()
     own = {p.name for p in top.rglob("*") if p.is_dir()}  # 自己裡面的資料夾：同名的字串說的是自己的檔
     others = names - {top.name} - own
     for path in sorted(top.rglob("*.py")):
-        if "__pycache__" in path.parts:
+        if "__pycache__" in path.parts or path in kernel or ".local" in path.relative_to(top).parts:
             continue
         rel = f"modules/{path.relative_to(top.parent).as_posix()}"  # 收件時模組在別處，一樣寫成 modules/<名字>/…
         try:
@@ -162,9 +170,9 @@ def scan_module(top: Path, names: set[str]) -> list[tuple[str, str, str]]:
 
 
 def scan_seed(names: set[str]) -> list[tuple[str, str, str]]:
-    """R6：core/、ui/、main.py 裡剛好是模組名字、或含 modules/<名字> 的字串（docstring 不算）。"""
+    """R6：核心本身（kernel_files）裡剛好是模組名字、或含 modules/<名字> 的字串（docstring 不算）。"""
     found = []
-    for path in sorted([*(ROOT / "core").glob("*.py"), *(ROOT / "ui").glob("*.py"), ROOT / "main.py"]):
+    for path in kernel_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docs = _docstrings(tree)
         for node in ast.walk(tree):

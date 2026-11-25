@@ -226,7 +226,7 @@ def from_error(error, app, log=()) -> Report:
     elif lost:
         name = LOST
     else:
-        name = {"core": "核心", "config": "config.py"}.get(error.source, "iPLoT")
+        name = {"core": "iPLoT 核心", "config": "config.py"}.get(error.source, "iPLoT")
     sentence = app.describe(replace(error, module=LOST) if lost else error)
     text = body(WHAT_ERROR, environment(app, top, bool(hidden), error.source), sentence, error.traceback_text, log)
     return _masked("BUG", f"[回報] {name}：{error.kind}（iPLoT {app.version}）", text, ctx)

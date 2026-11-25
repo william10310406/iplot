@@ -58,13 +58,13 @@ started: list[subprocess.Popen] = []
 
 
 def fresh(work: Path, n: int, with_lib: bool = False) -> Path:
-    """乾淨副本：只有 main.py、config.py、core/、ui/、requirements/、空的 modules/；上一層只有它自己。
+    """乾淨副本：只有 main.py、config.py、requirements/、modules/ 裡只有「核心」（D167）；上一層只有它自己。
     with_lib：把裝好的 lib/ 也複製過去（網頁面板要用）。"""
     home = work / str(n) / "iPLoT"
     (home / "modules").mkdir(parents=True)
     for name in ("main.py", "config.py"):
         shutil.copy(SRC / name, home / name)
-    for name in ("core", "ui", "requirements") + (("lib",) if with_lib else ()):
+    for name in ("modules/核心", "requirements") + (("lib",) if with_lib else ()):
         shutil.copytree(SRC / name, home / name, ignore=shutil.ignore_patterns("__pycache__"))
     return home
 

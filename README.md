@@ -62,7 +62,7 @@ iPLoT 本身（`core/`、`ui/`、`lib/`、`modules/`、`logs/`、`.history/`、`
 
 | 層 | 在哪裡 | 顏色 |
 |---|---|---|
-| 這一層 | `iPLoT/modules/` 底下的資料夾。隨附的 11 個模組（主控面板、互通、作業系統、回報與討論、工作坊、打開核心原始碼、更新、行事曆、重新啟動、開Terminal、開工）和自己做的模組都在這；Lean 不隨附，要到「工作坊」安裝 | 藍 |
+| 這一層 | `iPLoT/modules/` 底下的資料夾。隨附的 11 個模組（主控面板、互通、作業系統、回報與討論、工作坊、核心、更新、行事曆、重新啟動、開Terminal、開工）和自己做的模組都在這；Lean 不隨附，要到「工作坊」安裝 | 藍 |
 | 上一層 | iPLoT 資料夾的上一層底下的資料夾。把 iPLoT 放在 `~/`，`Documents` 只要放進一個 `iplot.py` 就變成按鈕 | 紅 |
 | 下一層 | 任何模組資料夾裡面再有模組，圖示右下角出現 ▸，點 ▸ 進去看，可以一直往下。還沒有下一層的模組沒有 ▸，第一個從右鍵「在這裡新增下一層模組…」加 | 紫 |
 
@@ -194,7 +194,7 @@ python3 tools/publish.py --version 0.6.0 --base-url https://william10310406.gith
 
 發佈的順序：
 
-1. commit `.gitattributes`、版本號（`core/__init__.py`）、`config.py`、`modules/工作坊`、`CHANGELOG.md`，和這一版其他的改動。
+1. commit `.gitattributes`、版本號（`modules/核心/core/__init__.py`）、`config.py`、`modules/工作坊`、`CHANGELOG.md`，和這一版其他的改動。
 2. 打 tag（`v0.6.0`）。
 3. 跑上面那一行 `publish.py`。它會印「核心的包最上層：」接著那一層的檔與資料夾；工作樹的 `.gitattributes` 跟 tag 裡的不一樣時（改了還沒 commit，或還沒追蹤），多印一句「注意：工作樹的 .gitattributes 跟 v0.6.0 裡的不一樣…」：`git archive` 只認 tag 裡已經 commit 的那一份，要照新的排，先 commit、重打 tag 再發佈。
 4. 解開核心的包檢查：最上層跟上一步印的一樣，`tests/`、`tools/`、`docs/plans/` 不在裡面，留下的檔沒有個人路徑與開發用電腦的帳號名。

@@ -3,7 +3,7 @@
 - `api_version = 7`。介面只加不減；要拿掉東西就升 `api_version` 並寫進 `CHANGELOG.md`。1 是第一版；2（核心 0.4.0）拿掉了 `app.window`——面板換成網頁面板之後，沒有 tkinter 主視窗可以交給模組了（D66）——同一版多了 `app.confirm`；3（核心 0.5.0）加了 `app.config`、`app.version`、`app.page`（D72），只加、沒有拿掉任何東西，照 2 寫的模組不用改；4（核心 0.7.0）加了 `app.parent`、`app.children`（D152），一樣只加，照 3 寫的模組不用改；5（核心 0.8.0）加了 `app.call`、`app.each`、`app.providers`，`app` 上沒有的名字轉給提供 `app.<名字>` 的模組（D159），一樣只加；6（核心 0.9.0）每按一次另開一個程序跑模組，加了 `app.start` 與模組頂層的 `MIN_API`（D161），一樣只加；7（核心 1.0.0）加了 `app.top_modules`、`app.parent_of`、`app.children_of`、`app.panel`、`app.describe`，模組不用再 import 核心、不用猜自己在哪個面板（D164），還有 `app.restart`（D166），一樣只加。
 - 每次執行都新建一個 `App` 傳給 `run(app)`（或 `on_files(app, paths)`）；`module` 與 `memory` 在建立時綁好。執行一次＝在面板上雙擊模組的圖示，或右鍵選「執行」；tkinter 面板是單擊按鈕。tkinter 面板在兩種時候出現：安全模式（`python3 main.py --safe`，只掃 `modules/`），以及網頁面板開不起來時的備用面板（照常掃上一層與 `ROOTS`，不是安全模式，D75）；下面說「tkinter 面板」就是指這兩種。下面說的「按下」都是指執行這一次。
 - `def run(app)` 可省略：沒有 `run` 時最外層程式碼就是按下的動作，不用 `app` 也能寫模組（見最後一節）。
-- 本表整理自 `core/app.py` 的 docstring；兩邊不一致時以 `core/app.py` 為準。
+- 本表整理自 `modules/核心/core/app.py` 的 docstring；兩邊不一致時以 `modules/核心/core/app.py` 為準。
 
 | 組 | 成員 | 說明 |
 |---|---|---|

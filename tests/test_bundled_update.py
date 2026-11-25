@@ -228,7 +228,7 @@ def test_an_up_to_date_module_is_left_alone_without_a_backup(home):
 
 
 def test_start_up_never_fails_because_of_the_sync(home, monkeypatch):
-    import main
+    from ui import start as main
 
     monkeypatch.setattr(bundled, "sync", lambda *a: (_ for _ in ()).throw(RuntimeError("炸了")))
     assert main.bundle_news(home, V) is None

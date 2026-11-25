@@ -71,7 +71,6 @@ T: dict[str, str] = {
     "cli_files": "要交給它的檔案（路徑，用空白隔開；直接按 Enter 是不選）",
     "cli_folder": "要交給它的資料夾（路徑；直接按 Enter 是不選）",
     "cli_window_failed": "在面板外跑的視窗開不起來（{message}），改在終端機跑。細節在 logs/iplot.log。",
-    "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
     "start_failed": "iPLoT 沒辦法啟動。技術細節記在 iPLoT 資料夾裡的 logs/iplot.log。可以試試：關掉這個視窗再開一次；"
                     "還是不行，就用安全模式開（在終端機進到 iPLoT 資料夾，打 python3 main.py --safe），"
                     "或把 logs/iplot.log 拿給幫你的人看。",
@@ -91,7 +90,7 @@ T: dict[str, str] = {
 
 # 隨附的模組（核心的包帶的）：「更新」之後跟著換成新版的就是這些（D156）。0.9 跟著隨附同步一起搬進「更新」。
 # 「整理」模組有一份一樣的（不讓人在面板上改名或刪除，D155）；tests/test_modify.py 對照 git 的內容，兩份多一個、少一個都會紅
-BUNDLED = frozenset({"主控面板", "互通", "作業系統", "回報與討論", "工作坊", "打開核心原始碼", "更新", "行事曆", "重新啟動",
+BUNDLED = frozenset({"主控面板", "互通", "作業系統", "回報與討論", "工作坊", "核心", "更新", "行事曆", "重新啟動",
                      "開Terminal", "開工", "整理", "導覽列", "頁面"})
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""

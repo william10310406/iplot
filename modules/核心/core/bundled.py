@@ -75,8 +75,8 @@ def sync(home: Path, version: str, known: dict | None = None) -> list[str]:
                 modified = True
             elif path.is_file():
                 have = _sha(path.read_bytes())
-                if have != _sha(data):
-                    modified = modified or have not in known.get(name, {}).get(rel, ())
+                if have != _sha(data):  # 雜湊表自己不在表裡（每一版都變）：一律照包裡的換
+                    modified = modified or (have not in known.get(name, {}).get(rel, ()) and path.name != HASHES.name)
                     todo[rel] = data
             else:
                 todo[rel] = data

@@ -1,7 +1,7 @@
-"""產生 core/bundled_hashes.json：隨附模組的每個檔，每一版發出去過的 sha256（D156）。
+"""產生 modules/核心/core/bundled_hashes.json：隨附模組的每個檔，每一版發出去過的 sha256（D156）。
 
     python3 tools/bundled_hashes.py            # 所有 v0.5.0 以後的 tag ＋ 現在的暫存區
-    python3 tools/bundled_hashes.py --check    # 不寫檔，只看 core/bundled_hashes.json 有沒有涵蓋現在的檔
+    python3 tools/bundled_hashes.py --check    # 不寫檔，只看 modules/核心/core/bundled_hashes.json 有沒有涵蓋現在的檔
 
 「更新」之後的第一次啟動，core/bundled.py 拿安裝的檔的 sha256 跟這份表比：在表裡就是某一版發出去的原樣（沒改過，可以換成新版），
 不在表裡就是使用者改過的（不換）。隨附模組改了、發新版之前要重新產生；tests/test_bundled_update.py 會擋住忘記的人。
@@ -17,12 +17,14 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "core" / "bundled_hashes.json"
-SKIP = {"__pycache__", ".DS_Store"}
+CORE = ROOT / "modules" / "核心" / "core"  # 1.0 起核心是隨附模組「核心」（D167）
+OUT = CORE / "bundled_hashes.json"
+# 這張表自己不進表（它每一版都變、表裡放不進自己的雜湊）：core/bundled.py 一律照包裡的換
+SKIP = {"__pycache__", ".DS_Store", OUT.name}
 
 
 def bundled_names() -> list[str]:
-    text = (ROOT / "core" / "text.py").read_text(encoding="utf-8")
+    text = (CORE / "text.py").read_text(encoding="utf-8")
     block = re.search(r"BUNDLED = frozenset\(\{(.*?)\}\)", text, re.S).group(1)
     return re.findall(r'"([^"]+)"', block)
 
@@ -63,7 +65,7 @@ def from_tree(names: list[str]) -> dict[tuple[str, str], str]:
 
 
 def current_version() -> str:
-    text = (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")
+    text = (CORE / "__init__.py").read_text(encoding="utf-8")
     return re.search(r"""__version__\s*=\s*["']([^"']+)["']""", text).group(1)
 
 
