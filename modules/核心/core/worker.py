@@ -25,7 +25,7 @@ from .types import ErrorInfo, ModuleInfo, Result
 # 工作程序的入口：argv[1] 是 core 所在的資料夾。拿掉 -c 放進來的 ''，工作目錄裡的同名檔才不會蓋掉標準庫
 ENTRY = "import sys; sys.path[:] = [sys.argv[1]] + [p for p in sys.path if p]; from core import worker; worker.main()"
 # 工作程序可以要主程序做的事：面板的對話框與訊息區、重掃、開始跑另一個模組（不等它）
-SERVED = ("log", "report", "ask", "confirm", "choose_files", "choose_folder", "rescan", "start")
+SERVED = ("log", "report", "ask", "confirm", "choose_files", "choose_folder", "rescan", "start", "paging", "restart")
 
 
 # ── 主程序這一頭 ──
@@ -49,7 +49,7 @@ def spawn(core: Any, info: ModuleInfo, handler: str, args: tuple) -> Result:
             err.close()
     pipe = Pipe(proc.stdout, proc.stdin)
     job = {"home": core.home, "config": core.config, "safe": core.safe, "info": info, "handler": handler,
-           "args": args, "scope": core.scope, "memories": dict(core._blobs)}
+           "args": args, "scope": core.scope, "memories": dict(core._blobs), "panel": getattr(core.view, "name", None)}
     try:
         pipe.send(("start", job))
         while (message := pipe.recv())[0] == "req":
@@ -112,8 +112,8 @@ class Remote:
 class RemoteView:
     """工作程序裡的 View：show 不做（主程序自己畫）；page 走到這裡表示沒有提供 app.page 的模組；其他交給主程序。"""
 
-    def __init__(self, remote: Remote) -> None:
-        self._remote = remote
+    def __init__(self, remote: Remote, name: str | None = None) -> None:
+        self._remote, self.name = remote, name  # name：開這個程序的面板是哪一種（app.panel）
 
     def show(self, scope: Any) -> None:
         pass
@@ -163,7 +163,7 @@ def serve(pipe: Pipe) -> None:
     threading.Thread(target=remote.listen, daemon=True).start()
     home, info = job["home"], job["info"]
     sys.path.insert(1, str(home / "lib"))
-    core = Core(home, job["config"], RemoteView(remote), job["safe"], remote=remote)
+    core = Core(home, job["config"], RemoteView(remote, job.get("panel")), job["safe"], remote=remote)
     core.scope, core.memories = job["scope"], _load(job["memories"])
     core.running.append(info)
     result = runner.run_module(info, App(core, info), job["handler"], job["args"])

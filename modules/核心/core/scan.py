@@ -50,7 +50,7 @@ def module_info(folder: Path, root: Path, level: Level) -> ModuleInfo:
         has_children = bool(_module_folders(folder))
     return ModuleInfo(name, meta.title or name, meta.description, folder, file, root, level,
                       meta.has_run, meta.accepts_files, has_children, meta.error, meta.icon, icon_file,
-                      meta.provides, meta.min_api)
+                      meta.provides, meta.min_api, meta.role_names)
 
 
 def _same(a: Path, b: Path) -> bool:

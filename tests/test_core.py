@@ -24,7 +24,8 @@ def find(c, name):
 
 
 SYS = "作業系統"
-FAKE_OS = ('def open(app, path):\n    print("opened", path)\n    return "ok"\n\n'
+FAKE_OS = ('PROVIDES = {"os.open": "open", "os.edit": "edit"}\n\n'
+           'def open(app, path):\n    print("opened", path)\n    return "ok"\n\n'
            'def edit(app, path, editor, line):\n    print("edit", path.name, editor, line)\n')
 
 
@@ -271,7 +272,7 @@ def test_report_internal_without_logs_still_reports(home, view):
 def test_action_without_system_module_logs_and_returns_none(home, view):
     c = started(home, view)
     assert c.action("open", Path("/x")) is None
-    assert view.logs[-1] == T["no_system"].format(module=SYS, name="open")
+    assert view.logs[-1] == T["no_system"].format(role="os.open")
 
 
 def test_action_runs_system_module_handler_and_returns_value(home, view):
@@ -282,7 +283,7 @@ def test_action_runs_system_module_handler_and_returns_value(home, view):
 
 
 def test_action_broken_system_module_reports_once(home, view):
-    make_module(home / "modules", SYS, "def open(app, path)\n")
+    make_module(home / "modules", SYS, 'PROVIDES = {"os.open": "open"}\n\ndef open(app, path):\n    1/0\n')
     c = started(home, view)
     assert c.action("open", Path("/x")) is None
     assert len(view.reports) == 1 and view.reports[0].module == SYS

@@ -1,4 +1,4 @@
-"""更新 iPLoT 的核心：只換 core/、ui/、main.py、requirements/ 四樣，換之前先備份到 .backup/。
+"""更新 iPLoT 的核心：只換 modules/ 裡的核心與最上層的 core/、ui/、main.py、requirements/，換之前先備份到 .backup/。
 自己的模組、config.py、custom.css 都不會被動到；隨附的模組在重新啟動時由核心（core/bundled.py）換成新版，只換沒改過的。更新來源寫在 config.py 的 UPDATE_URL。
 
 做法都在旁邊的 update.py；這個檔只負責問、說、串起來。按了才會連網，不會自己去檢查有沒有新版。"""
@@ -15,6 +15,7 @@ def run(app):
     if not url:
         return app.log("尚未設定更新來源：在 config.py 的 UPDATE_URL 填 update.json 的網址")
     on_disk = update.installed_version(app.home) or app.version  # 剛更新過、還沒重新啟動時，磁碟上的比執行中的新
+    parts = "、".join(f"{name}/" if "." not in name else name for name in update.parts(app.home))
     try:  # 連網的這一段：讀 update.json、問、下載
         info = update.fetch_json(url)
         latest, zip_url, sha256 = update.check(info)
@@ -23,7 +24,7 @@ def run(app):
                 return app.log(f"已經換成 {on_disk} 了，執行「重新啟動」就會用新版")
             return app.log(f"已是最新（{app.version}）")
         if not app.confirm(f"有新版 {latest}（現在是 {on_disk}）：\n{info.get('notes', '')}\n\n"
-                           "更新會換掉 iPLoT 的核心（core/、ui/、main.py、requirements/），舊版先備份在 .backup/；"
+                           f"更新會換掉 iPLoT 的核心（{parts}），舊版先備份在 .backup/；"
                            "你的模組和設定不動；隨附的模組在重新啟動時一起換成新版（你改過的、從工作坊裝的不換）。換完要執行「重新啟動」才會用新版。\n要更新嗎？"):
             return app.log("已取消更新")
         package = update.download(zip_url, app.home / ".backup" / f"download-{latest}.zip", sha256)
@@ -48,7 +49,7 @@ def run(app):
     except OSError as exc:  # 權限、磁碟滿、檔案被佔著：apply 會把換上去的放回去，看磁碟上是不是真的都回來了
         left, why = update.unfinished(app.home), update.plain(exc).partition("。")[0]  # 原因的中文，不貼 [Errno] 與英文
         if not left:
-            return app.log(f"沒有更新：{why}。core/、ui/、main.py、requirements/ 都還是原來的")
+            return app.log(f"沒有更新：{why}。{parts} 都還是原來的")
         kept = f"舊版的備份在 .backup/{saved.name}/" if saved else "這一次沒有做成備份"
         return app.log(f"沒有更新，而且放回原來的版本時出錯了：{why}。{'、'.join(left)} 要用手整理"
                        f"（{kept}，做法見 README 的「怎麼回到舊版」）")

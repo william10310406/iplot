@@ -231,9 +231,10 @@ class WebPanel:
         self._waiting: dict[int, tuple[threading.Event, list]] = {}  # 等回答的對話框
         self._closed = False
         self.menu_items: list[tuple[ModuleInfo, str, tuple]] = []  # 右鍵選單上模組提供的項目：（提供者, 函式名, (那一格,)）
-        self._busy: list[str] = []  # 還在跑的模組（標題），按下的順序
+        self._busy, self._pages = [], []  # 還在跑的模組、頁面開著的模組（標題），按下的順序
         self._warned: set[Path] = set()
-        self.recent, self.offer = Recent(), Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
+        self.recent, self.offer, self.name = Recent(), Offer(), "網頁"  # 最近的訊息；要回報嗎的節流（D150）；app.panel（D164）
+        self.restarting = False  # app.restart（D166）：視窗關掉之後 start 重新啟動
 
     def attach(self, core: Core) -> None:
         """接上 Core；之後頁面的動作都交給它。"""
@@ -248,6 +249,11 @@ class WebPanel:
         self.window.events.loaded += self._loaded
         self.window.events.closing += lambda: self._cancel(closed=True)
         self.webview.start()
+
+    def restart(self) -> None:
+        """app.restart（D166）：關掉視窗；事件迴圈結束後 iplot.py 的 start 重新啟動整個 iPLoT。"""
+        self.restarting = True
+        self.window.destroy()
 
     def _loaded(self) -> None:
         """頁面載入完成：先把文字整份送進去，工作執行緒才開始做事，頁面拿到文字之前不會收到別的呼叫。"""
@@ -288,20 +294,23 @@ class WebPanel:
         也用來跑模組的某個 handler（回報這個問題）。每按一次另開程序時（D161），另開一條執行緒等它，
         工作執行緒馬上空出來：頁面開著的時候按別的模組也馬上開始跑。狀態列顯示還在跑的最後一個。"""
         def wait() -> None:
-            with self._lock:
-                self._busy.append(info.title)
-            self._js("busy", info.title)
+            self._mark(self._busy, info.title, True)
             try:
                 core.press(info, handler, args, quiet)
             finally:
-                with self._lock:
-                    self._busy.remove(info.title)
-                    last = self._busy[-1] if self._busy else None
-                self._js("busy", last)
-        if getattr(core, "separate", False):
-            threading.Thread(target=wait, daemon=True).start()
-        else:
-            wait()
+                self._mark(self._busy, info.title, False)
+        threading.Thread(target=wait, daemon=True).start() if getattr(core, "separate", False) else wait()
+
+    def paging(self, title: str, opened: bool) -> None:
+        """工作程序裡的模組開了（opened）或關了頁面（D166）：頁面開著的期間狀態列不說它「執行中」。"""
+        self._mark(self._pages, title, opened)
+
+    def _mark(self, names: list[str], title: str, on: bool) -> None:
+        """記下或拿掉一個標題，狀態列顯示還在跑、頁面又沒開著的最後一個。"""
+        with self._lock:
+            (names.append if on else names.remove)(title)
+            shown = next((t for t in reversed(self._busy) if t not in self._pages), None)
+        self._js("busy", shown)
 
     def menu(self, core: Core, info: ModuleInfo) -> None:
         """右鍵選單上模組提供的項目（見 Bridge.menu）。"""

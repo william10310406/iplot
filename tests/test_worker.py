@@ -56,10 +56,32 @@ def test_serve_runs_the_module_and_passes_app_calls_to_the_panel(tmp_path, monke
     (kind, result, blobs), info = run_in_process(tmp_path, monkeypatch, src, view, pickle.dumps({"n": 4}))
 
     assert kind == "done" and result.ok, result.error
-    assert result.value == ["小華", 5, True, 6]
+    assert result.value == ["小華", 5, True, 7]
     assert pickle.loads(blobs[info.folder]) == {"n": 5}
     assert view.asks == ["名字？"] and "嗨" in view.logs and "沒有這個" in view.logs
     assert any("沒有提供者" in line for line in view.logs)  # 沒有提供 app.page 的模組：說一句，不開視窗
+
+
+class PagingView(FakeView):
+    def paging(self, title, opened):
+        self.events.append(("paging", (title, opened)))
+
+
+def test_a_page_opened_in_the_worker_tells_the_panel_while_it_is_open(tmp_path, monkeypatch):
+    """D166：工作程序裡開的頁面開著的期間，面板的狀態列不說「執行中」：開之前、關了之後各告訴面板一聲。"""
+    make_module(tmp_path / "iplot" / "modules", "頁", 'PROVIDES = {"app.page": "page"}\n'
+                'def page(app, title, html, api, owner):\n    app.log("開了 " + title)\n')
+    view = PagingView()
+    (kind, result, _), _ = run_in_process(tmp_path, monkeypatch, 'TITLE = "工"\ndef run(app):\n    app.page("t", "<p></p>")\n', view)
+    assert kind == "done" and result.ok, result.error
+    paging = [e for e in view.events if e[0] in ("paging", "log")]
+    assert paging == [("paging", ("工", True)), ("log", "開了 t"), ("paging", ("工", False))]
+
+
+def test_a_panel_without_paging_is_fine(tmp_path, monkeypatch):
+    make_module(tmp_path / "iplot" / "modules", "頁", 'PROVIDES = {"app.page": "page"}\ndef page(app, *a):\n    return None\n')
+    (kind, result, _), _ = run_in_process(tmp_path, monkeypatch, 'def run(app):\n    app.page("t", "<p></p>")\n')
+    assert kind == "done" and result.ok, result.error
 
 
 def test_a_value_that_cannot_cross_processes_becomes_an_error_that_names_its_type(tmp_path, monkeypatch):

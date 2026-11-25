@@ -113,7 +113,7 @@ def test_plus_without_system_module(home, view):
     folder = c.create(home / "modules", "整理桌面")
     assert (folder / "iplot.py").exists()
     assert any(m.name == "整理桌面" for m in c.all_modules())
-    assert view.logs[-1] == T["no_system"].format(module="作業系統", name="edit")
+    assert view.logs[-1] == T["no_system"].format(role="os.edit")
 
 
 def test_config_urls_default_none_and_type_checked(tmp_path):

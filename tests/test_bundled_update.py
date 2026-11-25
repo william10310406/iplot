@@ -5,6 +5,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import tarfile
@@ -15,7 +16,7 @@ import pytest
 
 import core
 from core import bundled
-from core.text import BUNDLED, T
+from core.text import T
 
 ROOT = Path(__file__).resolve().parents[1]
 V = "0.7.2"
@@ -228,7 +229,7 @@ def test_an_up_to_date_module_is_left_alone_without_a_backup(home):
 
 
 def test_start_up_never_fails_because_of_the_sync(home, monkeypatch):
-    import main
+    from ui import start as main
 
     monkeypatch.setattr(bundled, "sync", lambda *a: (_ for _ in ()).throw(RuntimeError("炸了")))
     assert main.bundle_news(home, V) is None
@@ -257,8 +258,10 @@ def test_the_hash_table_covers_every_bundled_file_in_this_tree():
     assert not missing, f"core/bundled_hashes.json 少了：{missing}；執行 python3 tools/bundled_hashes.py"
 
 
-def test_the_tool_and_the_core_agree_on_which_modules_are_bundled():
-    assert set(tool().bundled_names()) == set(BUNDLED)
+def test_the_hash_table_lists_exactly_the_bundled_modules():
+    """D169：核心不寫隨附的名單，從雜湊表的鍵知道有哪些；表裡多一個、少一個都不行。"""
+    have = json.loads(bundled.HASHES.read_text(encoding="utf-8"))
+    assert {n for n in have if not n.startswith(".")} == set(tool().bundled_names()) == set(have[".introduced"])
 
 
 def test_real_0_7_1_install_upgrades_to_this_trees_files_and_keeps_data(tmp_path):
@@ -288,3 +291,41 @@ def test_real_0_7_1_install_upgrades_to_this_trees_files_and_keeps_data(tmp_path
         assert (home / "modules" / rel).read_bytes() == content
     if old_mac != current[("作業系統", "mac.py")]:
         assert any("作業系統" in n for n in notes)
+
+
+def retired(table: dict, **modules: dict[str, list[bytes]]) -> dict:
+    """雜湊表的 .retired（D171）：這一版拿掉的隨附模組，與它每一版發出去過的雜湊。"""
+    table[".retired"] = {name: {"since": V, "files": known(x=files)["x"]} for name, files in modules.items()}
+    return table
+
+
+BUTTON = "def run(app):\n    app.log('舊按鈕')\n".encode()
+
+
+def test_a_retired_module_nobody_changed_is_moved_to_the_backup(home):
+    """0.8 升 1.0：「打開核心原始碼」由「核心」取代，沒改過的那一份移到 .backup/，不留一格打開舊種子的按鈕。"""
+    folder = module(home, "舊按鈕", {"iplot.py": BUTTON, "LICENSE": b"MIT\n", ".history/1.json": b"{}"})
+    notes = bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [b"# older\n", BUTTON], "LICENSE": [b"MIT\n"]}))
+    assert not folder.exists()
+    [backup] = (home / ".backup").glob(f"{V}-bundled-*")
+    assert (backup / "舊按鈕" / "iplot.py").read_bytes() == BUTTON and (backup / "舊按鈕" / ".history" / "1.json").is_file()
+    assert notes == [T["bundled_retired"].format(names="舊按鈕", backup=backup.relative_to(home).as_posix())]
+
+
+@pytest.mark.parametrize("extra", [{"iplot.py": b"# \xe6\x94\xb9\xe9\x81\x8e\n"}, {"mine.py": b"x = 1\n"}, {".origin": b"{}"}])
+def test_a_retired_module_that_was_changed_added_to_or_came_from_the_workshop_stays(home, extra):
+    folder = module(home, "舊按鈕", {"iplot.py": BUTTON, **extra})
+    assert bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [BUTTON]})) == []
+    assert (folder / "iplot.py").is_file()
+
+
+def test_a_retired_module_that_is_already_gone_says_nothing(home):
+    assert bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [BUTTON]})) == []
+
+
+def test_the_real_table_retires_the_old_open_source_button_with_its_0_8_hashes():
+    entry = json.loads(bundled.HASHES.read_text(encoding="utf-8"))[".retired"]["打開核心原始碼"]
+    old = subprocess.run(["git", "show", "9e85f44:modules/打開核心原始碼/iplot.py"], cwd=ROOT, capture_output=True)
+    if old.returncode:
+        pytest.skip("git 歷史裡沒有 0.8 的「打開核心原始碼」（淺 clone）")
+    assert entry["since"] == "1.0.0" and sha(old.stdout) in entry["files"]["iplot.py"]

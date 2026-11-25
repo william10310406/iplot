@@ -32,6 +32,7 @@ T: dict[str, str] = {
     "already_exists": "『{name}』已經是模組了",
     "ask_name": "新模組的名稱",
     "bundled_updated": "隨附模組已換成這一版的：{names}。換下來的舊檔案備份在 {backup}",
+    "bundled_retired": "這一版不再隨附「{names}」，你沒改過它，已經移到 {backup}。想留著就把它搬回 modules/",
     "bundled_modified": "隨附模組『{name}』的程式你改過，這次沒有換，你的版本照舊留著。新版在 {package} 裡的 modules/{name}/：想用新版，把它複製過去（你改過的先自己留一份）",
     "bundled_failed": "隨附模組『{name}』沒換成新版：{message}。已經放回原來的檔案，下次啟動會再試一次",
     "open_file": "打開檔案",
@@ -64,7 +65,13 @@ T: dict[str, str] = {
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
     "no_panel": "找不到提供面板的模組，先用備用面板。隨附的面板模組可能被刪了：重新下載 iPLoT 就會回來。",
     "panel_broken": "面板模組出錯了（{message}），先用備用面板。細節在 logs/iplot.log。",
-    "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
+    "cli_usage": "用法：python3 main.py --run <模組資料夾、iplot.py 或名字> [檔案…]",
+    "cli_not_module": "不是模組：{path}（資料夾裡沒有 iplot.py）",
+    "cli_gone": "找不到這個模組：{path}。它可能被改名或刪掉了。",
+    "cli_yes_no": "（y／n）",
+    "cli_files": "要交給它的檔案（路徑，用空白隔開；直接按 Enter 是不選）",
+    "cli_folder": "要交給它的資料夾（路徑；直接按 Enter 是不選）",
+    "cli_window_failed": "在面板外跑的視窗開不起來（{message}），改在終端機跑。細節在 logs/iplot.log。",
     "start_failed": "iPLoT 沒辦法啟動。技術細節記在 iPLoT 資料夾裡的 logs/iplot.log。可以試試：關掉這個視窗再開一次；"
                     "還是不行，就用安全模式開（在終端機進到 iPLoT 資料夾，打 python3 main.py --safe），"
                     "或把 logs/iplot.log 拿給幫你的人看。",
@@ -76,18 +83,11 @@ T: dict[str, str] = {
     "os_ENAMETOOLONG": "名稱太長",
     "os_ENOENT": "找不到檔案或資料夾",
     "os_other": "系統拒絕了這個動作，可以再試一次；還是不行就看 logs/iplot.log",
-    "allow_roles": "『{title}』是從工作坊裝來的，它想提供這些功能：{roles}。\n允許的話，iPLoT 需要這些功能時會執行它的程式"
+    "allow_roles": "『{title}』是從外面裝進來的，它想提供這些功能：{roles}。\n允許的話，iPLoT 需要這些功能時會執行它的程式"
                    "（不用等你按它）。要允許嗎？\n不允許也沒關係：它照樣是一顆按鈕，下次啟動會再問。",
-    "no_system": "沒有『{module}』模組，無法執行 {name}。要有這個功能，在 modules/ 新增一個叫『{module}』的模組"
-                 "並定義 {name}(app, …)；見 docs/07_接口與邊界.md",
+    "no_system": "沒有模組提供「{role}」，這個動作做不了。按「更新」把 iPLoT 隨附的模組補回來；"
+                 "或寫一個模組在 PROVIDES 宣告它，見 docs/api.md",
 }
-
-# 隨附的模組（核心的包帶的）：「更新」之後跟著換成新版的就是這些（D156）。0.9 跟著隨附同步一起搬進「更新」。
-# 「整理」模組有一份一樣的（不讓人在面板上改名或刪除，D155）；tests/test_modify.py 對照 git 的內容，兩份多一個、少一個都會紅
-BUNDLED = frozenset({"主控面板", "互通", "作業系統", "回報與討論", "工作坊", "打開核心原始碼", "更新", "行事曆", "重新啟動",
-                     "開Terminal", "開工", "整理", "導覽列", "頁面"})
-# 碰作業系統的事（打開、編輯、顯示、終端機、垃圾桶）由 modules/ 裡叫這個名字的模組做（D50、D52）
-SYSTEM_MODULE = "作業系統"
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
 # 規則在 iPLoT 資料夾的 AGENTS.md（給 AI 助手：改這個檔之前先讀它）。重點：只透過 app 碰 iPLoT，不 import core；

@@ -1,10 +1,19 @@
 """macOS：打開、編輯、顯示、終端機都用 open 指令；垃圾桶走系統的做法（Finder 同一條路），不行才直接搬進 ~/.Trash。"""
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 NAME = "macOS"
 GONE = "找不到「{path}」，可能被改名或刪掉了，沒有打開"
+# macOS 14 起，自己不在最前面的 App 叫別人到最前面會被拒絕；不是 App 的一般 python 程序叫就可以（2026-10-07 量過）。
+# 被拒絕時交給這一小段在子程序裡叫：argv 是 [-c, lib 的路徑, pid]。原本主控面板、行事曆各抄一份，1.0 收到這裡（D164）
+HELPER = ("import sys\n"
+          "sys.path.insert(0, sys.argv[1])\n"
+          "import AppKit\n"
+          "app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(int(sys.argv[2]))\n"
+          "sys.exit(0 if app is not None and app.activateWithOptions_("
+          "AppKit.NSApplicationActivateIgnoringOtherApps) else 1)\n")
 
 
 def _launch(argv, **kw):
@@ -114,3 +123,37 @@ def trash(app, path):
             dest = folder / f"{name} {n}"
         shutil.move(str(path), str(dest))
         return dest
+
+
+def activate(app, pid, run=subprocess.run):
+    """把 pid 那個程序的視窗叫到最前面，叫到了回 True。載不進 AppKit（lib/ 裡的 pyobjc）、被系統拒絕都回 False，
+    由呼叫的模組跟使用者說下一步。子程序的錯誤輸出不丟掉：留在這個程序的錯誤輸出（iPLoT 的 logs/worker.log）。"""
+    try:
+        import AppKit
+    except ImportError:
+        return False
+    target = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(int(pid))
+    if target is not None and target.activateWithOptions_(AppKit.NSApplicationActivateIgnoringOtherApps):
+        return True
+    lib = str(Path(AppKit.__file__).parents[1])
+    try:
+        done = run([sys.executable, "-c", HELPER, lib, str(int(pid))], stdin=subprocess.DEVNULL,
+                   stdout=subprocess.DEVNULL, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+def app_name(app, name):
+    """這個程序在 Dock、⌘-Tab、選單列上的名字（不改是「Python」，D166）。要在開第一個視窗之前叫；改到了回 True。
+    沒有 PyObjC（lib/ 裡的 pywebview 會帶）就回 False。"""
+    try:
+        from Foundation import NSBundle
+    except ImportError:
+        return False
+    bundle = NSBundle.mainBundle()
+    info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+    if info is None:
+        return False
+    info["CFBundleName"] = str(name)
+    return True

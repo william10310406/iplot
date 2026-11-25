@@ -1,7 +1,7 @@
-"""產生 core/bundled_hashes.json：隨附模組的每個檔，每一版發出去過的 sha256（D156）。
+"""產生 modules/核心/core/bundled_hashes.json：隨附模組的每個檔，每一版發出去過的 sha256（D156）。
 
     python3 tools/bundled_hashes.py            # 所有 v0.5.0 以後的 tag ＋ 現在的暫存區
-    python3 tools/bundled_hashes.py --check    # 不寫檔，只看 core/bundled_hashes.json 有沒有涵蓋現在的檔
+    python3 tools/bundled_hashes.py --check    # 不寫檔，只看 modules/核心/core/bundled_hashes.json 有沒有涵蓋現在的檔
 
 「更新」之後的第一次啟動，core/bundled.py 拿安裝的檔的 sha256 跟這份表比：在表裡就是某一版發出去的原樣（沒改過，可以換成新版），
 不在表裡就是使用者改過的（不換）。隨附模組改了、發新版之前要重新產生；tests/test_bundled_update.py 會擋住忘記的人。
@@ -17,14 +17,25 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "core" / "bundled_hashes.json"
-SKIP = {"__pycache__", ".DS_Store"}
+CORE = ROOT / "modules" / "核心" / "core"  # 1.0 起核心是隨附模組「核心」（D167）
+OUT = CORE / "bundled_hashes.json"
+# 這張表自己不進表（它每一版都變、表裡放不進自己的雜湊）：core/bundled.py 一律照包裡的換
+SKIP = {"__pycache__", ".DS_Store", OUT.name}
+# 拿掉的隨附模組：{名稱: 哪一版拿掉}。表裡的 ".retired" 留著它每一版發出去過的雜湊，新的核心第一次啟動時，
+# 本機那一份沒改過才移到 .backup/（D171）；改過的、工作坊裝來的不碰。
+RETIRED = {"打開核心原始碼": "1.0.0"}
 
 
 def bundled_names() -> list[str]:
-    text = (ROOT / "core" / "text.py").read_text(encoding="utf-8")
-    block = re.search(r"BUNDLED = frozenset\(\{(.*?)\}\)", text, re.S).group(1)
-    return re.findall(r'"([^"]+)"', block)
+    """隨附的模組＝核心的包帶的：git 追蹤的 modules/ 底下、沒有標 export-ignore 的資料夾（D169：名單不寫在核心裡，
+    核心從這張表的鍵知道有哪些）。"""
+    listed = subprocess.run(["git", "ls-files", "-z", "modules"], cwd=ROOT, capture_output=True, text=True,
+                            encoding="utf-8", check=True).stdout.split("\0")
+    tops = sorted({path.split("/")[1] for path in listed if path.count("/") >= 2})
+    attrs = subprocess.run(["git", "check-attr", "-z", "export-ignore", "--", *(f"modules/{n}/" for n in tops)],
+                           cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout.split("\0")
+    ignored = {attrs[i].split("/")[1] for i in range(0, len(attrs) - 2, 3) if attrs[i + 2] == "set"}
+    return [n for n in tops if n not in ignored]
 
 
 def tags() -> list[str]:
@@ -62,8 +73,26 @@ def from_tree(names: list[str]) -> dict[tuple[str, str], str]:
     return {key: hashlib.sha256(data).hexdigest() for key, data in tree_files(names).items()}
 
 
+def retired_hashes(name: str) -> dict[str, list[str]]:
+    """拿掉的模組在 git 歷史裡每一個 commit 的每個檔的雜湊（沒有 tag 的 clone 也收得齊；多收了沒發出去的版本只是比較寬）。"""
+    commits = subprocess.run(["git", "log", "--format=%H", "--", f"modules/{name}"], cwd=ROOT, capture_output=True,
+                             text=True, check=True).stdout.split()
+    found: dict[str, list[str]] = {}
+    for commit in commits:
+        listed = subprocess.run(["git", "ls-tree", "-r", "-z", "--name-only", commit, "--", f"modules/{name}/"], cwd=ROOT,
+                                capture_output=True, text=True, encoding="utf-8", check=True).stdout.split("\0")
+        for path in filter(None, listed):
+            parts = path.split("/")
+            if not SKIP & set(parts):
+                data = subprocess.run(["git", "show", f"{commit}:{path}"], cwd=ROOT, capture_output=True, check=True).stdout
+                digest = hashlib.sha256(data).hexdigest()
+                if digest not in (hashes := found.setdefault("/".join(parts[2:]), [])):
+                    hashes.append(digest)
+    return dict(sorted(found.items()))
+
+
 def current_version() -> str:
-    text = (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")
+    text = (CORE / "__init__.py").read_text(encoding="utf-8")
     return re.search(r"""__version__\s*=\s*["']([^"']+)["']""", text).group(1)
 
 
@@ -84,7 +113,10 @@ def build(extra_tags: bool = True) -> dict[str, dict]:
             hashes = table.setdefault(name, {}).setdefault(rel, [])
             if digest not in hashes:
                 hashes.append(digest)
-    return {**{n: dict(sorted(table[n].items())) for n in sorted(table)}, ".introduced": dict(sorted(introduced.items()))}
+    have = json.loads(OUT.read_text(encoding="utf-8")).get(".retired", {}) if OUT.is_file() else {}
+    retired = {n: have.get(n) or {"since": since, "files": retired_hashes(n)} for n, since in sorted(RETIRED.items())}
+    return {**{n: dict(sorted(table[n].items())) for n in sorted(table)}, ".introduced": dict(sorted(introduced.items())),
+            ".retired": retired}
 
 
 def main() -> int:
