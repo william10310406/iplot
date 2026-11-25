@@ -4,6 +4,7 @@
 舊的那一份 iPLoT 從 git 拿：有 v0.8.0 的 tag 就用它，沒有（雲端的 clone）就用核心搬家之前的最後一個 commit。"""
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -34,7 +35,8 @@ def old_ref():
 def old_install(home, ref):
     """ref 那一版的 iPLoT（git archive，跟發出去的包一樣），解到 home。"""
     with tarfile.open(fileobj=BytesIO(git("archive", ref, "core", "ui", "main.py", "requirements", "modules/更新"))) as tar:
-        tar.extractall(home, filter="data")
+        # filter 要 3.10.12 以後才有（CI 的 Windows／macOS 是 3.10.11）
+        tar.extractall(home, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     (home / "config.py").write_text("", encoding="utf-8")
 
 
@@ -56,8 +58,9 @@ def new_package(path, version):
 
 
 def boot(home, *args):
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}  # Windows 的管線預設不是 UTF-8，模組印的中文才比得到
     return subprocess.run([sys.executable, "main.py", *args], cwd=home, capture_output=True, text=True,
-                          encoding="utf-8", timeout=120)
+                          encoding="utf-8", timeout=120, env=env)
 
 
 def test_an_0_8_install_updated_with_its_own_updater_starts_and_moves_into_modules(tmp_path):
