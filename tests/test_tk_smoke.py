@@ -18,7 +18,7 @@ _probe.update()  # macOS 的 Tk 9.0：沒跑過事件迴圈就 destroy 的視窗
 _probe.destroy()
 
 from core.core import Core  # noqa: E402
-from core.text import REPORT_MODULE, T  # noqa: E402
+from core.text import T  # noqa: E402
 from core.types import DEFAULT_CONFIG, ErrorInfo  # noqa: E402
 from ui.tk import Panel  # noqa: E402
 
@@ -159,7 +159,9 @@ def test_open_file_button_uses_core_action(home, panel, monkeypatch):
     assert seen == [("edit", Path("/m/iplot.py"), panel.core.config.editor, 7)]
 
 
-REPORTER_SRC = "def on_error(app, error):\n    app.log(repr(error))\n"
+REPORT_MODULE = "回報與討論"  # 提供 panel.error 的假模組（D162）：按了「回報這個問題」把錯誤寫進訊息區
+REPORTER_SRC = ('PROVIDES = {"panel.error": "got"}\n\ndef run(app):\n    pass\n\n'
+                "def got(app, error, recent, pressed):\n    if pressed:\n        app.log(repr(error))\n    return False\n")
 
 
 def embedded(panel):
@@ -178,13 +180,13 @@ def failing(home, panel):
 
 
 def test_no_report_button_without_the_report_module(home, panel):
-    """modules/回報與討論 不是模組：錯誤那一列照舊只有「打開檔案」。"""
+    """沒有模組提供 panel.error：錯誤那一列照舊只有「打開檔案」。"""
     failing(home, panel)
     assert embedded(panel) == [T["open_file"]]
 
 
 def test_report_button_hands_the_same_error_to_on_error(home, panel):
-    """D110：有「回報與討論」才多一顆「回報這個問題」，排在「打開檔案」後面；按了把同一筆錯誤交給它的 on_error，
+    """D110、D162：有模組提供 panel.error 才多一顆「回報這個問題」，排在「打開檔案」後面；按了把同一筆錯誤交給它（pressed），
     而且 quiet（沒有「完成」那一行，設計第 17 節第 6 條）。"""
     make_module(home / "modules", REPORT_MODULE, REPORTER_SRC)
     error = failing(home, panel)
@@ -369,3 +371,15 @@ def test_page_logs_unsupported(home, panel):
     started(home, panel)
     assert panel.page("工作坊", "<p>hi</p>", object()) is None
     assert T["page_unsupported"] in messages(panel)
+
+
+def test_restart_ends_the_loop_and_reexecs_with_the_same_arguments(home, panel, monkeypatch):
+    """app.restart（D166）：安全模式開的，重新啟動之後還是安全模式（啟動參數照舊）。"""
+    started(home, panel)
+    seen = []
+    monkeypatch.setattr(sys, "argv", ["main.py", "--safe"])
+    monkeypatch.setattr(os, "execv", lambda exe, argv: seen.append((os.getcwd(), argv)))
+    monkeypatch.chdir(home.parent)
+    panel.root.after(10, panel.restart)
+    panel.mainloop()
+    assert seen == [(str(home), [sys.executable, str(home / "main.py"), "--safe"])]

@@ -30,7 +30,7 @@ def test_no_stale_allow_entries():
 
 
 def test_allow_entries_say_why_and_until_and_are_not_expired():
-    now = _version(re.search(r'__version__ = "([\d.]+)"', (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")).group(1))
+    now = _version(re.search(r'__version__ = "([\d.]+)"', (ROOT / "modules" / "核心" / "core" / "__init__.py").read_text(encoding="utf-8")).group(1))
     for entry in json.loads(deps.ALLOW.read_text(encoding="utf-8")):
         assert entry["why"] and entry["until"], entry
         if entry["until"] != "永久":
@@ -59,6 +59,13 @@ def test_r1_r5_another_modules_name(tree):
 
 def test_docstrings_comments_and_name_lists_do_not_count(tree):
     assert scan(tree, '"""跟乙一起用。"""\n# "乙"\nALL = ("乙", "丙", "丁")\n') == set()
+
+
+def test_a_folder_of_its_own_with_the_same_name_is_not_another_module(tree):
+    """課程作業的範例課程叫「科學計算」，跟另一個模組同名：說的是自己的 範例課程/科學計算/，不是那個模組。"""
+    (tree / "甲" / "範例" / "乙").mkdir(parents=True)
+    assert scan(tree, 'EXAMPLE = "乙"\n') == set()
+    assert scan(tree, 'X = "丙"\n') == {("R1", "丙"), ("R5", "丙")}
 
 
 def test_r5_roles_must_be_declared(tree):

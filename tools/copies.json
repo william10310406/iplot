@@ -10,55 +10,19 @@
  },
  {
   "places": [
-   "modules/主控面板/iplot.py:_errlog",
-   "modules/互通/nav.py:_errlog",
-   "modules/互通/separate.py:_errlog",
-   "modules/行事曆/iplot.py:_errlog"
-  ],
-  "same": true,
-  "why": "另開的程序的 stderr 接到 logs/separate.log；跟 _spawn、互通 separate.py 同一份，要一樣"
- },
- {
-  "places": [
-   "modules/主控面板/iplot.py:_ps",
-   "modules/互通/separate.py:_ps",
-   "modules/行事曆/iplot.py:_ps"
-  ],
-  "same": true,
-  "why": "把視窗叫到最前面；0.9 換成作業系統的角色 os.activate 後刪掉抄本。互通 separate.py 的 activate 多了 ENV 的處理，已經分家，不在這組"
- },
- {
-  "places": [
-   "modules/主控面板/iplot.py:_spawn",
-   "modules/互通/nav.py:_spawn",
-   "modules/行事曆/iplot.py:_spawn"
-  ],
-  "same": true,
-  "why": "另開程序要確認起來了（D160 第 3 條）；三個模組各自要能獨立運作，所以抄（R9）。0.9 換成互通提供的角色 page.separate 後刪掉抄本"
- },
- {
-  "places": [
-   "modules/主控面板/iplot.py:activate",
-   "modules/行事曆/iplot.py:activate"
-  ],
-  "same": true,
-  "why": "把視窗叫到最前面；0.9 換成作業系統的角色 os.activate 後刪掉抄本。互通 separate.py 的 activate 多了 ENV 的處理，已經分家，不在這組"
- },
- {
-  "places": [
    "modules/互通/popup.py:_cancel",
-   "ui/web.py:_cancel"
+   "modules/主控面板/panel_web.py:_cancel"
   ],
   "same": true,
-  "why": "互通的彈出式視窗照網頁面板的 View 做（D81）；兩邊對話框的取消與回答要一樣。0.9 面板搬成模組時合成一份"
+  "why": "互通的彈出式視窗照網頁面板的 View 做（D81）；兩邊對話框的取消與回答要一樣。兩個模組各自獨立，不互相 import（規則 7），所以各抄一份"
  },
  {
   "places": [
    "modules/互通/popup.py:answer",
-   "ui/web.py:answer"
+   "modules/主控面板/panel_web.py:answer"
   ],
   "same": true,
-  "why": "互通的彈出式視窗照網頁面板的 View 做（D81）；兩邊對話框的取消與回答要一樣。0.9 面板搬成模組時合成一份"
+  "why": "互通的彈出式視窗照網頁面板的 View 做（D81）；兩邊對話框的取消與回答要一樣。兩個模組各自獨立，不互相 import（規則 7），所以各抄一份"
  },
  {
   "places": [
@@ -276,5 +240,29 @@
   ],
   "same": false,
   "why": "課程作業是從科學計算長出來的，範例課程與作業類型抄了科學計算的檔；科學計算凍結到這學期，下架時這幾組一起刪"
+ },
+ {
+  "places": [
+   "modules/主控面板/panel_menu.py:items",
+   "modules/核心/ui/menu.py:items"
+  ],
+  "same": true,
+  "why": "右鍵選單上模組提供的項目（menu.module）：網頁面板在「主控面板」裡、後備的 tkinter 面板在 ui/，面板不 import 核心也不 import ui（D162）；1.0 後備面板跟開機程式一起凍結時再看要不要留兩份"
+ },
+ {
+  "places": [
+   "modules/主控面板/panel_web.py:due",
+   "modules/核心/ui/errlog.py:due"
+  ],
+  "same": true,
+  "why": "自動問「要回報嗎？」的節流（D150）：網頁面板與後備的 tkinter 面板各一份，理由同上（D162）"
+ },
+ {
+  "places": [
+   "modules/主控面板/panel_web.py:is_module",
+   "modules/回報與討論/report.py:is_module"
+  ],
+  "same": true,
+  "why": "「是不是模組」跟核心 core/scan.py 的 is_module 一樣（符號連結不算、iPLoT.py 不算）；模組不 import 核心（R2），所以各抄一份"
  }
 ]

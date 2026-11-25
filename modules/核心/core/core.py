@@ -1,8 +1,11 @@
 """組裝與編排：持有設定、畫面與記憶，把面板上的動作接到底層的檔案。"""
 
 import contextlib
+import importlib.util
 import json
 import runpy
+import sys
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -11,8 +14,8 @@ from typing import Any, Protocol
 from . import history, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
-from .errors import from_exception, reason
-from .text import SYSTEM_MODULE, T
+from .errors import describe, from_exception, reason
+from .text import T
 from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result, Root, Scope
 
 
@@ -60,14 +63,17 @@ def load_config(path: Path) -> tuple[Config, ErrorInfo | None]:
 
 
 class Core:
-    """iPLoT 的編排：重掃、進入／返回、按下、依名稱執行、依角色找模組（D159）、新增、回報核心錯誤。"""
+    """iPLoT 的編排：重掃、進入／返回、按下、依名稱執行、依角色找模組（D159）、新增、回報核心錯誤。
+    separate：每按一次另開一個工作程序跑（D161，網頁面板用）；remote：自己就是工作程序，對主程序發問的函式。"""
 
-    def __init__(self, home: Path, config: Config, view: View, safe: bool = False) -> None:
+    def __init__(self, home: Path, config: Config, view: View, safe: bool = False,
+                 separate: bool = False, remote: Any = None) -> None:
         self.home, self.config, self.view, self.safe = home, config, view, safe
+        self.separate, self.remote, self._blobs = separate, remote, {}  # _blobs：工作程序交回來的 memory（pickle 過）
         self.scope = Scope(("iPLoT",), ())
         self.memories: dict[Path, dict] = {}
         self._stack: list[ModuleInfo] = []
-        self._declined: set[Path] = set()  # 這次執行期間答了「不允許」的工作坊模組，不再問
+        self._declined: set[Path] = set()  # 這次執行期間答了「不允許」的外來模組（有 .origin），不再問
         self.running, self._pending = [], False  # running：正在執行的模組（ModuleInfo），最裡面的在最後；app.page 被呼叫時 running[-1] 就是開頁面的那一個
 
     def roots(self) -> list[Root]:
@@ -75,8 +81,10 @@ class Core:
         return scan.roots_from_config(self.home, ("modules",) if self.safe else self.config.roots)
 
     def rescan(self) -> None:
-        """重掃目前範圍並重畫；模組執行中只先記著，等執行結束才做。"""
-        if self.running:
+        """重掃目前範圍並重畫；模組執行中只先記著，等執行結束才做。工作程序裡交給主程序做。"""
+        if self.remote is not None:
+            return self.remote("rescan")
+        if self.running and not self.separate:
             self._pending = True
             return
         gone = [i for i, m in enumerate(self._stack) if not scan.is_module(m.folder)]
@@ -108,7 +116,12 @@ class Core:
               quiet: bool = False) -> Result:
         """執行模組：先存快照再交給 runner，結果寫進訊息區；執行中收到的重掃延到結束才做。
         quiet 只省掉「完成」那一行，快照、輸出、錯誤照舊。
-        模組資料夾裡有空檔案 .unconfirmed（工作坊裝進來的）時先問一次：取消就不執行，確定就拿掉標記（D59）。"""
+        模組資料夾裡有空檔案 .unconfirmed（裝它進來的模組放的，例如工作坊）時先問一次：取消就不執行，確定就拿掉標記（D59）。核心不管是誰放的。"""
+        if info.min_api > App.api_version:  # 要的指令集比這個核心新：不跑，說要更新（D161）
+            message = T["needs_api"].format(title=info.title, need=info.min_api, have=App.api_version)
+            error = ErrorInfo("NeedsNewerIPLoT", message, info.file, None, "", "module", info.name)
+            self.view.report(error)
+            return Result(False, error, 0.0, "")
         marker = info.folder / ".unconfirmed"
         if marker.exists() and not self.view.confirm(T["confirm_foreign"].format(title=info.title)):
             self.view.log(T["cancelled"].format(title=info.title))
@@ -121,7 +134,11 @@ class Core:
                 history.snapshot(info.file, self.config.history_keep)
             except OSError as exc:
                 self.view.log(T["snapshot_failed"].format(message=self._why(exc)))
-            result = runner.run_module(info, App(self, info), handler, args)
+            if self.separate:
+                from . import worker  # worker 也 import 這個檔，放在這裡才不會循環
+                result = worker.spawn(self, info, handler, args)
+            else:
+                result = runner.run_module(info, App(self, info), handler, args)
             for line in result.output.splitlines():
                 self.view.log(line)
             if result.error:
@@ -130,10 +147,17 @@ class Core:
                 self.view.log(T["done"].format(title=info.title, seconds=result.duration))
             return result
         finally:
-            self.running.pop()
+            self.running.remove(info)
             if not self.running and self._pending:
                 self._pending = False
                 self.rescan()
+
+    def start(self, info: ModuleInfo) -> None:
+        """開始跑 info，不等它（D161）：工作程序裡交給主程序；主程序裡另開一條執行緒按下去。"""
+        if self.remote is not None:
+            return self.remote("start", info)
+        threading.Thread(target=self.press, args=(info,), daemon=True).start()
+        return None
 
     def run_by_name(self, name: str | ModuleInfo) -> Result:
         """執行另一個模組：先找面板目前這一層，找不到再找最上層；同一處有兩個同名就丟 LookupError，不猜。
@@ -151,7 +175,7 @@ class Core:
 
     def providers(self, role: str) -> list[ModuleInfo]:
         """最上層宣告了 PROVIDES 而且裡面有 role 的模組，依掃描順序（D159）。role 是什麼意思核心不管，
-        由提供的模組和使用的模組自己約定。從工作坊裝來的（有 .origin）要使用者允許過才算。"""
+        由提供的模組和使用的模組自己約定。從外面裝進來的（有 .origin，誰放的核心不管）要使用者允許過才算。"""
         found = [m for g in scan.find_modules(self.roots()) for m in g.modules if role in dict(m.provides)]
         return [m for m in found if self._allowed(m)]
 
@@ -164,7 +188,9 @@ class Core:
         with contextlib.suppress(OSError):
             if ok.read_text(encoding="utf-8") == stamp:
                 return True
-        roles = "、".join(role for role, _ in info.provides)
+        tops = (m for g in scan.find_modules(self.roots()) for m in g.modules if not (m.folder / ".origin").exists())
+        named = {r: n for m in tops for r, n in m.role_names}
+        roles = "、".join(named.get(role, role) for role, _ in info.provides)  # 用角色的那一個寫的名字（D166）
         if info.folder in self._declined or not self.view.confirm(T["allow_roles"].format(title=info.title, roles=roles)):
             self._declined.add(info.folder)
             return False
@@ -178,6 +204,25 @@ class Core:
         found = self.providers(role)
         return self.run_role(found[0], role, args) if found else None
 
+    def call_here(self, role: str, *args: Any) -> Any:
+        """在這個程序裡直接執行第一個提供 role 的模組，交給它 app 與 args，回它的回傳值；沒有提供者回 None（D162）。
+        不另開程序、不接輸出、不改工作目錄：開機程式用它開面板，面板要佔著這個程序的主執行緒到視窗關掉。
+        模組資料夾放進 sys.path 最前面，它自己的檔照常 import 得到；載入或執行時的例外照樣丟給呼叫的人。"""
+        found = self.providers(role)
+        if not found:
+            return None
+        info = found[0]
+        spec = importlib.util.spec_from_file_location("iplot_host_" + role.replace(".", "_"), info.file)
+        module = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(info.folder))
+        spec.loader.exec_module(module)
+        return getattr(module, dict(info.provides)[role])(App(self, info), *args)
+
+    @staticmethod
+    def describe(error: ErrorInfo) -> str:
+        """錯誤的白話一句（面板顯示用，跟訊息區、記錄檔說的一樣）。"""
+        return describe(error)
+
     def each(self, role: str, *args: Any) -> list[tuple[ModuleInfo, Any]]:
         """交給每一個提供 role 的模組，依序執行；回（模組, 回傳值）。某一個壞了照常報錯，不影響其他的。"""
         return [(m, self.run_role(m, role, args)) for m in self.providers(role)]
@@ -187,15 +232,11 @@ class Core:
         return self.press(info, dict(info.provides)[role], args, quiet=True).value
 
     def action(self, name: str, *args: Any) -> Any:
-        """碰作業系統的事（open、edit、reveal、terminal、trash、requirements、webview_ready）：交給提供 os.<name> 的模組。
-        0.8 過渡（0.9 拿掉）：沒有提供者時，照舊找 modules/ 裡的「作業系統」——使用者改過的舊版沒有 PROVIDES。"""
+        """碰作業系統的事（open、edit、reveal、terminal、trash、requirements、webview_ready）：交給提供 os.<name> 的模組；
+        沒有就在訊息區說一句（1.0 起不再照名字找「作業系統」，D164）。"""
         if found := self.providers("os." + name):
             return self.run_role(found[0], "os." + name, args)
-        folder = self.home / "modules" / SYSTEM_MODULE
-        if not scan.is_module(folder):
-            return self.view.log(T["no_system"].format(module=SYSTEM_MODULE, name=name))
-        info = scan.module_info(folder, (self.home / "modules").resolve(), "here")
-        return self.press(info, name, args, quiet=True).value
+        return self.view.log(T["no_system"].format(role="os." + name))
 
     def create(self, parent: Path, name: str) -> Path | None:
         """新增模組：建好後重掃並打開編輯器；名稱不對、已存在或建不了時寫進訊息區、回 None。"""

@@ -10,9 +10,11 @@ from pathlib import Path
 import pytest
 
 from core.core import Core
-from core.text import SYSTEM_MODULE, T
+from core.text import T
 from core.types import DEFAULT_CONFIG, ErrorInfo
 from ui import install
+
+SYSTEM_MODULE = "作業系統"  # 隨附的作業系統模組（提供 os.*）；1.0 起核心不知道這個名字（D164）
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,7 +101,7 @@ def test_installed_compares_hash(home, req):
 def test_requirements_file_without_system_module(home, capsys):
     """作業系統模組不在：回 None，主控台印出 no_system 那一句（跟其他動作一樣）。"""
     assert install.requirements_file(home, console_core(home)) is None
-    assert T["no_system"].format(module=SYSTEM_MODULE, name="requirements") in capsys.readouterr().out
+    assert T["no_system"].format(role="os.requirements") in capsys.readouterr().out
 
 
 def with_system_module(home):
@@ -121,7 +123,9 @@ def test_requirements_file_and_ready_ask_the_system_module(home, monkeypatch, ca
 
 def test_broken_system_module_is_reported_in_plain_words(home, capsys):
     core = with_system_module(home)
-    (home / "modules" / SYSTEM_MODULE / "iplot.py").write_text("def requirements(app)\n", encoding="utf-8")
+    (home / "modules" / SYSTEM_MODULE / "iplot.py").write_text(
+        'PROVIDES = {"os.requirements": "requirements"}\n\ndef requirements(app):\n    raise OSError("壞了")\n',
+        encoding="utf-8")
     assert install.requirements_file(home, core) is None
     out = capsys.readouterr().out
     assert SYSTEM_MODULE in out and "Traceback" not in out

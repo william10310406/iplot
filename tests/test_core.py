@@ -24,7 +24,8 @@ def find(c, name):
 
 
 SYS = "作業系統"
-FAKE_OS = ('def open(app, path):\n    print("opened", path)\n    return "ok"\n\n'
+FAKE_OS = ('PROVIDES = {"os.open": "open", "os.edit": "edit"}\n\n'
+           'def open(app, path):\n    print("opened", path)\n    return "ok"\n\n'
            'def edit(app, path, editor, line):\n    print("edit", path.name, editor, line)\n')
 
 
@@ -271,7 +272,7 @@ def test_report_internal_without_logs_still_reports(home, view):
 def test_action_without_system_module_logs_and_returns_none(home, view):
     c = started(home, view)
     assert c.action("open", Path("/x")) is None
-    assert view.logs[-1] == T["no_system"].format(module=SYS, name="open")
+    assert view.logs[-1] == T["no_system"].format(role="os.open")
 
 
 def test_action_runs_system_module_handler_and_returns_value(home, view):
@@ -282,7 +283,7 @@ def test_action_runs_system_module_handler_and_returns_value(home, view):
 
 
 def test_action_broken_system_module_reports_once(home, view):
-    make_module(home / "modules", SYS, "def open(app, path)\n")
+    make_module(home / "modules", SYS, 'PROVIDES = {"os.open": "open"}\n\ndef open(app, path):\n    1/0\n')
     c = started(home, view)
     assert c.action("open", Path("/x")) is None
     assert len(view.reports) == 1 and view.reports[0].module == SYS
@@ -447,3 +448,21 @@ def test_an_unknown_reason_says_what_to_do_and_the_original_goes_to_the_log(home
     log = (home / "logs" / "iplot.log").read_text(encoding="utf-8")
     assert "Input/output error" in log and "Errno 5" in log and "A" in log
     assert os.strerror(errno.EIO) not in view.logs[-1]
+
+
+def test_call_here_runs_the_first_provider_in_this_process_and_returns_its_value(home, monkeypatch):
+    """D162：開機程式用 call_here 開面板。模組自己資料夾的檔 import 得到；沒有提供者回 None。"""
+    import sys
+
+    from conftest import FakeView
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    folder = make_module(home / "modules", "甲", 'PROVIDES = {"main": "start"}\nimport callhere_helper as helper\n\n'
+                         "def run(app):\n    pass\n\ndef start(app, x):\n    return (helper.N, app.module.name, x)\n")
+    (folder / "callhere_helper.py").write_text("N = 7\n", encoding="utf-8")
+    core = Core(home, DEFAULT_CONFIG, FakeView())
+    core.rescan()
+    try:
+        assert core.call_here("main", "x") == (7, "甲", "x")
+    finally:
+        sys.modules.pop("callhere_helper", None)  # 別的測試的模組也有叫 helper 的檔，不能拿到這一份
+    assert core.call_here("沒有人提供") is None

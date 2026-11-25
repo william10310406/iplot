@@ -3,10 +3,8 @@
 會開程式的呼叫一律換成記錄，要寫的資料夾一律在 tmp_path。"""
 
 import ast
-import atexit
 import dataclasses
 import errno
-import getpass
 import importlib
 import importlib.util
 import inspect
@@ -29,7 +27,7 @@ from conftest import make_module, until
 from core.types import DEFAULT_CONFIG
 
 INTEROP = Path(__file__).resolve().parents[1] / "modules" / "互通"
-NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run", "nav")
+NAMES = ("boot", "popup", "snippet", "shortcut", "sync", "run", "window")
 # 「沒被重寫」的記號：先把 mtime 設成這個整秒的舊時間（2001-09-09），之後看它還在不在。
 # 不用 1 奈秒：NTFS 的時間精度是 100 奈秒，1 奈秒會被存成 0；整秒每個檔案系統都存得下。
 OLD_NS = 1_000_000_000 * 10**9
@@ -69,6 +67,21 @@ def fake_framework(root):
 
 def never(*args, **kw):
     pytest.fail(f"不該被呼叫：{args} {kw}")
+
+
+def real_app(home, config=None, view=None):
+    """真的 App（交給互通的 sync、status、candidates 用）：核心掃 home，app 是給「互通」自己的。"""
+    from conftest import FakeView
+
+    from core.app import App
+    from core.core import Core
+    from core.scan import module_info
+
+    core = Core(home, config or DEFAULT_CONFIG, view or FakeView())
+    core.rescan()
+    folder = home / "modules" / "互通"
+    folder.mkdir(parents=True, exist_ok=True)
+    return App(core, module_info(folder, (home / "modules").resolve(), "here"))
 
 
 # ── boot：找 iPLoT、用對的 Python、核對核心版本、提示框（D86） ──
@@ -172,19 +185,6 @@ def test_ensure_python_ok_puts_home_and_lib_first(load, tmp_path):
     assert env == {}  # 換過、成功了：之後這個程序開的程式不再帶著這個記號
 
 
-def test_check_version_only_sets_a_floor(load):
-    """只擋下限：核心 ≥ 0.5 而且 api_version ≥ 3 就放行，核心一升次版本捷徑不會被擋（D151）。"""
-    b = load("boot")
-    for found in ("0.5.0", "0.5.2", "0.6.0", "0.6.3", "0.7.0", "0.10.0", "1.0.0"):
-        assert b.check_version(found, 3, "0.3.0") is None, found
-    assert b.check_version("0.7.0", 4, "0.3.0") is None
-    for found in ("0.4.9", "0.1.0"):
-        assert b.check_version(found, 3, "0.3.0") == (f"互通 0.3.0 需要 iPLoT 0.5 以上，這台是 {found}。"
-                                                      "iPLoT 太舊，按「更新」。")
-    assert b.check_version("0.6.0", 2, "0.3.0") is not None
-    assert b.check_version("看不懂", 3, "0.3.0") is not None  # 讀不出版本：沒辦法確認就說一句
-
-
 def test_alert_passes_text_as_arguments(load, capsys):
     calls = []
     load("boot").alert("互通", "這是 \" 與 ' 與 end tell", platform="darwin", call=calls.append)
@@ -234,7 +234,7 @@ def test_own_version(load, tmp_path):
     assert boot.own_version(tmp_path) == "?"
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.2.0] - 2026-10-08\n\nx\n\n## [0.1.0]\n",
                                            encoding="utf-8")
-    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "0.5.0"
+    assert boot.own_version(tmp_path) == "0.2.0" and boot.own_version(INTEROP) == "1.0.0"
 
 
 def test_boot_and_run_read_on_python_3_8():
@@ -286,11 +286,11 @@ def test_dock_icon_only_while_shown(popup, load, home):
 
     p = popup.p
     p.run(lambda: (p.done("ok", 0.0), 0)[1])
-    assert popup.dock == [False]
+    assert set(popup.dock) == {False}  # 開視窗前一次、頁面載入後再一次（pywebview 開視窗時會設回一般的 App）
     dock = []
     q = load("popup").Popup(home, FakeWebview(), "測試", exit=popup.exits.append, dock=dock.append)
     q.run(lambda: (q.log("x"), q.log("y"), 0)[2])
-    assert dock == [False, True]
+    assert set(dock[:-1]) == {False} and dock[-1] is True
 
 
 def test_log_shows_the_window_and_sends_text(popup):
@@ -467,17 +467,13 @@ def test_popup_html_defines_every_entry_python_calls():
 
 # ── snippet：把那一小段補進現有的模組（每個模組一次，先存快照） ──
 
-SNIPPET_SHA256 = "0dbf45c3d39d9630d3f1e3d4a8a3f569dc03da18e7bd4bbb09c8c0c93f7364ba"  # 0.5.1 的那一小段（22 行），一字不改
-
-
-def test_snippet_text_is_fixed_and_no_longer_comes_from_the_core_template(load):
-    """那一小段的文字是「互通」自己的（D84 修訂）：一字不改，已經加過的模組才認得出來；核心的範本不再帶它。"""
-    import hashlib
-
+def test_snippet_text_is_the_iplot_header_and_not_in_the_core_template(load):
+    """1.0 起「加上」加的是 iPLoT 自己的那一段（D163），跟 docs/api.md 一字不差；核心 ＋ 的範本不帶它（D84 修訂）。"""
     from core.text import TEMPLATE
     s = load("snippet")
-    assert hashlib.sha256(s.TEXT.encode("utf-8")).hexdigest() == SNIPPET_SHA256 and len(s.TEXT.splitlines()) == 22
-    assert s.TEXT.startswith("# ── 互通 ──") and s.TEXT.endswith("# ── 互通 ──\n") and s.MARK not in TEMPLATE
+    doc = (INTEROP.parents[1] / "docs" / "api.md").read_text(encoding="utf-8")
+    assert re.search(r"```python\n(# ── iPLoT ──.*?# ── iPLoT ──\n)```", doc, re.S)[1] == s.TEXT
+    assert s.IPLOT_MARK not in TEMPLATE and s.MARK not in TEMPLATE
     assert "core.text" not in (INTEROP / "snippet.py").read_text(encoding="utf-8")
 
 
@@ -503,6 +499,7 @@ def test_where_stops_at_the_first_other_statement(load):
 def test_has_only_counts_the_mark_at_the_start_of_a_line(load):
     s = load("snippet")
     assert s.has("x = 1\n# ── 互通 ── 說明\n") and not s.has('print("# ── 互通 ──")\n')
+    assert s.has("# ── iPLoT ── 說明\n") and not s.has('print("# ── iPLoT ──")\n')  # 0.x 的舊的那一段與 1.0 的都認得
 
 
 def test_add_inserts_once_and_snapshots_first(load, tmp_path):
@@ -510,7 +507,7 @@ def test_add_inserts_once_and_snapshots_first(load, tmp_path):
     s = load("snippet")
     assert s.add(f, 20) is True and s.add(f, 20) is False
     [snap] = (f.parent / ".history").glob("*.py")
-    assert s.MARK not in snap.read_text(encoding="utf-8") and f.read_text(encoding="utf-8").count(s.MARK) == 2
+    assert s.IPLOT_MARK not in snap.read_text(encoding="utf-8") and f.read_text(encoding="utf-8").count(s.IPLOT_MARK) == 2
     assert f.read_text(encoding="utf-8") == '"""說明。"""\n' + s.TEXT + "def run(app):\n    pass\n"
 
 
@@ -520,7 +517,7 @@ def test_add_keeps_bom_and_crlf(load, tmp_path):
     assert load("snippet").add(f, 20)
     data = f.read_bytes()
     assert data.startswith(b"\xef\xbb\xbf") and b"\n" not in data.replace(b"\r\n", b"")
-    assert data.count("# ── 互通 ──".encode()) == 2
+    assert data.count("# ── iPLoT ──".encode()) == 2
 
 
 def test_add_to_a_file_without_a_trailing_newline(load, tmp_path):
@@ -712,7 +709,7 @@ def interop(home):
 
 def do_sync(load, home, interop, config=None, **kw):
     kw.setdefault("platform", "linux")
-    return load("sync").sync(home, config or DEFAULT_CONFIG, sys.executable, interop, **kw)
+    return load("sync").sync(real_app(home, config), sys.executable, interop, **kw)
 
 
 def test_sync_never_changes_a_module_file(load, home, interop, tmp_path):
@@ -790,7 +787,8 @@ def test_records_are_replaced_atomically(load, home, interop, monkeypatch):     
 
 
 def test_shortcuts_only_on_macos_and_never_for_the_os_module(load, home, interop, monkeypatch):
-    make_module(home / "modules", "作業系統")
+    """碰作業系統的模組是宣告 os.* 的那一個，不看名字（D164）。"""
+    make_module(home / "modules", "作業系統", 'PROVIDES = {"os.reveal": "reveal"}\n')
     make_module(home / "modules", "A")
     do_sync(load, home, interop, platform="linux")
     assert not (interop / "捷徑").exists()
@@ -804,7 +802,6 @@ def test_shortcuts_only_on_macos_and_never_for_the_os_module(load, home, interop
 
 
 def test_why_not_names_the_reason(load, home, tmp_path):
-    from core import scan
     sync = load("sync")
     b = make_module(home / "modules", "B")
     (b / ".origin").write_text("{}", encoding="utf-8")
@@ -812,14 +809,13 @@ def test_why_not_names_the_reason(load, home, tmp_path):
     make_module(home / "modules", "A")
     make_module(tmp_path / "extra", "E")
     config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules", "..", str(tmp_path / "extra")))
-    roots = scan.roots_from_config(home, config.roots)
-    got = {info.name: sync.why_not(info, roots) for info, _ in sync.modules(home, config)}
+    app = real_app(home, config)
+    got = {info.name: sync.why_not(info, sync.levels(app)) for info, _ in sync.modules(app)}
     assert got == {"A": None, "B": "工作坊裝來的", "工作坊": "隨附模組", "E": "在 ROOTS 另外加的資料夾裡"}
 
 
 def test_why_not_walks_up_to_the_root_for_origin(load, home):
     """工作坊裝來的模組底下的子模組、孫模組也是「工作坊裝來的」：加上那一小段會讓上層變成「已修改」（D77）。"""
-    from core import scan
     sync = load("sync")
     top = make_module(home / "modules", "P")
     (top / ".origin").write_text("{}", encoding="utf-8")
@@ -828,8 +824,8 @@ def test_why_not_walks_up_to_the_root_for_origin(load, home):
     free = make_module(home / "modules", "F")
     own = make_module(free, "K")
     config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules",))
-    roots = scan.roots_from_config(home, config.roots)
-    got = {" › ".join(t): sync.why_not(i, roots) for i, t in sync.modules(home, config)}
+    app = real_app(home, config)
+    got = {" › ".join(t): sync.why_not(i, sync.levels(app)) for i, t in sync.modules(app)}
     assert got == {"P": "工作坊裝來的", "P › C": "工作坊裝來的", "P › C › G": "工作坊裝來的", "F": None, "F › K": None}
     assert kid.is_dir() and grandkid.is_dir() and own.is_dir()
 
@@ -840,198 +836,167 @@ def test_status_lists_descendants_of_workshop_modules_as_not_added(load, home, t
     make_module(make_module(top, "C"), "G")
     interop = make_module(home / "modules", "互通")
     config = dataclasses.replace(DEFAULT_CONFIG, roots=("modules",))
-    got = load_button().status(home, config, "/py", interop)
+    got = load_button().status(real_app(home, config), "/py", interop)
     assert {s["name"]: s["reason"] for s in got["skipped"]} == {
         "P": "工作坊裝來的", "P › C": "工作坊裝來的", "P › C › G": "工作坊裝來的"}
     assert [c["name"] for c in got["candidates"]] == ["互通"]  # 自己不是工作坊裝來的：照舊可以加上
 
 
-# ── run：面板外的入口 ──
+# ── run.py：捷徑與舊的那一小段的入口，確認 Python 之後交給 main.py --run（D163） ──
 
 @pytest.fixture
 def entry(load, home, monkeypatch):
-    """run.main 的測試環境：Python 一律算對、同步與提示框只記錄、webview 是假的；互通的紀錄寫在 home/modules/互通。
-    同一個測試 go 好幾次也一樣：每一次 go 都只記錄同步，不會真的做捷徑。"""
+    """run.main 與 window.outside 的測試環境：Python 一律算對、同步與提示框只記錄、webview 是假的；
+    互通的紀錄寫在 home/modules/互通。"""
     from conftest import FakeWebview
 
-    run, boot = load("run"), load("boot")
-    synced, alerts, wv = [], [], FakeWebview()
-
-    def record_sync():
-        """把 sys.modules 裡的那一份 sync 的 sync 換成只記錄。run._run 跑完會把 sync 從 sys.modules 拿掉（OURS），
-        下一次 import sync 拿到的是新的一份、真的 sync.sync：所以每一次 go 之前都要再換一次。"""
-        monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: synced.append(a) or [])
-
+    run, boot, window = load("run"), load("boot"), load("window")
+    synced, alerts, calls, wv = [], [], [], FakeWebview()
     monkeypatch.setattr(boot, "ensure_python", lambda *a, **k: None)
-    record_sync()
+    monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: synced.append(a) or [])
     monkeypatch.setattr(boot, "alert", lambda title, message, **k: alerts.append((title, message)))
     folder = home / "modules" / "互通"
     folder.mkdir()
 
     def go(argv, cwd=None, **kw):
         kw.setdefault("home", home)
-        record_sync()
-        return run.main(argv, folder=folder, webview=wv, cwd=cwd or home, **kw)
+        return run.main(argv, folder=folder, cwd=cwd or home, call=lambda argv, cwd: calls.append((argv, cwd)) or 0, **kw)
 
-    return types.SimpleNamespace(run=run, go=go, wv=wv, synced=synced, alerts=alerts, folder=folder)
+    def outside(name, files=(), problem=None, config_error=None, config=None):
+        """main.py --run 找好模組之後的那一頭：真的 Core（不另開程序），在假的小視窗裡跑 name。"""
+        app = real_app(home, config)
+        core = app._core
+        info = next((m for m in core.all_modules() if m.name == name), None)
+        return window.outside(app, core, folder, info, list(files), problem, config_error, webview=wv)
 
-
-def started_core(home, config=DEFAULT_CONFIG):
-    from conftest import FakeView
-
-    from core.core import Core
-    c = Core(home, config, FakeView())
-    c.rescan()
-    return c
+    return types.SimpleNamespace(run=run, window=window, go=go, outside=outside, wv=wv, synced=synced, alerts=alerts,
+                                 calls=calls, folder=folder)
 
 
-def test_resolve_by_folder_iplot_py_nested_path_and_name(load, home):
-    from core import scan
-    run = load("run")
-    a = make_module(home / "modules", "A")
-    p = make_module(home / "modules", "P")
-    c = make_module(p, "C")
-    core = started_core(home)
-    top = scan.module_info(a, (home / "modules").resolve(), "here")
-    child = scan.module_info(c, (home / "modules").resolve(), "child")
-    assert run.resolve(core, str(a), home) == (top, None)
-    assert run.resolve(core, str(a / "iplot.py"), home) == (top, None)
-    assert run.resolve(core, "modules/P/C", home) == (child, None)
-    assert run.resolve(core, "A", home) == (top, None)
+def test_main_hands_over_to_main_run(entry, home):
+    """run.py 不自己找模組、不開視窗：交給 python3 main.py --run，結束碼照它的（D163）。"""
+    code = entry.run.main(["A", "a.txt"], home=home, folder=entry.folder, cwd=home / "modules",
+                          call=lambda argv, cwd: entry.calls.append((argv, cwd)) or 7)
+    assert code == 7
+    assert entry.calls == [([sys.executable, str(home / "main.py"), "--run", "A", "a.txt"], str(home / "modules"))]
+    assert entry.synced == [] and entry.wv.windows == []
 
 
-def test_resolve_outside_every_root_is_extra(load, home, tmp_path):
-    run = load("run")
-    m = make_module(tmp_path / "遠方" / "更遠", "M")  # ROOTS 只有 modules：tmp_path 不是根目錄
-    core = started_core(home, dataclasses.replace(DEFAULT_CONFIG, roots=("modules",)))
-    info, problem = run.resolve(core, str(m), home)
-    assert problem is None and (info.level, info.root, info.folder) == ("extra", m.parent, m)
+def test_run_py_no_longer_imports_the_core():
+    """1.0 起 run.py 只 import 標準庫與 boot（D164）：找模組、跑都在 main.py --run 那邊。"""
+    tree = ast.parse((INTEROP / "run.py").read_text(encoding="utf-8"))
+    names = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    names |= {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+    assert names <= {"__future__", "contextlib", "os", "pathlib", "subprocess", "sys", "time", "boot", "traceback"}, names
 
 
-def test_resolve_problems(load, home):
-    from core.text import T
-    run = load("run")
-    (home / "modules" / "空的").mkdir()
-    make_module(home / "modules", "A")
-    make_module(home.parent, "A")
-    core = started_core(home)
-    empty = home / "modules" / "空的"
-    assert run.resolve(core, str(empty), home) == (None, run.NOT_A_MODULE.format(path=empty))
-    assert run.resolve(core, "/x/y", home) == (None, run.GONE.format(path="/x/y"))
-    assert run.resolve(core, "nope", home) == (None, T["not_found"].format(name="nope"))
-    info, problem = run.resolve(core, "A", home)
-    assert info is None and problem.startswith(T["ambiguous"].split("：")[0].format(name="A"))
-
-
-def test_main_runs_a_module_quietly_and_returns_0(entry, home):
-    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
-    assert entry.go(["A"]) == 0
-    w = entry.wv.windows[0]
-    assert ["hi"] in w.calls("log") and not any("完成（" in c[0] for c in w.calls("log"))
-    assert len(entry.synced) == 1 and w.title == "A"
-
-
-def test_main_module_error_returns_1(entry, home):
-    make_module(home / "modules", "A", "def run(app):\n    1/0\n")
-    assert entry.go(["A"]) == 1
-    w = entry.wv.windows[0]
-    assert w.calls("report")[0][0]["kind"] == "ZeroDivisionError" and w.calls("done") == [["error", pytest.approx(
-        w.calls("done")[0][1]), None]]
-
-
-def test_main_files_go_to_on_files_relative_to_cwd(entry, home, tmp_path):
-    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
-    absolute = Path(tmp_path.anchor, "abs", "y.txt")  # 這個平台的絕對路徑：/abs/y.txt，Windows 是 C:\abs\y.txt
-    assert entry.go(["A", "x.txt", str(absolute)], cwd=tmp_path) == 0
-    assert [repr([tmp_path / "x.txt", absolute])] in entry.wv.windows[0].calls("log")
-
-
-def test_main_unconfirmed_cancel_returns_1(entry, home, load, monkeypatch):
-    from core.text import T
-    a = make_module(home / "modules", "A")
-    (a / ".unconfirmed").write_text("", encoding="utf-8")
-    monkeypatch.setattr(load("popup").Popup, "confirm", lambda self, prompt: False)
-    assert entry.go(["A"]) == 1
-    assert [T["cancelled"].format(title="A")] in entry.wv.windows[0].calls("log")
-
-
-def test_main_not_found_returns_1_and_still_syncs(entry):
-    from core.text import T
-    assert entry.go(["nope"]) == 1
-    w = entry.wv.windows[0]
-    assert [T["not_found"].format(name="nope")] in w.calls("log") and w.calls("done")[0][0] == "error"
-    assert len(entry.synced) == 1
-
-
-def test_main_wrong_version_alerts_and_returns_2(entry, load, monkeypatch):
-    monkeypatch.setattr(load("boot"), "check_version", lambda *a: "版本不合的那一句")
-    assert entry.go(["A"]) == 2
-    assert entry.alerts == [("互通", "版本不合的那一句")] and entry.wv.windows == []
+def test_main_remembers_the_python(entry):
+    entry.go(["A"])
+    assert (entry.folder / ".python").read_text(encoding="utf-8") == sys.executable
 
 
 def test_main_wrong_python_alerts_and_returns_2(entry, load, monkeypatch):
     monkeypatch.setattr(load("boot"), "ensure_python", lambda *a, **k: "Python 不對的那一句")
     assert entry.go(["A"]) == 2
-    assert entry.alerts == [("互通", "Python 不對的那一句")] and entry.wv.windows == []
-
-
-def test_main_remembers_the_python(entry, home):
-    make_module(home / "modules", "A")
-    entry.go(["A"])
-    assert (entry.folder / ".python").read_text(encoding="utf-8") == sys.executable
-
-
-def test_main_syncs_with_the_recorded_python(entry, home):
-    make_module(home / "modules", "A")
-    entry.go(["A"])
-    [(h, config, python, folder)] = entry.synced
-    assert (h, python, folder) == (home, sys.executable, entry.folder)
-
-
-def test_main_reports_a_broken_config_and_still_runs(entry, home):
-    (home / "config.py").write_text("ROOTS = 1\n", encoding="utf-8")
-    make_module(home / "modules", "A", "def run(app):\n    app.log('跑了')\n")
-    assert entry.go(["A"]) == 0
-    w = entry.wv.windows[0]
-    assert len(w.calls("report")) == 1 and w.calls("report")[0][0]["kind"] == "TypeError" and ["跑了"] in w.calls("log")
+    assert entry.alerts == [("互通", "Python 不對的那一句")] and entry.calls == []
 
 
 def test_main_outside_modules_alerts_and_returns_2(entry, load, monkeypatch):
     monkeypatch.setattr(load("boot"), "iplot_home", lambda run_file: None)
-    assert entry.go(["A"], home=None) == 2
+    assert entry.go(["A"], home=None) == 2 and entry.calls == []
     assert entry.alerts[0][1].startswith("「互通」要放在 iPLoT 的 modules/ 裡才能用：")
     assert entry.alerts[0][1].endswith("把整個「互通」資料夾搬進 iPLoT 的 modules/，再打開一次")  # 體驗 7-07：有下一步
 
 
-def test_main_popup_cannot_start_alerts_and_returns_2(entry, home):
+def test_main_without_a_target_says_how_to_use(entry, capsys):
+    assert entry.go([]) == 1 and entry.calls == []
+    assert "run.py <模組資料夾或名稱>" in capsys.readouterr().err
+
+
+# ── window：角色 run.outside，在小視窗裡跑 main.py --run 交過來的模組 ──
+
+def test_outside_runs_the_module_quietly_in_the_popup_and_syncs(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    assert entry.outside("A") == 0
+    w = entry.wv.windows[0]
+    assert ["hi"] in w.calls("log") and not any("完成（" in c[0] for c in w.calls("log"))
+    assert len(entry.synced) == 1 and w.title == "A"
+
+
+def test_outside_says_why_when_the_module_was_not_found(entry):
+    assert entry.outside("B", problem="找不到模組『B』") == 1
+    w = entry.wv.windows[0]
+    assert ["找不到模組『B』"] in w.calls("log") and w.calls("done")[0][0] == "error" and w.title == "互通"
+    assert len(entry.synced) == 1
+
+
+def test_the_provider_hands_app_and_its_own_folder_to_window(load, monkeypatch):
+    window = load("window")
+    seen = []
+    monkeypatch.setattr(window, "outside", lambda *a: seen.append(a) or 0)
+    button = load_button()
+    assert button.outside("app", "core", "info", ["f"], None, "err") == 0
+    assert seen == [("app", "core", button.HERE, "info", ["f"], None, "err")]
+
+
+def test_outside_module_error_returns_1(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    1/0\n")
+    assert entry.outside("A") == 1
+    w = entry.wv.windows[0]
+    assert w.calls("report")[0][0]["kind"] == "ZeroDivisionError" and w.calls("done") == [["error", pytest.approx(
+        w.calls("done")[0][1]), None]]
+
+
+def test_outside_files_go_to_on_files(entry, home, tmp_path):
+    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
+    files = [tmp_path / "x.txt", Path(tmp_path.anchor, "abs", "y.txt")]
+    assert entry.outside("A", files) == 0
+    assert [repr(files)] in entry.wv.windows[0].calls("log")
+
+
+def test_outside_unconfirmed_cancel_returns_1(entry, home, load, monkeypatch):
+    from core.text import T
+    a = make_module(home / "modules", "A")
+    (a / ".unconfirmed").write_text("", encoding="utf-8")
+    monkeypatch.setattr(load("popup").Popup, "confirm", lambda self, prompt: False)
+    assert entry.outside("A") == 1
+    assert [T["cancelled"].format(title="A")] in entry.wv.windows[0].calls("log")
+
+
+def test_outside_syncs_with_the_recorded_python(entry, home, load):
+    make_module(home / "modules", "A")
+    load("boot").remember_python(entry.folder, "/recorded/python3")
+    entry.outside("A")
+    [(app, python, folder)] = entry.synced
+    assert (app.home, python, folder) == (home, "/recorded/python3", entry.folder)
+
+
+def test_outside_reports_a_broken_config_and_still_runs(entry, home):
+    from core.core import load_config
+    (home / "config.py").write_text("ROOTS = 1\n", encoding="utf-8")
+    make_module(home / "modules", "A", "def run(app):\n    app.log('跑了')\n")
+    config, err = load_config(home / "config.py")
+    assert entry.outside("A", config_error=err, config=config) == 0
+    w = entry.wv.windows[0]
+    assert len(w.calls("report")) == 1 and w.calls("report")[0][0]["kind"] == "TypeError" and ["跑了"] in w.calls("log")
+
+
+def test_outside_popup_cannot_start_alerts_and_returns_2(entry, home):
     make_module(home / "modules", "A")
 
     def broken():
         raise entry.wv.WebViewException("沒有 WebKit")
 
     entry.wv.start = broken
-    assert entry.go(["A"]) == 2 and entry.alerts == [("互通", "彈出式視窗開不起來：沒有 WebKit。再打開一次；還是不行就從 iPLoT 的面板打開這個模組")]
+    assert entry.outside("A") == 2
+    assert entry.alerts == [("互通", "彈出式視窗開不起來：沒有 WebKit。再打開一次；還是不行就從 iPLoT 的面板打開這個模組")]
 
 
-def test_a_module_importing_tkinter_gets_the_sentence(entry, home, monkeypatch):
-    for name in ("tkinter", "_tkinter"):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    make_module(home / "modules", "T", "import tkinter\n")
-    assert entry.go(["T"]) == 1
-    assert entry.wv.windows[0].calls("report")[0][0]["message"] == entry.run.NO_TK
-    assert not any(type(f).__name__ == "NoTk" for f in sys.meta_path)
-
-
-def test_a_module_with_a_helper_named_like_ours_gets_its_own(entry, home):
-    """run.py 自己的 sync.py、popup.py……不能蓋掉模組自己同名的 helper。"""
-    m = make_module(home / "modules", "A", "import sync\nprint(sync.VALUE)\n")
-    (m / "sync.py").write_text("VALUE = 42\n", encoding="utf-8")
-    assert entry.go(["A"]) == 0 and ["42"] in entry.wv.windows[0].calls("log")
-
-
-def test_main_without_a_target_says_how_to_use(entry, capsys):
-    assert entry.go([]) == 1 and entry.wv.windows == []
-    assert "run.py <模組資料夾或名稱>" in capsys.readouterr().err
+def test_outside_without_pywebview_raises_import_error_for_main_to_fall_back(load, home, monkeypatch):
+    """沒有 pywebview：丟 ImportError，main.py --run 改在終端機跑（D163）。"""
+    monkeypatch.setitem(sys.modules, "webview", None)
+    with pytest.raises(ImportError):
+        load("window").popup_for(types.SimpleNamespace(view=None), home)
 
 
 # ── 在面板按「互通」：同步一次，看狀態、捷徑與指令 ──
@@ -1045,39 +1010,44 @@ def load_button():
 
 
 def test_button_remembers_python_syncs_and_opens_the_page(load, home, monkeypatch):
-    from conftest import FakeApp
+    from conftest import FakeView
 
-    from core.runner import run_module
-    from core.scan import module_info
+    from core.core import Core
     copy = home / "modules" / "互通"
     shutil.copytree(INTEROP, copy, ignore=shutil.ignore_patterns("__pycache__", ".*", "捷徑"))
     plain = make_module(home / "modules", "A", '"""a"""\ndef run(app):\n    pass\n') / "iplot.py"
     mine = (copy / "iplot.py").read_bytes()
     before = {n: (INTEROP / n).stat().st_mtime_ns if (INTEROP / n).exists() else None for n in (".python", ".patched")}
-    app, revealed = FakeApp(home), []
-    app.reveal = revealed.append
     monkeypatch.setattr(sys, "platform", "linux")  # 這個測試不做捷徑
-    monkeypatch.delitem(sys.modules, "ui.web", raising=False)  # 面板外（另開的程序）：頁面就在這裡開（separate.py）
-    monkeypatch.delitem(sys.modules, "ui.tk", raising=False)  # 別的測試 import 過 tkinter 面板的話，會被當成 tkinter 面板
-    monkeypatch.setattr(atexit, "register", lambda fn: None)
-    app.module = module_info(copy, home / "modules", "here")
-    result = run_module(app.module, app)
+    view = FakeView()
+    core = Core(home, DEFAULT_CONFIG, view)
+    core.rescan()
+    [info] = [m for m in core.all_modules() if m.name == "互通"]
+    result = core.press(info, quiet=True)
     assert result.ok, result.error
-    assert app.pages[0][0] == "互通" and (copy / ".python").read_text(encoding="utf-8") == sys.executable
-    assert (copy / ".pid").read_text(encoding="utf-8") == str(os.getpid())  # 同一個只開一個
+    [(title, html, api)] = [e[1] for e in view.events if e[0] == "page"]
+    assert title == "互通" and "__STATUS__" not in html and (copy / ".python").read_text(encoding="utf-8") == sys.executable
     assert plain.read_text(encoding="utf-8") == '"""a"""\ndef run(app):\n    pass\n'  # 按「互通」不改模組（D87）
     assert (copy / "iplot.py").read_bytes() == mine and not (copy / ".patched").exists()
     after = {n: (INTEROP / n).stat().st_mtime_ns if (INTEROP / n).exists() else None for n in (".python", ".patched")}
     assert after == before  # repo 裡的 modules/互通 一個檔都沒動
 
 
+def test_button_on_an_older_iplot_says_to_update(load):
+    """從工作坊裝到 1.0 以前的 iPLoT 上（舊核心不看 MIN_API）：說一句請更新，不做別的。"""
+    from conftest import FakeApp
+    app = FakeApp(Path("/nowhere"))
+    button = load_button()
+    assert button.run(app) is None and app.logs == [button.NEWER]
+
+
 def _patch_tree(home, tmp_path):
-    """modules/ 裡的候選 A 與它的下一層 C；不能補的 B（.origin）、更新（隨附）、T（turtle）、F（iplot.py 是符號連結）、
+    """modules/ 裡的候選 A 與它的下一層 C；不能補的 B（.origin）、更新（隨附）、F（iplot.py 是符號連結）、
     S（語法錯誤）、M（已經有記號）、互通（有記號）；上一層（tmp_path）的 旁邊；ROOTS 另外加的 E。"""
     m = home / "modules"
     made = {"A": make_module(m, "A", '"""a"""\ndef run(app):\n    pass\n'),
             "B": make_module(m, "B", 'TITLE = "<b>x</b>"\n'),
-            "更新": make_module(m, "更新"), "T": make_module(m, "T", "import turtle\n"),
+            "更新": make_module(m, "更新"),
             "S": make_module(m, "S", "def run(app)\n"), "M": make_module(m, "M", '"""m"""\n# ── 互通 ── 自己加的\n'),
             "旁邊": make_module(tmp_path, "旁邊", '"""旁邊"""\n'), "E": make_module(tmp_path / "extra", "E")}
     made["C"] = make_module(made["A"], "C", '"""c"""\n')
@@ -1100,7 +1070,7 @@ def _snapshot(made):
 
 def test_candidates_are_plain_modules_inside_modules_only(load, home, tmp_path):
     made, interop, config = _patch_tree(home, tmp_path)
-    got = load_button().candidates(home, config)
+    got = load_button().candidates(real_app(home, config))
     assert [(" › ".join(titles), info.file) for info, titles in got] == [
         ("A", made["A"] / "iplot.py"), ("A › C", made["C"] / "iplot.py")]
 
@@ -1108,7 +1078,7 @@ def test_candidates_are_plain_modules_inside_modules_only(load, home, tmp_path):
 def test_patch_adds_the_snippet_only_to_the_candidates(load, home, tmp_path):
     made, interop, config = _patch_tree(home, tmp_path)
     before = _snapshot(made)
-    api = load_button().Api(None, home, config, "/py", interop)
+    api = load_button().Api(real_app(home, config), "/py", interop)
     result = api.patch()
     assert (result["patched"], result["problems"]) == (["A", "A › C"], [])
     snip = load("snippet")
@@ -1130,7 +1100,7 @@ def test_patch_takes_no_arguments(load, home, tmp_path):
     assert list(inspect.signature(button.Api.patch).parameters) == ["self"]
     made, interop, config = _patch_tree(home, tmp_path)
     with pytest.raises(TypeError):
-        button.Api(None, home, config, "/py", interop).patch([str(made["旁邊"] / "iplot.py")])
+        button.Api(real_app(home, config), "/py", interop).patch([str(made["旁邊"] / "iplot.py")])
     assert "互通" not in (made["旁邊"] / "iplot.py").read_text(encoding="utf-8")
 
 
@@ -1141,29 +1111,21 @@ def test_patch_says_one_sentence_per_problem(load, home, tmp_path, monkeypatch):
         raise OSError(errno.EROFS, "Read-only file system")
 
     monkeypatch.setattr(load("snippet"), "add", broken)
-    result = load_button().Api(None, home, config, "/py", interop).patch()
+    result = load_button().Api(real_app(home, config), "/py", interop).patch()
     assert (result["patched"], result["problems"]) == ([], ["A：沒補：資料夾是唯讀的", "A › C：沒補：資料夾是唯讀的"])
 
 
 def test_status_counts_reasons_and_candidates(load, home, tmp_path):
     made, interop, config = _patch_tree(home, tmp_path)
-    got = load_button().status(home, config, "/py/python3", interop)
+    got = load_button().status(real_app(home, config), "/py/python3", interop)
     reasons = {s["name"]: s["reason"] for s in got["skipped"]}
-    assert reasons == {"<b>x</b>": "工作坊裝來的", "更新": "隨附模組", "T": "用了 tkinter 或 turtle", "F": "是符號連結",
+    assert reasons == {"<b>x</b>": "工作坊裝來的", "更新": "隨附模組", "F": "是符號連結",
                        "S": "有語法錯誤", "旁邊": "在 iPLoT 外面，不改", "E": "在 ROOTS 另外加的資料夾裡"}
     assert got["candidates"] == [{"name": "A", "path": str(made["A"] / "iplot.py")},
                                  {"name": "A › C", "path": str(made["C"] / "iplot.py")}]
-    assert (got["total"], got["direct"]) == (11, 2)  # 十一個都能從面板外打開；直接執行的是 M 與互通
+    assert (got["total"], got["direct"]) == (10, 2)  # 十個都能從面板外打開；直接執行的是 M 與互通
     assert got["shortcuts"] == str(interop / "捷徑") and got["python"] == "/py/python3" and got["problems"] == []
-    assert got["command"] == shlex.join(["/py/python3", str(interop / "run.py"), "A"])
-
-
-def test_the_example_command_prefers_kaigong(load, home):
-    interop = make_module(home / "modules", "互通")
-    make_module(home / "modules", "A")
-    make_module(home / "modules", "開工")
-    got = load_button().status(home, DEFAULT_CONFIG, "/py", interop)
-    assert got["command"] == shlex.join(["/py", str(interop / "run.py"), "開工"])
+    assert got["command"] == shlex.join(["/py/python3", str(home / "main.py"), "--run", "A"])
 
 
 def test_api_exposes_only_four_methods(load):
@@ -1172,11 +1134,10 @@ def test_api_exposes_only_four_methods(load):
 
 
 def test_api_reveal_copy_and_resync(load, home, monkeypatch):
-    from conftest import FakeApp
     button, interop = load_button(), make_module(home / "modules", "互通")
-    app, revealed, runs = FakeApp(home), [], []
-    app.reveal = revealed.append
-    api = button.Api(app, home, DEFAULT_CONFIG, "/py", interop)
+    app, revealed, runs = real_app(home), [], []
+    monkeypatch.setattr(app, "reveal", revealed.append)
+    api = button.Api(app, "/py", interop)
     api.reveal()
     assert revealed == [interop / "捷徑"]
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: runs.append((argv, kw)))
@@ -1192,7 +1153,7 @@ def test_names_reach_the_page_as_data_not_markup(load, home, tmp_path, monkeypat
     made, interop, config = _patch_tree(home, tmp_path)
     odd = make_module(home / "modules", "&z", 'TITLE = "<b>y</b>"\n')  # 資料夾名不用 < >：Windows 的檔名不准有
     button = load_button()
-    html = button.render(button.status(home, config, "/py", interop))
+    html = button.render(button.status(real_app(home, config), "/py", interop))
     for raw in ("<b>x</b>", "<b>y</b>"):
         assert raw not in html
     assert "\\u003cb>x\\u003c/b>" in html and "\\u003cb>y\\u003c/b>" in html and "__STATUS__" not in html
@@ -1200,7 +1161,7 @@ def test_names_reach_the_page_as_data_not_markup(load, home, tmp_path, monkeypat
     page = json.loads(re.search(r'id="data">(.*?)</script>', html, re.S).group(1))
     assert {"name": "<b>y</b>", "path": str(odd / "iplot.py")} in page["candidates"] and "&amp;" not in html
     monkeypatch.setattr(load("sync"), "sync", lambda *a, **k: [])
-    data = button.Api(None, home, config, "/py", interop).resync()
+    data = button.Api(real_app(home, config), "/py", interop).resync()
     assert {"name": "<b>x</b>", "reason": "工作坊裝來的"} in data["skipped"]
     assert {"name": "<b>y</b>", "path": str(odd / "iplot.py")} in data["candidates"]
 
@@ -1240,69 +1201,11 @@ def test_sync_rewrites_when_only_the_python_app_moves(load, tmp_path, monkeypatc
     assert plistlib.loads((base / "A.app" / "Contents" / "Info.plist").read_bytes())["IPLoTApp"] == str(current[0])
 
 
-@pytest.mark.parametrize("src", ["import turtle\nturtle.forward(10)\n", "from tkinter import messagebox\n",
-                                 "import tkinter.ttk as ttk\n", "def run(app):\n    import turtle\n"])
-def test_tkinter_and_turtle_modules_are_never_candidates(load, home, src):
-    """用 tkinter／turtle 的模組在面板外開不了視窗（run.py 擋著）；加上那一小段，原本能直接 python3 iplot.py 的就不能了。"""
-    t = make_module(home / "modules", "T", src)
-    interop = make_module(home / "modules", "互通", '"""互通"""\n# ── 互通 ──\n')
-    button = load_button()
-    assert button.candidates(home, DEFAULT_CONFIG) == []
-    assert button.Api(None, home, DEFAULT_CONFIG, "/py", interop).patch()["patched"] == []
-    assert (t / "iplot.py").read_text(encoding="utf-8") == src
-    from core import scan
-    sync = load("sync")
-    [info] = [i for i, _ in sync.modules(home, DEFAULT_CONFIG) if i.name == "T"]
-    assert sync.why_not(info, scan.roots_from_config(home, DEFAULT_CONFIG.roots)) == "用了 tkinter 或 turtle"
-
-
-def test_an_unknown_tilde_user_is_one_sentence_not_a_traceback(load, home, entry, tmp_path):
-    """「~打錯/x」：pathlib 找不到那個使用者會丟 RuntimeError；這裡要的是一句話。"""
-    run = load("run")
-    assert run.resolve(started_core(home), "~沒有這個人/x", home) == (None, run.GONE.format(path="~沒有這個人/x"))
-    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
-    assert entry.go(["A", "~沒有這個人/f.txt"], cwd=tmp_path) == 0
-    assert [repr([tmp_path / "~沒有這個人/f.txt"])] in entry.wv.windows[0].calls("log")
-
-
-def test_a_tilde_with_a_real_user_name_is_a_relative_path(load, home, entry, tmp_path):
-    """「~帳號名/…」各平台都照字面、以工作目錄為準，就算那個帳號真的存在；只有「~」「~/…」換成家目錄。"""
-    me = getpass.getuser()
-    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
-    assert entry.go(["A", f"~{me}/f.txt", "~/g.txt"], cwd=tmp_path) == 0
-    assert [repr([tmp_path / f"~{me}" / "f.txt", Path.home() / "g.txt"])] in entry.wv.windows[0].calls("log")
-
-
-def test_expand_on_a_0_5_core_without_home_path(load, monkeypatch):
-    """iPLoT 0.5.x 的核心沒有 core.scan.home_path：照互通 0.1.0 的做法，不丟 ImportError（D117）。"""
-    from core import scan
-    run = load("run")
-    monkeypatch.delattr(scan, "home_path")
-    assert run._expand("~/g.txt") == Path.home() / "g.txt" and run._expand("a/b.txt") == Path("a/b.txt")
-    try:  # 0.1.0 的做法：pathlib 找不到那個使用者丟 RuntimeError 就照字面；Windows 不丟，猜成 C:\Users\<名字>
-        old = Path("~沒有這個人/f.txt").expanduser()
-    except RuntimeError:
-        old = Path("~沒有這個人/f.txt")
-    assert run._expand("~沒有這個人/f.txt") == old
-
-
-def test_the_same_interop_runs_before_and_after_updating_from_0_5_2_to_0_6_0(entry, home, monkeypatch, tmp_path):
-    """互通 0.2.0 先裝在 0.5.2 上（核心沒有 home_path），再按「更新」換成 0.6.0（「更新」不碰 modules/）：
-    同一份互通兩邊都跑得動，模組都跑了、沒有提示框（D117）。"""
-    import core
-    from core import scan
-    make_module(home / "modules", "A", "def on_files(app, paths):\n    app.log(repr(paths))\n")
-    want = [repr([Path.home() / "g.txt", tmp_path / "x.txt"])]
-    for version in ("0.5.2", "0.6.0"):
-        entry.wv.windows.clear()          # FakeWebview.start 只觸發 windows[0]
-        with monkeypatch.context() as m:
-            m.setattr(core, "__version__", version)
-            if version == "0.5.2":
-                m.delattr(scan, "home_path")
-            assert entry.go(["A", "~/g.txt", "x.txt"], cwd=tmp_path) == 0, version
-            assert hasattr(scan, "home_path") == (version == "0.6.0")
-        assert want in entry.wv.windows[0].calls("log") and entry.alerts == [], version
-    assert len(entry.synced) == 2  # 兩次都只記錄：第二次 go 也沒有真的同步、做捷徑
+@pytest.mark.parametrize("src", ["import turtle\nturtle.forward(10)\n", "from tkinter import messagebox\n"])
+def test_tkinter_and_turtle_modules_are_candidates_since_1_0(load, home, src):
+    """iPLoT 1.0 在面板外也是每按一次另開程序（D161、D163）：tkinter／turtle 的視窗開得起來，加上那一小段也照樣能直接執行。"""
+    make_module(home / "modules", "T", src)
+    assert [info.name for info, _ in load_button().candidates(real_app(home, DEFAULT_CONFIG))] == ["T"]
 
 
 def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
@@ -1310,48 +1213,7 @@ def test_a_page_window_gets_a_dock_icon_without_showing_the_popup(popup):
     p = popup.p
     t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
     until(lambda: len(popup.wv.windows) == 2)
-    assert popup.dock == [False, True] and popup.wv.windows[0].shown is False
-    popup.wv.windows[1].fire("closed")
-    t.join(3)
-
-
-def test_a_popup_page_gets_the_nav_bar_while_a_module_runs_and_no_other_page_is_open(popup, home):
-    """D154：模組執行中開的頁面有導覽列；已經有一頁開著，新的一頁沒有；不在模組執行中開的（直接呼叫）也沒有。"""
-    from core import scan
-    make_module(home / "modules", "X")
-    make_module(home / "modules", "主控面板")
-    p, wv = popup.p, popup.wv
-    p.core.rescan()
-    t0, _ = in_thread(lambda: p.page("無", "<p>0</p>", None))
-    until(lambda: len(wv.windows) == 1)
-    assert wv.windows[0].exposed == {}
-    wv.windows[0].fire("closed")
-    t0.join(3)
-    root = (home / "modules").resolve()
-    p.core.running.append(scan.module_info(root / "X", root, "here"))
-    t1, _ = in_thread(lambda: p.page("一", "<p>1</p>", None))
-    until(lambda: len(wv.windows) == 2 and wv.windows[1].exposed)
-    assert list(wv.windows[1].exposed) == ["_iplot_nav"]
-    t2, _ = in_thread(lambda: p.page("二", "<p>2</p>", None))
-    until(lambda: len(wv.windows) == 3)
-    wv.windows[2].fire("loaded")
-    assert wv.windows[2].exposed == {} and wv.windows[2].js == [] and wv.windows[0].shown is False
-    wv.windows[2].fire("closed")
-    t2.join(3)
-    wv.windows[1].fire("closed")
-    t1.join(3)
-    assert p._pages == []
-
-
-def test_a_popup_page_does_not_show_the_popup_even_with_a_nav_bar(popup, home):
-    from core import scan
-    make_module(home / "modules", "X")
-    p = popup.p
-    root = (home / "modules").resolve()
-    p.core.running.append(scan.module_info(root / "X", root, "here"))
-    t, _ = in_thread(lambda: p.run(lambda: (p.page("頁", "<p>x</p>", None), 0)[1]))
-    until(lambda: len(popup.wv.windows) == 2)
-    assert popup.wv.windows[0].shown is False
+    assert popup.dock[-1] is True and set(popup.dock[:-1]) == {False} and popup.wv.windows[0].shown is False
     popup.wv.windows[1].fire("closed")
     t.join(3)
 
@@ -1367,14 +1229,25 @@ def test_a_foreign_app_with_a_wanted_name_is_left_alone(load, tmp_path):
     assert len(problems) == 1 and problems[0].startswith("捷徑「A」：") and not list(base.glob(".tmp-*"))
 
 
-# ── 小視窗回到主控面板（D88） ──
+# ── 小視窗的回去鈕：回提供 home 的模組（行事曆，D93），沒有就回面板（提供 main 的，D88）；不看名字（D164） ──
 
-FAKE_PANEL = '"""假的主控面板：不開真的面板，只說一句。"""\ndef run(app):\n    app.log("假的主控面板跑了")\n'
+FAKE_PANEL = ('"""假的主控面板：不開真的面板，只說一句。"""\nPROVIDES = {"main": "run"}\n'
+              'def run(app):\n    app.log("假的主控面板跑了")\n')
+FAKE_CALENDAR = ('"""假的行事曆：不開真的行事曆，只說一句。"""\nPROVIDES = {"home": "run"}\n'
+                 'def run(app):\n    app.log("假的行事曆跑了")\n')
 
 
-def test_done_passes_on_whether_to_offer_the_panel(popup):
+def found(core, name):
+    core.rescan()
+    [info] = [m for m in core.all_modules() if m.name == name]
+    return info
+
+
+def test_done_passes_on_the_name_of_the_back_button(popup, home):
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
     p = popup.p
-    p.run(lambda: (p.log("x"), p.done("ok", 1.2, back="主控面板"), 0)[2])
+    back = found(p.core, "主控面板")
+    p.run(lambda: (p.log("x"), p.done("ok", 1.2, back=back), 0)[2])
     assert popup.wv.windows[0].calls("done") == [["ok", 1.2, "主控面板"]]
 
 
@@ -1387,116 +1260,30 @@ def test_no_panel_button_while_the_module_runs(popup):
         return 0
 
     p.run(job)
-    assert seen == [([["測試"]], [])]  # 跑的時候底下只有「執行中」與「停止」；「主控面板」只跟著 done 來
+    assert seen == [([["測試"]], [])]  # 跑的時候底下只有「執行中」與「停止」；回去鈕只跟著 done 來
 
 
-def test_the_panel_button_runs_the_panel_module_and_closes(popup, home):
-    make_module(home / "modules", "主控面板", FAKE_PANEL)
+def test_the_back_button_runs_that_module_and_closes(popup, home):
+    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
     p = popup.p
-    p.core.rescan()
-    assert p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="主控面板"), 7)[2]) == 7
+    back = found(p.core, "行事曆")
+    assert p.run(lambda: (p.log("x"), p.done("ok", 0.1, back=back), 7)[2]) == 7
     w = popup.wv.windows[0]
     bridge(popup).panel()
     until(lambda: w.destroyed)
-    assert ["假的主控面板跑了"] in w.calls("log")
+    assert ["假的行事曆跑了"] in w.calls("log")
 
 
-def test_a_failing_panel_module_keeps_the_popup(popup, home):
-    make_module(home / "modules", "主控面板", "def run(app):\n    1/0\n")
+def test_a_failing_back_module_keeps_the_popup(popup, home):
+    make_module(home / "modules", "主控面板", 'PROVIDES = {"main": "run"}\ndef run(app):\n    1/0\n')
     p = popup.p
-    p.core.rescan()
-    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="主控面板"), 0)[2])
+    back = found(p.core, "主控面板")
+    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back=back), 0)[2])
     w = popup.wv.windows[0]
     bridge(popup).panel()
     until(lambda: w.calls("report"))
     time.sleep(0.05)
     assert w.calls("report")[0][0]["kind"] == "ZeroDivisionError" and not w.destroyed
-
-
-def test_the_panel_button_without_a_panel_module_says_one_sentence(popup):
-    from core.text import T
-    p = popup.p
-    p.core.rescan()
-    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="主控面板"), 0)[2])
-    w = popup.wv.windows[0]
-    bridge(popup).panel()
-    until(lambda: [T["not_found"].format(name="主控面板")] in w.calls("log"))
-    assert not w.destroyed
-
-
-def test_main_offers_the_panel_only_when_there_is_one_and_it_is_not_the_target(entry, home):
-    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
-    make_module(home / "modules", "E", "def run(app):\n    1/0\n")
-    entry.go(["A"])
-    assert entry.wv.windows[0].calls("done")[0][2] is None  # 最上層沒有「主控面板」
-    make_module(home / "modules", "主控面板", FAKE_PANEL)
-    for target, outcome in (("A", "ok"), ("E", "error"), ("主控面板", "ok")):
-        entry.wv.windows.clear()
-        entry.go([target])
-        [[got, _, offer]] = entry.wv.windows[0].calls("done")
-        assert (got, offer) == (outcome, "主控面板" if target != "主控面板" else None), target
-    assert len(entry.synced) == 4  # 四次 go 都只記錄同步
-
-
-def test_pressing_the_panel_keeps_the_modules_exit_code(entry, home):
-    """出錯的模組（結束碼 1）跑完之後按「主控面板」：主控面板跑了、小視窗關了，結束碼仍然是 1。"""
-    make_module(home / "modules", "主控面板", FAKE_PANEL)
-    make_module(home / "modules", "E", "def run(app):\n    1/0\n")
-
-    def start():
-        w = entry.wv.windows[0]
-        w.fire("loaded")
-        until(lambda: w.calls("done"))
-        w.kw["js_api"].panel()
-        until(lambda: w.destroyed)
-
-    entry.wv.start = start
-    assert entry.go(["E"]) == 1
-    assert ["假的主控面板跑了"] in entry.wv.windows[0].calls("log")
-
-
-# ── 小視窗回到行事曆（D93：有「行事曆」就回行事曆，否則照 D88 回主控面板） ──
-
-FAKE_CALENDAR = '"""假的行事曆：不開真的行事曆，只說一句。"""\ndef run(app):\n    app.log("假的行事曆跑了")\n'
-
-
-def test_main_offers_the_calendar_when_there_is_exactly_one(entry, home):
-    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
-    make_module(home / "modules", "主控面板", FAKE_PANEL)
-    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
-    entry.go(["A"])
-    assert entry.wv.windows[0].calls("done")[0][2] == "行事曆"
-
-
-def test_two_calendars_fall_back_to_the_panel(entry, home):
-    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
-    make_module(home / "modules", "主控面板", FAKE_PANEL)
-    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
-    make_module(home.parent, "行事曆", FAKE_CALENDAR)          # 上一層（ROOTS 的 ".."）也有一個
-    entry.go(["A"])
-    assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
-
-
-def test_running_the_calendar_itself_offers_the_panel(entry, home):
-    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
-    entry.go(["行事曆"])
-    assert entry.wv.windows[0].calls("done")[0][2] is None     # 沒有主控面板
-    make_module(home / "modules", "主控面板", FAKE_PANEL)
-    entry.wv.windows.clear()
-    entry.go(["行事曆"])
-    assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
-    assert len(entry.synced) == 2  # 兩次 go 都只記錄同步
-
-
-def test_the_back_button_runs_the_named_module_and_closes(popup, home):
-    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
-    p = popup.p
-    p.core.rescan()
-    p.run(lambda: (p.log("x"), p.done("ok", 0.1, back="行事曆"), 0)[2])
-    w = popup.wv.windows[0]
-    bridge(popup).panel()
-    until(lambda: w.destroyed)
-    assert ["假的行事曆跑了"] in w.calls("log")
 
 
 def test_the_back_button_with_nothing_to_go_back_to_does_nothing(popup, home):
@@ -1510,12 +1297,84 @@ def test_the_back_button_with_nothing_to_go_back_to_does_nothing(popup, home):
     assert not w.destroyed and ["假的主控面板跑了"] not in w.calls("log")
 
 
+def test_outside_offers_the_panel_only_when_there_is_one_and_it_is_not_the_target(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    make_module(home / "modules", "E", "def run(app):\n    1/0\n")
+    entry.outside("A")
+    assert entry.wv.windows[0].calls("done")[0][2] is None  # 沒有模組提供 main
+    make_module(home / "modules", "我的面板", FAKE_PANEL)  # 名字不重要，看的是角色
+    for target, outcome in (("A", "ok"), ("E", "error"), ("我的面板", "ok")):
+        entry.wv.windows.clear()
+        entry.outside(target)
+        [[got, _, offer]] = entry.wv.windows[0].calls("done")
+        assert (got, offer) == (outcome, "我的面板" if target != "我的面板" else None), target
+
+
+def test_pressing_the_back_button_keeps_the_modules_exit_code(entry, home):
+    """出錯的模組（結束碼 1）跑完之後按回去鈕：面板跑了、小視窗關了，結束碼仍然是 1。"""
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    make_module(home / "modules", "E", "def run(app):\n    1/0\n")
+
+    def start():
+        w = entry.wv.windows[0]
+        w.fire("loaded")
+        until(lambda: w.calls("done"))
+        w.kw["js_api"].panel()
+        until(lambda: w.destroyed)
+
+    entry.wv.start = start
+    assert entry.outside("E") == 1
+    assert ["假的主控面板跑了"] in entry.wv.windows[0].calls("log")
+
+
+def test_outside_offers_the_home_provider_first(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    make_module(home / "modules", "月曆", FAKE_CALENDAR)
+    entry.outside("A")
+    assert entry.wv.windows[0].calls("done")[0][2] == "月曆"
+
+
+def test_two_home_providers_fall_back_to_the_panel(entry, home):
+    make_module(home / "modules", "A", "def run(app):\n    app.log('hi')\n")
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
+    make_module(home.parent, "行事曆", FAKE_CALENDAR)          # 上一層（ROOTS 的 ".."）也有一個
+    entry.outside("A")
+    assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
+
+
+def test_running_the_home_provider_itself_offers_the_panel(entry, home):
+    make_module(home / "modules", "行事曆", FAKE_CALENDAR)
+    entry.outside("行事曆")
+    assert entry.wv.windows[0].calls("done")[0][2] is None     # 沒有面板
+    make_module(home / "modules", "主控面板", FAKE_PANEL)
+    entry.wv.windows.clear()
+    entry.outside("行事曆")
+    assert entry.wv.windows[0].calls("done")[0][2] == "主控面板"
+
+
 def test_popup_html_puts_the_name_on_the_button():
     html_text = (INTEROP / "popup.html").read_text(encoding="utf-8")
     assert '[[offer, panel, "panelBtn"]]' in html_text and '"主控面板", panel' not in html_text
 
 
 # ── 頁面開著的時候，小視窗不冒出來、關它不結束程序；選完檔案藏回去（M5 設計第 15 節第 2 條） ──
+
+def test_a_page_opened_in_the_modules_own_process_keeps_the_popup_hidden(popup):
+    """iPLoT 1.0 的頁面在模組自己的程序裡開（D161），開著的期間核心會告訴小視窗（paging，D166）：不因「跑太久」出來。"""
+    p, seen = popup.p, []
+
+    def job():
+        p.paging("頁", True)
+        time.sleep(p.busy_after + 0.2)
+        seen.append(popup.wv.windows[0].shown)
+        p.paging("頁", False)
+        return 0
+
+    p.run(job)
+    assert seen == [False]
+
 
 def test_a_page_open_longer_than_busy_after_never_shows_the_popup(popup):
     p = popup.p
@@ -1561,7 +1420,7 @@ def test_choose_folder_hides_the_window_again_when_it_was_hidden(popup):
         seen.append(w.shown)
         return got
 
-    assert p.run(job) == Path("/d") and seen == [True, False] and popup.dock == [False, True]   # 沒有第三個 dock 呼叫
+    assert p.run(job) == Path("/d") and seen == [True, False] and popup.dock.count(True) == 1  # 藏回去不再改 Dock
 
 
 def test_choose_folder_leaves_the_window_up_when_it_was_already_showing(popup):
@@ -1609,34 +1468,32 @@ def test_choose_folder_keeps_the_busy_popup_up_after_a_slow_dialog(popup):   # �
 
 # ── ＋ 建的新模組不帶那一小段：在「互通」按「加上」之後才能直接執行（D84 修訂） ──
 
-def _plus_tree(tmp_path, with_run_py):
-    """tmp/我的 iPLoT/modules/A 是用 ＋（core.create.new_module）建的模組；with_run_py 時放一個假的 modules/互通/run.py：
-    把收到的參數寫成 argv.json、以 3 結束。"""
+def _plus_tree(tmp_path, with_iplot):
+    """tmp/我的 iPLoT/modules/A 是用 ＋（core.create.new_module）建的模組；with_iplot 時放一個假的 iPLoT（main.py 與 core/）：
+    main.py 把收到的參數寫成 argv.json、以 3 結束。"""
     from core.create import new_module
     home = tmp_path / "我的 iPLoT"
     (home / "modules").mkdir(parents=True)
-    (home / "main.py").write_text("", encoding="utf-8")
+    if with_iplot:
+        (home / "core").mkdir()
+        (home / "main.py").write_text("import json, sys\nopen(sys.argv[0] + '.argv.json', 'w').write(json.dumps(sys.argv[1:]))\n"
+                                      "sys.exit(3)\n", encoding="utf-8")
     folder = new_module(home / "modules", "A")
-    if with_run_py:
-        run = home / "modules" / "互通" / "run.py"
-        run.parent.mkdir(parents=True)
-        run.write_text("import json, sys\nopen(sys.argv[0] + '.argv.json', 'w').write(json.dumps(sys.argv[1:]))\n"
-                       "sys.exit(3)\n", encoding="utf-8")
     return home, folder
 
 
 def test_a_module_made_with_plus_is_offered_for_adding_the_snippet(load, tmp_path):
-    home, folder = _plus_tree(tmp_path, with_run_py=True)
-    got = load_button().candidates(home, DEFAULT_CONFIG)
+    home, folder = _plus_tree(tmp_path, with_iplot=True)
+    got = load_button().candidates(real_app(home, DEFAULT_CONFIG))
     assert [info.file for info, _ in got] == [folder / "iplot.py"]
 
 
-def test_after_adding_python3_iplot_py_hands_folder_and_args_to_run_py(load, tmp_path):
-    home, folder = _plus_tree(tmp_path, with_run_py=True)
+def test_after_adding_python3_iplot_py_hands_folder_and_args_to_main_run(load, tmp_path):
+    home, folder = _plus_tree(tmp_path, with_iplot=True)
     assert load("snippet").add(folder / "iplot.py", 20)
     r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, text=True)
-    argv = json.loads((home / "modules" / "互通" / "run.py.argv.json").read_text(encoding="utf-8"))
-    assert r.returncode == 3 and argv == [str(folder), "f.txt"]
+    argv = json.loads((home / "main.py.argv.json").read_text(encoding="utf-8"))
+    assert r.returncode == 3 and argv == ["--run", str(folder), "f.txt"]
 
 
 def test_an_added_snippet_does_nothing_inside_iplot(load, home, monkeypatch):
@@ -1651,32 +1508,32 @@ def test_an_added_snippet_does_nothing_inside_iplot(load, home, monkeypatch):
     assert c.press(next(m for m in c.all_modules() if m.name == "A")).ok
 
 
-def test_an_added_snippet_without_interop_runs_it_as_a_plain_script(load, tmp_path):
-    """找不到「互通」：說一句，然後照一般的 python3 iplot.py 跑。"""
-    _, folder = _plus_tree(tmp_path, with_run_py=False)
+def test_an_added_snippet_without_iplot_runs_it_as_a_plain_script(load, tmp_path):
+    """找不到 iPLoT：說一句，然後照一般的 python3 iplot.py 跑。"""
+    _, folder = _plus_tree(tmp_path, with_iplot=False)
     f = folder / "iplot.py"
     f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
     load("snippet").add(f, 20)
     r = subprocess.run([sys.executable, "iplot.py"], cwd=folder, capture_output=True, encoding="utf-8",
                        env={**os.environ, "PYTHONIOENCODING": "utf-8"})  # 接到管線時英文版 Windows 預設 cp1252
-    assert r.returncode == 0 and "找不到 iPLoT 的「互通」" in r.stderr and "最外層跑了" in r.stdout
+    assert r.returncode == 0 and "找不到 iPLoT" in r.stderr and "最外層跑了" in r.stdout
 
 
 def test_an_added_snippet_with_iplot_direct_never_hands_over(load, tmp_path):
-    """IPLOT_DIRECT=1（例如在編輯器裡除錯）：就算找得到「互通」也不交出去，照一般腳本跑、不說話。"""
-    home, folder = _plus_tree(tmp_path, with_run_py=True)
+    """IPLOT_DIRECT=1（例如在編輯器裡除錯）：就算找得到 iPLoT 也不交出去，照一般腳本跑、不說話。"""
+    home, folder = _plus_tree(tmp_path, with_iplot=True)
     f = folder / "iplot.py"
     f.write_text(f.read_text(encoding="utf-8") + 'print("最外層跑了")\n', encoding="utf-8")
     load("snippet").add(f, 20)
     r = subprocess.run([sys.executable, "iplot.py", "f.txt"], cwd=folder, capture_output=True, encoding="utf-8",
                        env={**os.environ, "IPLOT_DIRECT": "1", "PYTHONIOENCODING": "utf-8"})
     assert r.returncode == 0 and "最外層跑了" in r.stdout and r.stderr == ""
-    assert not (home / "modules" / "互通" / "run.py.argv.json").exists()
+    assert not (home / "main.py.argv.json").exists()
 
 
 def test_an_added_snippet_finds_iplot_from_beside_it(load, tmp_path):
     from core.create import new_module
-    _plus_tree(tmp_path, with_run_py=True)
+    _plus_tree(tmp_path, with_iplot=True)
     beside = new_module(tmp_path, "旁邊的模組")            # 跟 iPLoT 資料夾同一層（ROOTS 的 ".."）
     load("snippet").add(beside / "iplot.py", 20)
     r = subprocess.run([sys.executable, "iplot.py"], cwd=beside, capture_output=True, text=True)
@@ -1737,9 +1594,8 @@ def test_an_unexpected_crash_is_logged_and_said_in_one_sentence(entry, home, mon
 
 def test_copy_that_cannot_start_pbcopy_answers_false_not_an_exception(load, home, monkeypatch):
     """體驗 7-03：pbcopy 叫不起來時回 False，頁面才說「請自己選取上面那一行複製」。"""
-    from conftest import FakeApp
     interop = make_module(home / "modules", "互通")
-    api = load_button().Api(FakeApp(home), home, DEFAULT_CONFIG, "/py", interop)
+    api = load_button().Api(real_app(home), "/py", interop)
     monkeypatch.setattr(sys, "platform", "darwin")
 
     def gone(*a, **k):
@@ -1784,7 +1640,7 @@ def test_cancelling_a_question_in_the_popup_is_one_neutral_line_not_an_error(ent
     結束碼仍是 1（取消執行）。模組自己丟的 EOFError 照舊是錯誤。"""
     make_module(home / "modules", "問", "def run(app):\n    input('年齡')\n")
     monkeypatch.setattr(load("popup").Popup, "ask", lambda self, prompt, default="": None)
-    assert entry.go(["問"]) == 1
+    assert entry.outside("問") == 1
     w = entry.wv.windows[0]
     assert ["模組『問』已取消"] in w.calls("log") and not w.calls("report") and w.calls("done")[0][0] == "cancelled"
     assert not any("EOFError" in str(c) or "InputCancelled" in str(c) for c in w.calls("log"))
@@ -1792,291 +1648,6 @@ def test_cancelling_a_question_in_the_popup_is_one_neutral_line_not_an_error(ent
 
 def test_a_modules_own_eoferror_in_the_popup_is_still_an_error(entry, home):
     make_module(home / "modules", "自己丟", "def run(app):\n    raise EOFError('自己丟的')\n")
-    assert entry.go(["自己丟"]) == 1
+    assert entry.outside("自己丟") == 1
     w = entry.wv.windows[0]
     assert w.calls("report")[0][0]["kind"] == "EOFError" and w.calls("done")[0][0] == "error"
-
-
-# ── 導覽列（D154）：互通自己的 nav.py、nav.js ──
-
-UI_NAV_JS = Path(__file__).resolve().parents[1] / "modules" / "導覽列" / "nav.js"  # 0.8 起在「導覽列」模組裡（D159）
-NAV_JS_SHA256 = "27466bf9857847e17a7ff2e288a49c73d1e3b35790e2f67369005868faaf14d7"
-
-
-def test_the_two_nav_js_files_are_byte_for_byte_the_same_and_pinned():
-    """「導覽列」的 nav.js 與互通的 nav.js 是同一份（互通在沒有「導覽列」的舊核心上也要畫得出來，所以各放一份）：一字不差，而且釘住——
-    要改就兩份一起改，連這個 sha256 一起換（跟 snippet.TEXT 的做法一樣）。"""
-    import hashlib
-    # Windows 的 git 可能把換行換成 CRLF 再檢出：比的是內容，不是那一個位元組
-    mine, theirs = ((f.read_bytes().replace(b"\r\n", b"\n")) for f in (INTEROP / "nav.js", UI_NAV_JS))
-    assert mine == theirs
-    assert hashlib.sha256(mine).hexdigest() == NAV_JS_SHA256
-
-
-def nav_tree(home):
-    """課程（子模組：作業一〔底下有 G〕、作業二）、主控面板、孤。"""
-    top = make_module(home / "modules", "課程", '"""說明"""\nTITLE = "課程作業"\n')
-    one = make_module(top, "一", 'ICON = "📄"\nTITLE = "作業一"\n')
-    make_module(top, "二", 'TITLE = "作業二"\n')
-    make_module(one, "G")
-    make_module(home / "modules", "主控面板")
-    make_module(home / "modules", "孤")
-
-
-def nav_for(load, home, *names, log=None, popen=None, environ=None):
-    """owner（用 top 底下的名字路徑指）正在跑、開了一個頁面視窗：回 (Nav, 視窗, Core)。"""
-    from conftest import FakeView, FakeWindow
-
-    from core import scan
-    from core.core import Core
-    from core.types import DEFAULT_CONFIG
-
-    core = Core(home, DEFAULT_CONFIG, FakeView())
-    core.rescan()
-    root = (home / "modules").resolve()
-    info = scan.module_info(root.joinpath(*names), root, "here" if len(names) == 1 else "child")
-    core.running.append(info)
-    window = FakeWindow("頁", {})
-    kw = {"popen": popen} if popen else {}
-    if environ is not None:
-        kw["environ"] = environ
-    return load("nav").Nav(window, core, log or (lambda text: None), **kw), window, core
-
-
-def test_nav_cells_have_the_panel_the_parent_and_the_children(load, home):
-    nav_tree(home)
-    bar, _, _ = nav_for(load, home, "課程", "一")
-    assert bar.cells == [{"k": "panel", "t": "主控面板", "i": "", "d": ""},
-                         {"k": "parent", "t": "↑ 課程作業", "i": "", "d": "說明"},
-                         {"k": "child", "t": "G", "i": "", "d": ""}]
-    assert [t.name for t in bar.targets] == ["主控面板", "課程", "G"]
-
-
-def test_nav_asks_the_page_top_provider_so_it_matches_the_panel_and_has_the_same_level(load, home):
-    """核心 0.8 起（有 Core.call）：問「導覽列」模組，跟面板裡開的頁面一樣多了同一層（Discussion #9）。
-    它的「主控面板」那一格（目標 None）在這裡換成「主控面板」模組，照舊另開。「導覽列」放在上一層（ROOTS 的 ".."），不算同一層。"""
-    nav_tree(home)
-    shutil.copytree(UI_NAV_JS.parent, home.parent / "導覽列")
-    bar, _, _ = nav_for(load, home, "孤")
-    assert [(c["k"], c["t"]) for c in bar.cells] == [("panel", "主控面板"), ("sibling", "課程作業")]  # 主控面板不重複列
-    assert [t.name for t in bar.targets] == ["主控面板", "課程"]
-    bar, _, _ = nav_for(load, home, "課程", "一")
-    assert [(c["k"], c["t"]) for c in bar.cells] == [("panel", "主控面板"), ("parent", "↑ 課程作業"), ("sibling", "作業二"),
-                                                      ("child", "G")]
-
-
-def test_nav_panel_cell_only_when_the_top_level_has_exactly_one_and_it_is_not_the_page_itself(load, home):
-    nav_tree(home)
-    assert [c["k"] for c in nav_for(load, home, "孤")[0].cells] == ["panel"]
-    assert nav_for(load, home, "主控面板")[0].cells == []  # 主控面板自己：沒有父層、沒有子模組、不指回自己
-    make_module(home / "modules" / "課程", "主控面板")  # 底下另一個同名的不算：只看最上層
-    assert [c["k"] for c in nav_for(load, home, "孤")[0].cells] == ["panel"]
-    shutil.rmtree(home / "modules" / "主控面板")
-    assert nav_for(load, home, "孤")[0].cells == []
-
-
-def test_nav_has_no_panel_cell_when_the_top_level_has_two(load, home):
-    nav_tree(home)
-    (home / "modules" / "主控面板").rename(home / "modules" / "P1")
-    make_module(home / "modules", "P1b")
-    assert nav_for(load, home, "孤")[0].cells == []
-
-
-def test_nav_injects_after_load_and_exposes_only_iplot_nav(load, home):
-    nav_tree(home)
-    bar, window, _ = nav_for(load, home, "課程")
-    assert list(window.exposed) == ["_iplot_nav"] and window.js == []
-    window.fire("loaded")
-    assert window.js == [f"({load('nav').source()})({json.dumps(bar.cells)})"]
-
-
-@pytest.mark.parametrize("bad", ["1", 1.0, True, None, -1, 9, [0]])
-def test_nav_iplot_nav_only_accepts_an_index_on_the_bar(load, home, bad):
-    nav_tree(home)
-    calls = []
-    bar, window, _ = nav_for(load, home, "課程", popen=lambda *a, **k: calls.append(a))
-    window.exposed["_iplot_nav"](bad)
-    assert calls == [] and not window.destroyed and bar.choice is None
-
-
-def test_nav_jump_starts_a_new_process_with_run_py_and_then_closes_the_page(load, home, monkeypatch):
-    nav_tree(home)
-    calls = []
-    env = {"IPLOT_CALENDAR": "1", "A": "b"}
-    bar, window, _ = nav_for(load, home, "課程", popen=lambda *a, **k: calls.append((a, k)) or window_state(window, calls),
-                             environ=env)
-    window.exposed["_iplot_nav"](2)  # 0 主控面板、1 作業一、2 作業二
-    [((argv,), kw)] = calls
-    assert argv == [sys.executable, str(INTEROP / "run.py"), str((home / "modules" / "課程" / "二").resolve())]
-    assert kw["env"] == {"A": "b"} and kw["start_new_session"] is True
-    assert kw["stdin"] == kw["stdout"] == subprocess.DEVNULL and kw["stderr"].name.endswith("separate.log")  # D160 第 3 條
-    assert window.destroyed and bar.choice == 2 and env == {"IPLOT_CALENDAR": "1", "A": "b"}
-
-
-def window_state(window, calls):
-    """開新程序的當下，原本那一頁還沒關：開成功才關。"""
-    assert not window.destroyed
-    return object()
-
-
-def test_nav_jump_to_the_panel_starts_the_panel_module(load, home):
-    nav_tree(home)
-    calls = []
-    bar, window, _ = nav_for(load, home, "孤", popen=lambda *a, **k: calls.append(a))
-    window.exposed["_iplot_nav"](0)
-    assert calls == [([sys.executable, str(INTEROP / "run.py"), str((home / "modules" / "主控面板").resolve())],)]
-
-
-def test_nav_jump_that_cannot_start_says_so_and_keeps_the_page(load, home):
-    nav_tree(home)
-    said = []
-
-    def broken(*a, **k):
-        raise OSError(errno.ENOENT, "No such file")
-
-    bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=broken)
-    window.exposed["_iplot_nav"](1)
-    assert not window.destroyed and bar.choice is None
-    assert said == ["打不開『作業一』：找不到檔案或資料夾。再按一次；還是不行就從 iPLoT 的面板打開它"]
-
-
-def test_nav_jump_without_run_py_says_so_and_keeps_the_page(load, home, monkeypatch, tmp_path):
-    """Popen 只在 Python 執行檔本身起不來時才丟 OSError；run.py 不在的話不會，所以先確認它在（審查）。"""
-    nav_tree(home)
-    said, calls = [], []
-    bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=lambda *a, **k: calls.append(a))
-    monkeypatch.setattr(load("nav"), "RUN", tmp_path / "沒有.py")
-    window.exposed["_iplot_nav"](1)
-    assert calls == [] and not window.destroyed and bar.choice is None
-    assert said == ["打不開『作業一』：找不到 run.py。再按一次；還是不行就從 iPLoT 的面板打開它"]
-
-
-def test_nav_jump_twice_starts_only_one_process(load, home):
-    """連按兩下（pywebview 每個呼叫各開一條執行緒）：只開一個程序，第一次按的那一格算數。"""
-    nav_tree(home)
-    calls = []
-    bar, window, _ = nav_for(load, home, "課程", popen=lambda *a, **k: calls.append(a))
-    window.exposed["_iplot_nav"](1)
-    window.exposed["_iplot_nav"](2)
-    assert len(calls) == 1 and bar.choice == 1
-
-
-def test_nav_jump_to_a_module_that_is_gone_says_so_and_keeps_the_page(load, home):
-    nav_tree(home)
-    said, calls = [], []
-    bar, window, _ = nav_for(load, home, "課程", log=said.append, popen=lambda *a, **k: calls.append(a))
-    shutil.rmtree(home / "modules" / "課程" / "一")
-    window.exposed["_iplot_nav"](1)
-    assert calls == [] and not window.destroyed and said == ["找不到模組『作業一』，可能已經被移除了"]
-
-
-def test_track_records_the_running_modules_on_a_core_without_running(load, home):
-    """核心 0.5、0.6 沒有 Core.running：互通自己記（包住 press，app.run、app.open 最後都走它）；有的話什麼都不改。"""
-    nav = load("nav")
-    new = types.SimpleNamespace(running=[], press=lambda info: "orig")
-    pressed = new.press
-    nav.track(new)
-    assert new.press is pressed and new.running == []
-    seen = []
-
-    class Old:
-        def press(self, info, handler="run", args=(), quiet=False):
-            seen.append(list(self.running))
-            if info == "outer":
-                self.press("inner")
-            return (handler, args, quiet)
-
-    old = Old()
-    nav.track(old)
-    assert old.press("outer", "h", (1,), True) == ("h", (1,), True)
-    assert seen == [["outer"], ["outer", "inner"]] and old.running == []
-
-
-def test_track_pops_even_when_press_raises(load):
-    nav = load("nav")
-
-    class Old:
-        def press(self, info):
-            raise ValueError("x")
-
-    old = Old()
-    nav.track(old)
-    with pytest.raises(ValueError):
-        old.press("a")
-    assert old.running == []
-
-
-def test_parent_of_falls_back_to_the_same_algorithm_on_a_core_without_it(load, home, monkeypatch):
-    from core import scan
-    nav_tree(home)
-    root = (home / "modules").resolve()
-    roots = scan.roots_from_config(home, ("modules",))
-    child = scan.module_info(root / "課程" / "一", root, "child")
-    want = scan.parent_of(child, roots)
-    monkeypatch.delattr(scan, "parent_of")
-    got = load("nav").parent_of(child, roots)
-    assert (got.name, got.folder, got.level, got.root) == (want.name, want.folder, want.level, want.root)
-    assert load("nav").parent_of(got, roots) is None
-    plain = root / "普通"
-    make_module(plain, "B")
-    assert load("nav").parent_of(scan.module_info(plain / "B", root, "child"), roots) is None
-
-
-OLD_CORE_SCRIPT = r"""
-import json, sys
-sys.path[:0] = [sys.argv[1], sys.argv[2]]
-import nav
-from core.core import Core, load_config
-
-class Window:
-    def __init__(self):
-        self.events = type("E", (), {"loaded": type("L", (), {"__iadd__": lambda s, f: s})()})()
-    def expose(self, *f): pass
-    def evaluate_js(self, s): pass
-    def destroy(self): pass
-
-out = []
-class View:
-    def show(self, scope): pass
-    def log(self, text): out.append(text)
-    def report(self, error): out.append("ERR " + error.message)
-    def ask(self, prompt, default=""): return None
-    def confirm(self, prompt): return False
-    def page(self, title, html, api): out.append(json.dumps(nav.Nav(Window(), core, print).cells))
-    def choose_files(self): return []
-    def choose_folder(self): return None
-
-view = View()
-core = Core(__import__("pathlib").Path(sys.argv[3]), load_config(__import__("pathlib").Path(sys.argv[3]) / "config.py")[0], view)
-nav.track(core)
-core.rescan()
-[p] = [m for m in core.all_modules() if m.name == "P"]
-core.press(p)
-import core as _core
-print(json.dumps(out + ["ver " + _core.__version__]))
-"""
-
-
-@pytest.mark.parametrize("version", ["v0.5.0", "v0.6.0"])
-def test_nav_works_on_a_real_old_core(load, home, tmp_path, version):
-    """D117 的做法：從 git 取出真的舊核心來驗；沒有那個 tag（淺 clone）就跳過。"""
-    import io
-    import tarfile
-    root = Path(__file__).resolve().parents[1]
-    archive = subprocess.run(["git", "archive", version, "core"], cwd=root, capture_output=True)
-    if archive.returncode != 0:
-        pytest.skip(f"沒有 {version} 這個 tag")
-    old = tmp_path / "old"
-    old.mkdir()
-    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
-        tar.extractall(old)
-    top = make_module(home / "modules", "P", 'def run(app):\n    app.page("t", "<p>x</p>")\n    app.log("done")\n')
-    make_module(top, "K", 'TITLE = "孩子"\n')
-    make_module(home / "modules", "主控面板")
-    got = subprocess.run([sys.executable, "-I", "-c", OLD_CORE_SCRIPT, str(old), str(INTEROP), str(home)],
-                         capture_output=True, text=True, cwd=tmp_path)
-    assert got.returncode == 0, got.stderr
-    cells, *rest = json.loads(got.stdout.splitlines()[-1])
-    assert f"ver {version[1:4]}" in " ".join(rest), rest  # 真的載到舊核心，不是 sys.path 上的新核心
-    assert [c["k"] for c in json.loads(cells)] == ["panel", "child"] and json.loads(cells)[1]["t"] == "孩子" and json.loads(cells)[1]["i"] == ""
-    assert "done" in rest  # 模組在 app.page 之後照常跑完

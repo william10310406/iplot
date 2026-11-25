@@ -278,7 +278,7 @@ function entry(text, error) {
 // ── 滑鼠與鍵盤 ──
 
 document.addEventListener("click", (e) => {
-  if (!$("menu").contains(e.target)) closeMenu();
+  if (!e.target.closest(".menu, .scrim")) closeMenu();  // 第一次右鍵問「要允許嗎？」：按對話框不關選單，項目晚一點補上
   if (!e.target.closest(".tile, .menu, .scrim")) select(null);  // 點空白的地方：取消選取
 });
 // 雙擊的第一下如果不是按在模組那一格上（按的是 ▸、選單、別的地方），就不算數。在格子自己的 click 之前先看
