@@ -76,15 +76,19 @@ def set_dock_icon(path: pathlib.Path, platform: str = sys.platform) -> bool:
     return True
 
 
+LOCK_AT = 1 << 20  # Windows 鎖的那一格：在檔尾之後，不擋讀 pid
+
+
 def hold(path: pathlib.Path):
     """拿「開著」的鎖：拿到了寫上這個程序的 pid、回打開的檔（關掉或程序結束鎖就放掉，不會留下過期的記號）；
-    別的程序拿著（行事曆已經開著）回 None。鎖是系統的檔案鎖（macOS／Linux 的 flock、Windows 的 msvcrt）。"""
+    別的程序拿著（行事曆已經開著）回 None。鎖是系統的檔案鎖（macOS／Linux 的 flock、Windows 的 msvcrt）。
+    Windows 的鎖會擋住別人讀那一段，所以鎖在 pid 後面很遠的一格（LOCK_AT），別人照樣讀得到 pid。"""
     path.parent.mkdir(exist_ok=True)
     f = open(path, "a+", encoding="utf-8")  # noqa: SIM115  開著的期間一直拿著，關頁面時才關
     try:
         if os.name == "nt":
             import msvcrt
-            f.seek(0)
+            f.seek(LOCK_AT)
             msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
@@ -100,7 +104,7 @@ def hold(path: pathlib.Path):
 
 
 def open_pid(path: pathlib.Path) -> int | None:
-    """開著的那個程序的 pid；讀不到（Windows 上鎖住的那一格讀不了、檔壞了）回 None。"""
+    """開著的那個程序的 pid；讀不到（檔壞了、沒寫完）回 None。"""
     try:
         return int(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
