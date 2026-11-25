@@ -73,7 +73,7 @@ class Core:
         self.scope = Scope(("iPLoT",), ())
         self.memories: dict[Path, dict] = {}
         self._stack: list[ModuleInfo] = []
-        self._declined: set[Path] = set()  # 這次執行期間答了「不允許」的工作坊模組，不再問
+        self._declined: set[Path] = set()  # 這次執行期間答了「不允許」的外來模組（有 .origin），不再問
         self.running, self._pending = [], False  # running：正在執行的模組（ModuleInfo），最裡面的在最後；app.page 被呼叫時 running[-1] 就是開頁面的那一個
 
     def roots(self) -> list[Root]:
@@ -116,7 +116,7 @@ class Core:
               quiet: bool = False) -> Result:
         """執行模組：先存快照再交給 runner，結果寫進訊息區；執行中收到的重掃延到結束才做。
         quiet 只省掉「完成」那一行，快照、輸出、錯誤照舊。
-        模組資料夾裡有空檔案 .unconfirmed（工作坊裝進來的）時先問一次：取消就不執行，確定就拿掉標記（D59）。"""
+        模組資料夾裡有空檔案 .unconfirmed（裝它進來的模組放的，例如工作坊）時先問一次：取消就不執行，確定就拿掉標記（D59）。核心不管是誰放的。"""
         if info.min_api > App.api_version:  # 要的指令集比這個核心新：不跑，說要更新（D161）
             message = T["needs_api"].format(title=info.title, need=info.min_api, have=App.api_version)
             error = ErrorInfo("NeedsNewerIPLoT", message, info.file, None, "", "module", info.name)
@@ -175,7 +175,7 @@ class Core:
 
     def providers(self, role: str) -> list[ModuleInfo]:
         """最上層宣告了 PROVIDES 而且裡面有 role 的模組，依掃描順序（D159）。role 是什麼意思核心不管，
-        由提供的模組和使用的模組自己約定。從工作坊裝來的（有 .origin）要使用者允許過才算。"""
+        由提供的模組和使用的模組自己約定。從外面裝進來的（有 .origin，誰放的核心不管）要使用者允許過才算。"""
         found = [m for g in scan.find_modules(self.roots()) for m in g.modules if role in dict(m.provides)]
         return [m for m in found if self._allowed(m)]
 

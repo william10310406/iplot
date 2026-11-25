@@ -27,7 +27,7 @@ def params(fn):
 
 
 def test_version_and_api_version():
-    assert isinstance(core.__version__, str) and core.__version__.startswith("0.")
+    assert isinstance(core.__version__, str) and core.__version__.startswith("1.")
     assert App.api_version >= 4
 
 

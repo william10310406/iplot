@@ -7,13 +7,6 @@
   "why": "規則 18：工作坊要在每一版核心（0.5 起）上都打得開，舊核心沒有角色，只能照名字找舊版互通的 separate.py 另開；找不到、沒開起來就自己在這裡開。1.0 的互通沒有 separate.py，所以 1.0 上一定自己開（2026-11-25 William 同意這是唯一的永久例外）"
  },
  {
-  "rule": "R1",
-  "file": "modules/工作坊/workshop.py",
-  "what": "更新",
-  "until": "永久",
-  "why": "按鈕文字「更新」剛好跟模組同名，不是用到更新模組"
- },
- {
   "rule": "R3",
   "file": "modules/主控面板/iplot.py",
   "what": "core.runner",
@@ -96,110 +89,5 @@
   "what": "core.runner",
   "until": "永久",
   "why": "核心永久保留 sys.modules['core.runner'] 這個別名（2026-11-23 William 同意），寫進使用者程式碼的那一小段要靠它"
- },
- {
-  "rule": "R5",
-  "file": "modules/工作坊/workshop.py",
-  "what": "更新",
-  "until": "永久",
-  "why": "按鈕文字「更新」剛好跟模組同名，不是用到更新模組"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "主控面板",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "互通",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "作業系統",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "回報與討論",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "導覽列",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "工作坊",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "核心",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "整理",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "更新",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "行事曆",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "重新啟動",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "開Terminal",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "開工",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED／SYSTEM_MODULE／REPORT_MODULE（D159）：核心搬進 modules/ 時一起拿掉"
- },
- {
-  "rule": "R6",
-  "file": "modules/核心/core/text.py",
-  "what": "頁面",
-  "until": "1.0",
-  "why": "過渡用的常數 BUNDLED（D159）：隨附模組多了「頁面」（D161）；核心搬進 modules/ 時一起拿掉"
  }
 ]

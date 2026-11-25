@@ -34,7 +34,8 @@ def old_ref():
 
 def old_install(home, ref):
     """ref 那一版的 iPLoT（git archive，跟發出去的包一樣），解到 home。"""
-    with tarfile.open(fileobj=BytesIO(git("archive", ref, "core", "ui", "main.py", "requirements", "modules/更新"))) as tar:
+    # Windows 的 git 會照 core.autocrlf 把 archive 裡的文字檔換成 CRLF；發出去的包是 LF 的，這裡也要 LF
+    with tarfile.open(fileobj=BytesIO(git("-c", "core.autocrlf=false", "archive", ref, "core", "ui", "main.py", "requirements", "modules/更新", "modules/打開核心原始碼"))) as tar:
         # filter 要 3.10.12 以後才有（CI 的 Windows／macOS 是 3.10.11）
         tar.extractall(home, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     (home / "config.py").write_text("", encoding="utf-8")
@@ -68,6 +69,7 @@ def test_an_0_8_install_updated_with_its_own_updater_starts_and_moves_into_modul
 
     home = tmp_path / "iPLoT"
     old_install(home, old_ref())
+    (home / ".bundled-version").write_text("0.8.0\n", encoding="utf-8")  # 0.8 開過一次就寫了這個
     spec = importlib.util.spec_from_file_location("old_update", home / "modules" / "更新" / "update.py")
     old = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(old)
@@ -82,7 +84,18 @@ def test_an_0_8_install_updated_with_its_own_updater_starts_and_moves_into_modul
     kernel = home / "modules" / "核心"
     assert (kernel / "ui" / "start.py").is_file(), "第一次啟動（種子開的）把「核心」裝進 modules/"
     assert not (kernel / ".local").exists(), "用種子開的那一次不記 .good"
+    assert not (home / "modules" / "打開核心原始碼").exists(), "0.8 的「打開核心原始碼」沒改過：移到備份，不留一格打開種子的舊按鈕（D171）"
+    assert list((home / ".backup").glob(f"{__version__}-bundled-*/打開核心原始碼/iplot.py"))
 
     second = boot(home, "--run", "甲")
     assert f"甲跑了 {__version__}" in second.stdout, second.stdout + second.stderr
     assert (kernel / ".local" / "核心.good" / "ui" / "start.py").is_file(), "第二次從 modules/核心/ 開，記下這一份"
+
+
+def test_the_kernel_module_counts_as_new_in_1_0():
+    """「核心」在 1.0 才變成隨附模組：雜湊表要這樣寫，0.8 升上來的人（.bundled-version 是 0.8.x）才會裝上它。"""
+    import json
+
+    from core import bundled
+
+    assert json.loads(bundled.HASHES.read_text(encoding="utf-8"))[".introduced"]["核心"] == "1.0.0"

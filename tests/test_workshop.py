@@ -262,7 +262,7 @@ def test_render_shows_state_and_the_right_button(workshop, mods, entry):
     workshop.install(entry, mods)
     html = workshop.render([entry], mods, "{rows}")
     assert workshop.LABELS["installed"] in html and "<button" not in html, "已安裝：沒有按鈕"
-    assert ">更新<" in workshop.render([{**entry, "version": "2.0.0"}], mods, "{rows}")
+    assert ">換成新版<" in workshop.render([{**entry, "version": "2.0.0"}], mods, "{rows}")
     (mods / "整理桌面" / "helper.py").write_text("改過", encoding="utf-8")
     assert ">覆蓋<" in workshop.render([entry], mods, "{rows}")
 
