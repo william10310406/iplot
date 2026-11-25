@@ -27,7 +27,16 @@ _spec.loader.exec_module(PAGE)
 
 @pytest.fixture(autouse=True)
 def provider(home):
+    """導覽列與一個面板（提供 main 的，第一格的字是它的名字；D164）都放在上一層。"""
     shutil.copytree(NAV, home.parent / "導覽列")
+    make_module(home.parent, "主控面板", 'PROVIDES = {"main": "start"}\n\ndef start(app, core):\n    pass\n')
+
+
+def test_without_a_panel_the_first_cell_just_says_panel(home):
+    shutil.rmtree(home.parent / "主控面板")
+    make_module(home / "modules", "A")
+    cells, targets = bar_for(home, "A")
+    assert cells[0] == {**PANEL, "t": "面板"} and targets[0] is None
 
 
 def tree(home):

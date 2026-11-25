@@ -79,3 +79,8 @@ def trash(app, path):
     if code:
         raise OSError(f"資源回收筒拒絕：{code}")
     return None
+
+
+def activate(app, pid):
+    """把 pid 那個程序的視窗叫到最前面：這個系統還不會，回 False，由呼叫的模組跟使用者說下一步。"""
+    return False

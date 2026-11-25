@@ -1857,7 +1857,7 @@ def nav_tree(home):
     one = make_module(top, "一", 'ICON = "📄"\nTITLE = "作業一"\n')
     make_module(top, "二", 'TITLE = "作業二"\n')
     make_module(one, "G")
-    make_module(home / "modules", "主控面板")
+    make_module(home / "modules", "主控面板", 'PROVIDES = {"main": "start"}\n')  # 面板是提供 main 的（D164）
     make_module(home / "modules", "孤")
 
 

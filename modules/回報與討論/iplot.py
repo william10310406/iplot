@@ -21,7 +21,6 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
         print("找不到 iPLoT（模組要放在 iPLoT 資料夾裡或它旁邊），照一般的 python3 iplot.py 跑", file=sys.stderr)
 # ── iPLoT ──
 
-import importlib.util
 import json
 import threading
 import time
@@ -35,6 +34,7 @@ import report
 
 ICON = "💬"
 PROVIDES = {"panel.error": "on_panel_error"}  # 面板上的錯誤交給這裡（D110、D150、D162）
+MIN_API = 7  # app.panel、app.describe（D164）；每按一次在自己的程序裡跑，頁面開著不卡面板（D161）
 HERE = Path(__file__).resolve().parent
 OUTBOX = HERE / "回報"  # 完整的回報（.txt）與 tkinter 面板的草稿（.md）：只放在這台電腦，不進 git、不進包
 BROWSER_FAILS = (webbrowser.Error, OSError, ValueError)  # 找不到瀏覽器、Windows 的 ShellExecute、3.14 對 - 開頭的網址
@@ -217,10 +217,8 @@ class Api:
 def run(app):
     """面板上的「回報與討論」這一格（D114，設計第 5、9 節）：回報問題、提建議、問問題、看論壇。回報問題可以指定一個
     最上層的模組（下一層模組的名字可能是學生的名字，不列）；每一份都在這裡先算好，頁面那一頭只查表、不碰 app。"""
-    if report.panel_kind() == "tkinter":
+    if report.panel_kind(app) == "tkinter":
         return _menu_by_ask(app)
-    if not _separate(app):  # 在另開的程序裡開這一頁，面板空出來；「回報這個問題」（on_error）拿的是面板上的錯誤，留在面板裡
-        return
     env = report.short_env(app)
     names = list(dict.fromkeys(m.name for m in app.modules if m.level != "child"))  # 不同的根底下同名的只列一次
     saved = []
@@ -257,7 +255,7 @@ def on_error(app, error, recent=None):
     """面板上的「回報這個問題」（D110）：遮過的回報給人看、讓人改，再用預填的網址開瀏覽器（設計第 5.1、5.2 節）。
     頁面那一頭不碰 app：存了要指給人看的檔，等頁面關掉、回到這裡才 reveal。"""
     rep = report.from_error(error, app, report.recent_for(app.home, error) if recent is None else recent)
-    if report.panel_kind() == "tkinter":
+    if report.panel_kind(app) == "tkinter":
         return _by_file(app, rep, error.kind)
     saved = []
     data = {"mode": "edit", "title": rep.title, "body": rep.body, "notice": rep.notice, "hint": report.HINT}
@@ -395,15 +393,3 @@ def _copy_tk(text: str) -> bool:
     except Exception:  # noqa: BLE001  複製不成不能讓整個回報停下來
         return False
     return True
-
-
-def _separate(app) -> bool:
-    """有「互通」的 separate.py（互通 0.4.0 起）就經它另開一個程序開這一頁，面板不會被卡住；回 False 表示已經另開
-    或叫到最前面了，這裡不用開。沒有就照舊在這裡開。用檔案路徑載入：這個模組的 sys.path[0] 是自己的資料夾。"""
-    path = Path(app.home) / "modules" / "互通" / "separate.py"
-    if not path.is_file():
-        return True
-    spec = importlib.util.spec_from_file_location("iplot_interop_separate", path)
-    separate = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(separate)
-    return separate.here(app)

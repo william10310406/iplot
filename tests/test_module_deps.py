@@ -61,6 +61,13 @@ def test_docstrings_comments_and_name_lists_do_not_count(tree):
     assert scan(tree, '"""跟乙一起用。"""\n# "乙"\nALL = ("乙", "丙", "丁")\n') == set()
 
 
+def test_a_folder_of_its_own_with_the_same_name_is_not_another_module(tree):
+    """課程作業的範例課程叫「科學計算」，跟另一個模組同名：說的是自己的 範例課程/科學計算/，不是那個模組。"""
+    (tree / "甲" / "範例" / "乙").mkdir(parents=True)
+    assert scan(tree, 'EXAMPLE = "乙"\n') == set()
+    assert scan(tree, 'X = "丙"\n') == {("R1", "丙"), ("R5", "丙")}
+
+
 def test_r5_roles_must_be_declared(tree):
     assert scan(tree, 'def run(app):\n    app.call("page.top")\n') == {("R5", "page.top")}
     assert scan(tree, 'NEEDS = ("page.top",)\ndef run(app):\n    app.each("page.top")\n') == set()

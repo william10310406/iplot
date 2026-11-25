@@ -49,7 +49,7 @@ def spawn(core: Any, info: ModuleInfo, handler: str, args: tuple) -> Result:
             err.close()
     pipe = Pipe(proc.stdout, proc.stdin)
     job = {"home": core.home, "config": core.config, "safe": core.safe, "info": info, "handler": handler,
-           "args": args, "scope": core.scope, "memories": dict(core._blobs)}
+           "args": args, "scope": core.scope, "memories": dict(core._blobs), "panel": getattr(core.view, "name", None)}
     try:
         pipe.send(("start", job))
         while (message := pipe.recv())[0] == "req":
@@ -112,8 +112,8 @@ class Remote:
 class RemoteView:
     """工作程序裡的 View：show 不做（主程序自己畫）；page 走到這裡表示沒有提供 app.page 的模組；其他交給主程序。"""
 
-    def __init__(self, remote: Remote) -> None:
-        self._remote = remote
+    def __init__(self, remote: Remote, name: str | None = None) -> None:
+        self._remote, self.name = remote, name  # name：開這個程序的面板是哪一種（app.panel）
 
     def show(self, scope: Any) -> None:
         pass
@@ -163,7 +163,7 @@ def serve(pipe: Pipe) -> None:
     threading.Thread(target=remote.listen, daemon=True).start()
     home, info = job["home"], job["info"]
     sys.path.insert(1, str(home / "lib"))
-    core = Core(home, job["config"], RemoteView(remote), job["safe"], remote=remote)
+    core = Core(home, job["config"], RemoteView(remote, job.get("panel")), job["safe"], remote=remote)
     core.scope, core.memories = job["scope"], _load(job["memories"])
     core.running.append(info)
     result = runner.run_module(info, App(core, info), job["handler"], job["args"])

@@ -15,7 +15,7 @@ from . import history, runner, scan
 from .app import App
 from .create import AlreadyExists, BadName, new_module
 from .errors import describe, from_exception, reason
-from .text import SYSTEM_MODULE, T
+from .text import T
 from .types import DEFAULT_CONFIG, Config, ErrorInfo, Group, ModuleInfo, Result, Root, Scope
 
 
@@ -230,15 +230,11 @@ class Core:
         return self.press(info, dict(info.provides)[role], args, quiet=True).value
 
     def action(self, name: str, *args: Any) -> Any:
-        """碰作業系統的事（open、edit、reveal、terminal、trash、requirements、webview_ready）：交給提供 os.<name> 的模組。
-        0.8 過渡（0.9 拿掉）：沒有提供者時，照舊找 modules/ 裡的「作業系統」——使用者改過的舊版沒有 PROVIDES。"""
+        """碰作業系統的事（open、edit、reveal、terminal、trash、requirements、webview_ready）：交給提供 os.<name> 的模組；
+        沒有就在訊息區說一句（1.0 起不再照名字找「作業系統」，D164）。"""
         if found := self.providers("os." + name):
             return self.run_role(found[0], "os." + name, args)
-        folder = self.home / "modules" / SYSTEM_MODULE
-        if not scan.is_module(folder):
-            return self.view.log(T["no_system"].format(module=SYSTEM_MODULE, name=name))
-        info = scan.module_info(folder, (self.home / "modules").resolve(), "here")
-        return self.press(info, name, args, quiet=True).value
+        return self.view.log(T["no_system"].format(role="os." + name))
 
     def create(self, parent: Path, name: str) -> Path | None:
         """新增模組：建好後重掃並打開編輯器；名稱不對、已存在或建不了時寫進訊息區、回 None。"""

@@ -231,7 +231,7 @@ def test_missing_system_module_falls_back_without_pip(boot, capsys):
     boot.web = ImportError("No module named 'webview'")
     boot.main.main()
     assert kinds(boot) == ["web", "tk"] and boot.calls[-1][1] is False
-    assert T["no_system"].format(module=SYSTEM_MODULE, name="requirements") in capsys.readouterr().out
+    assert T["no_system"].format(role="os.requirements") in capsys.readouterr().out
 
 
 def test_config_error_reaches_the_panel(boot, monkeypatch):

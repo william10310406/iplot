@@ -30,24 +30,10 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
 
 ICON = "🎛️"
 PROVIDES = {"main": "start"}  # 開機程式要的面板（D162）
-NEEDS = ("menu.module", "panel.error")  # 右鍵選單多的項目、錯誤那一列的「回報這個問題」（可有可無）
-# macOS 14 起，自己不在最前面的 App 叫別人到最前面會被拒絕；不是 App 的一般 python 程序叫就可以（2026-10-07 量過）。
-# 被拒絕時交給這一小段在子程序裡叫：argv 是 [-c, lib 的路徑, pid]
-HELPER = ("import sys\n"
-          "sys.path.insert(0, sys.argv[1])\n"
-          "import AppKit\n"
-          "app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(int(sys.argv[2]))\n"
-          "sys.exit(0 if app is not None and app.activateWithOptions_("
-          "AppKit.NSApplicationActivateIgnoringOtherApps) else 1)\n")
-
-
+NEEDS = ("menu.module", "panel.error", "os.activate")  # 右鍵選單多的項目、錯誤那一列的「回報這個問題」、叫面板到最前面
+MIN_API = 7  # app.panel（D164）
 REASONS = {errno.ENOENT: "找不到 Python 或 iPLoT 的 main.py", errno.EACCES: "沒有權限", errno.EPERM: "沒有權限",
            errno.ENOMEM: "記憶體不夠", errno.EAGAIN: "系統現在開不了新的程式"}
-
-
-def in_panel(modules=sys.modules) -> bool:
-    """現在是不是在面板的程序裡（網頁面板或 tkinter 面板）。"""
-    return "ui.web" in modules or "ui.tk" in modules
 
 
 def _ps() -> str:
@@ -97,28 +83,6 @@ def find_panel(home: pathlib.Path, ps=_ps, lsof=_lsof, me: int | None = None) ->
     return None
 
 
-def activate(pid: int | None, platform: str = sys.platform, run=subprocess.run) -> bool:
-    """把 pid（None 是自己）叫到最前面；macOS 以外、或載不進 AppKit（lib/ 裡的 pyobjc）就回 False。"""
-    if platform != "darwin":
-        return False
-    try:
-        import AppKit
-    except ImportError:
-        return False
-    running = AppKit.NSRunningApplication
-    app = running.currentApplication() if pid is None else running.runningApplicationWithProcessIdentifier_(pid)
-    if app is not None and app.activateWithOptions_(AppKit.NSApplicationActivateIgnoringOtherApps):
-        return True
-    lib = str(pathlib.Path(AppKit.__file__).parents[1])
-    target = os.getpid() if pid is None else pid
-    try:
-        done = run([sys.executable, "-c", HELPER, lib, str(target)], stdin=subprocess.DEVNULL,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return done.returncode == 0
-
-
 UP_FAILED = "它一開就結束了（原因記在 iPLoT 資料夾的 logs/separate.log）"
 
 
@@ -156,26 +120,20 @@ def launch(home: pathlib.Path, python: str, popen=subprocess.Popen) -> bool:
     return _spawn(popen, [python, str(home / "main.py")], home, cwd=str(home))
 
 
-def open_panel(app, home: pathlib.Path, *, modules=None, ps=_ps, lsof=_lsof, popen=subprocess.Popen, activate=activate,
-               platform: str | None = None, me: int | None = None, parent=os.getppid) -> None:
-    """四種情況：在面板的程序裡（叫自己到最前面）；面板開的工作程序裡（面板已經在最前面，說一句）；
-    在面板外、面板開著（叫它到最前面）；在面板外、面板沒開（開一個）。"""
-    modules = sys.modules if modules is None else modules
+def open_panel(app, home: pathlib.Path, *, ps=_ps, lsof=_lsof, popen=subprocess.Popen, platform: str | None = None,
+               me: int | None = None) -> None:
+    """三種情況：面板開的（app.panel 有值）：面板就是開這個程序的那一個，本來就在最前面，說一句；
+    不是面板開的（python3 main.py --run）、面板開著：請作業系統的 os.activate 叫它到最前面；面板沒開：開一個。"""
     platform = platform or sys.platform
-    if in_panel(modules):
-        if platform == "darwin":
-            activate(None, platform)
+    if app.panel is not None:
         app.log("主控面板已經開著")
         return
     pid = find_panel(home, ps, lsof, me) if platform == "darwin" else None
-    if pid is not None and pid == parent():  # iPLoT 0.9 起每按一次另開程序（D161）：面板就是開這個程序的那一個，它本來就在最前面
-        app.log("主控面板已經開著")
-        return
     if pid is not None:
-        app.log("主控面板已經開著，叫到最前面了" if activate(pid, platform) else "主控面板已經開著，但沒辦法把它叫到最前面。到 Dock 點一下 Python 的圖示")
+        app.log("主控面板已經開著，叫到最前面了" if app.call("os.activate", pid) else "主控面板已經開著，但沒辦法把它叫到最前面。到 Dock 點一下 Python 的圖示")
         return
     try:
-        up = launch(home, sys.executable, popen)  # 在面板外：互通的 run.py 已經確認過這個 Python 跑得動面板（D86）
+        up = launch(home, sys.executable, popen)
     except OSError as exc:
         app.log(f"打不開主控面板：{REASONS.get(exc.errno, '系統不讓打開')}。確認 iPLoT 資料夾還在，再雙擊一次")  # 原因是中文（體驗 7-08）
         return

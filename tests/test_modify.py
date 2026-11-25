@@ -18,7 +18,7 @@ from core.text import T as CORE_T
 from core.types import DEFAULT_CONFIG
 
 ROOT = Path(__file__).resolve().parents[1]
-FAKE_OS = ('import shutil\nfrom pathlib import Path\n\n'
+FAKE_OS = ('PROVIDES = {"os.trash": "trash"}\nimport shutil\nfrom pathlib import Path\n\n'
            'def trash(app, path):\n'
            '    bin_ = Path(app.home) / "fake-trash"\n'
            '    bin_.mkdir(exist_ok=True)\n'
@@ -255,11 +255,12 @@ def test_remove_without_the_system_module_leaves_the_folder_and_says_so(home, vi
     core = started(home, view)
     assert remove(core, find(core, "A")) is False
     assert folder.is_dir() and view.logs[-1] == T["remove_failed"].format(title="A")
-    assert T["no_system"].format(module="作業系統", name="trash") in view.logs
+    assert T["no_system"].format(role="os.trash") in view.logs
 
 
 def test_remove_when_the_trash_fails_reports_it_and_leaves_the_folder(home, view):
-    make_module(home / "modules", "作業系統", 'def trash(app, path):\n    raise OSError("垃圾桶滿了")\n')
+    make_module(home / "modules", "作業系統",
+                'PROVIDES = {"os.trash": "trash"}\n\ndef trash(app, path):\n    raise OSError("垃圾桶滿了")\n')
     folder = make_module(home / "modules", "A")
     core = started(home, view)
     assert remove(core, find(core, "A")) is False

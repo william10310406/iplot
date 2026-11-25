@@ -1,4 +1,4 @@
-"""碰作業系統的事都在這個資料夾：打開檔案、編輯、在資料夾中顯示、開終端機、搬到垃圾桶。
+"""碰作業系統的事都在這個資料夾：打開檔案、編輯、在資料夾中顯示、開終端機、搬到垃圾桶、把視窗叫到最前面。
 核心一行作業系統的程式碼都沒有；要改這些行為，改這裡的 mac.py / win.py / linux.py。"""
 import sys
 from pathlib import Path
@@ -12,11 +12,12 @@ else:
 
 ICON = "🖥️"
 open, edit, reveal = backend.open, backend.edit, backend.reveal
-terminal, trash = backend.terminal, backend.trash
+terminal, trash, activate = backend.terminal, backend.trash, backend.activate
 requirements, webview_ready = backend.requirements, backend.webview_ready  # 第一次啟動的安裝會問這兩個
 # iPLoT 0.8 起核心照這張表找做這些事的模組（D159），不再靠「作業系統」這個名字；更舊的核心不看它
 PROVIDES = {"os.open": "open", "os.edit": "edit", "os.reveal": "reveal", "os.terminal": "terminal", "os.trash": "trash",
-            "os.requirements": "requirements", "os.webview_ready": "webview_ready"}
+            "os.requirements": "requirements", "os.webview_ready": "webview_ready",
+            "os.activate": "activate"}  # 1.0 起：把另一個程序的視窗叫到最前面（D164）
 
 
 def run(app):

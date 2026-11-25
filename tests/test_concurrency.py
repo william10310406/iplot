@@ -117,7 +117,7 @@ def test_app_calls_reach_the_panel_through_the_pipe(tmp_path):
     assert first.value is True  # app.run 在同一個工作程序裡跑 B，回 Result
     assert view.asks == ["名字？", "名字？"]
     assert "嗨" in view.logs
-    assert "小明 1 True E 6" in view.logs and "小明 2 True E 6" in view.logs  # memory 跨次保留
+    assert "小明 1 True E 7" in view.logs and "小明 2 True E 7" in view.logs  # memory 跨次保留
 
 
 def test_role_calls_from_the_panel_get_the_return_value(tmp_path):
@@ -136,4 +136,4 @@ def test_min_api_higher_than_ours_does_not_start_a_process(tmp_path):
 
     assert not result.ok
     assert result.error.kind == "NeedsNewerIPLoT"
-    assert "99" in result.error.message and "6" in result.error.message
+    assert "99" in result.error.message and "7" in result.error.message

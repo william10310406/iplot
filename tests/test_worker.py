@@ -56,7 +56,7 @@ def test_serve_runs_the_module_and_passes_app_calls_to_the_panel(tmp_path, monke
     (kind, result, blobs), info = run_in_process(tmp_path, monkeypatch, src, view, pickle.dumps({"n": 4}))
 
     assert kind == "done" and result.ok, result.error
-    assert result.value == ["小華", 5, True, 6]
+    assert result.value == ["小華", 5, True, 7]
     assert pickle.loads(blobs[info.folder]) == {"n": 5}
     assert view.asks == ["名字？"] and "嗨" in view.logs and "沒有這個" in view.logs
     assert any("沒有提供者" in line for line in view.logs)  # 沒有提供 app.page 的模組：說一句，不開視窗

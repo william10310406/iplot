@@ -37,7 +37,7 @@ class Panel:
 
     def __init__(self, version: str, safe: bool) -> None:
         self.root = _make_root(safe)
-        self.title = T["title"].format(version=version)
+        self.title, self.name = T["title"].format(version=version), "tkinter"  # name：app.panel（D164）
         self.root.title(self.title + (T["safe_mode"] if safe else ""))
         self.root.geometry("420x600")
         self.core: Core | None = None

@@ -19,6 +19,10 @@
   "why": "網頁面板搬進 modules/主控面板/ 變成提供 main 的模組：開機程式要在自己的程序裡叫它（call_here），面板不 import core 也要能把錯誤說成一句話（describe）",
   "replace_with": "1.0 核心搬進 modules/，core/ 的上限換成核心模組自己的上限", "remove_by": "1.0",
   "raises": {"core": 887}},
+ {"id": "D164", "where": ["core/app.py top_modules、parent_of、children_of、panel、describe（api_version 7）", "core/worker.py 交給工作程序的 panel"],
+  "why": "1.0 要模組不 import 核心、不猜自己在哪個面板（R2、R3 清到 0）：導覽列、行事曆、回報與討論、主控面板原本靠 core.scan、core.errors、sys.modules 拿到的，改由 app 給；同時拿掉照名字找「作業系統」的過渡（減 4 行）",
+  "replace_with": "1.0 核心搬進 modules/，core/ 的上限換成核心模組自己的上限", "remove_by": "1.0",
+  "raises": {"core": 894}},
  {"id": "D119", "where": ["core/create.py", "ui/tk.py", "ui/app.js"],
   "why": "修種子從零啟動的缺陷（父資料夾不存在時一併建立），不是為某個功能",
   "replace_with": "不需要回收；列在這裡是為了讓所有核心改動都在同一張表上", "remove_by": "不回收"}

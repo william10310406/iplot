@@ -69,3 +69,8 @@ def trash(app, path):
         f"DeletionDate={datetime.now():%Y-%m-%dT%H:%M:%S}\n", encoding="utf-8")
     shutil.move(str(source), str(files / name))
     return files / name
+
+
+def activate(app, pid):
+    """把 pid 那個程序的視窗叫到最前面：這個系統還不會，回 False，由呼叫的模組跟使用者說下一步。"""
+    return False

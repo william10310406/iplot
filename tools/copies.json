@@ -12,8 +12,7 @@
   "places": [
    "modules/主控面板/iplot.py:_errlog",
    "modules/互通/nav.py:_errlog",
-   "modules/互通/separate.py:_errlog",
-   "modules/行事曆/iplot.py:_errlog"
+   "modules/互通/separate.py:_errlog"
   ],
   "same": true,
   "why": "另開的程序的 stderr 接到 logs/separate.log；跟 _spawn、互通 separate.py 同一份，要一樣"
@@ -21,8 +20,7 @@
  {
   "places": [
    "modules/主控面板/iplot.py:_ps",
-   "modules/互通/separate.py:_ps",
-   "modules/行事曆/iplot.py:_ps"
+   "modules/互通/separate.py:_ps"
   ],
   "same": true,
   "why": "把視窗叫到最前面；0.9 換成作業系統的角色 os.activate 後刪掉抄本。互通 separate.py 的 activate 多了 ENV 的處理，已經分家，不在這組"
@@ -30,19 +28,10 @@
  {
   "places": [
    "modules/主控面板/iplot.py:_spawn",
-   "modules/互通/nav.py:_spawn",
-   "modules/行事曆/iplot.py:_spawn"
+   "modules/互通/nav.py:_spawn"
   ],
   "same": true,
   "why": "另開程序要確認起來了（D160 第 3 條）；三個模組各自要能獨立運作，所以抄（R9）。0.9 換成互通提供的角色 page.separate 後刪掉抄本"
- },
- {
-  "places": [
-   "modules/主控面板/iplot.py:activate",
-   "modules/行事曆/iplot.py:activate"
-  ],
-  "same": true,
-  "why": "把視窗叫到最前面；0.9 換成作業系統的角色 os.activate 後刪掉抄本。互通 separate.py 的 activate 多了 ENV 的處理，已經分家，不在這組"
  },
  {
   "places": [
@@ -292,5 +281,13 @@
   ],
   "same": true,
   "why": "自動問「要回報嗎？」的節流（D150）：網頁面板與後備的 tkinter 面板各一份，理由同上（D162）"
+ },
+ {
+  "places": [
+   "modules/主控面板/panel_web.py:is_module",
+   "modules/回報與討論/report.py:is_module"
+  ],
+  "same": true,
+  "why": "「是不是模組」跟核心 core/scan.py 的 is_module 一樣（符號連結不算、iPLoT.py 不算）；模組不 import 核心（R2），所以各抄一份"
  }
 ]

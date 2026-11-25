@@ -233,7 +233,7 @@ class WebPanel:
         self.menu_items: list[tuple[ModuleInfo, str, tuple]] = []  # 右鍵選單上模組提供的項目：（提供者, 函式名, (那一格,)）
         self._busy: list[str] = []  # 還在跑的模組（標題），按下的順序
         self._warned: set[Path] = set()
-        self.recent, self.offer = Recent(), Offer()  # 最近的訊息；自動問「要回報嗎？」的節流（D150）
+        self.recent, self.offer, self.name = Recent(), Offer(), "網頁"  # 最近的訊息；要回報嗎的節流（D150）；app.panel（D164）
 
     def attach(self, core: Core) -> None:
         """接上 Core；之後頁面的動作都交給它。"""

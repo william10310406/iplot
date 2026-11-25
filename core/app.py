@@ -16,9 +16,10 @@ class App:
     """模組拿到的 app。介面只加不減；要拿掉東西就升 api_version 並寫進 CHANGELOG
     （1 是第一版；2 拿掉了 window，見 D66；3 加了 config、version、page；4 加了 parent、children；
     5 加了 call、each、providers，以及「沒有的名字交給提供 app.<名字> 的模組」，見 D159；
-    6 每按一次另開一個程序跑，加了 start，模組可以寫 MIN_API，見 D161）。version 是核心的版本字串。"""
+    6 每按一次另開一個程序跑，加了 start，模組可以寫 MIN_API，見 D161；7 加了 top_modules、parent_of、children_of、panel、describe，
+    模組不用再 import 核心或猜自己在哪個面板，見 D164）。version 是核心的版本字串。"""
 
-    api_version: int = 6
+    api_version: int = 7
     version: str = __version__
 
     def __init__(self, core: Core, info: ModuleInfo) -> None:
@@ -62,12 +63,33 @@ class App:
     @property
     def parent(self) -> ModuleInfo | None:
         """這個模組的父層模組（資料夾上一層，不越過根目錄）；最上層的模組沒有，回 None。可以直接交給 app.run。"""
-        return scan.parent_of(self._info, self._core.roots())
+        return self.parent_of(self._info)
 
     @property
     def children(self) -> tuple[ModuleInfo, ...]:
         """這個模組的子模組，每次都重新看磁碟；跟面板進到下一層時看到的一樣。可以直接交給 app.run。"""
-        return tuple(scan.find_children(self._info.folder, self._info.root))
+        return self.children_of(self._info)
+
+    def top_modules(self) -> tuple[ModuleInfo, ...]:
+        """每個根目錄最上層的模組，每次都重新看磁碟；不管面板現在停在哪一層（app.modules 是面板現在那一層）。"""
+        return tuple(m for g in scan.find_modules(self._core.roots()) for m in g.modules)
+
+    def parent_of(self, info: ModuleInfo) -> ModuleInfo | None:
+        """任何一個模組的父層（跟 app.parent 一樣的規則）；例如導覽列替開頁面的模組畫「上一層」。"""
+        return scan.parent_of(info, self._core.roots())
+
+    def children_of(self, info: ModuleInfo) -> tuple[ModuleInfo, ...]:
+        """任何一個模組的子模組（跟 app.children 一樣的規則）。"""
+        return tuple(scan.find_children(info.folder, info.root))
+
+    @property
+    def panel(self) -> str | None:
+        """開這個模組的面板說它是哪一種（例如「網頁」「tkinter」）；不是從面板開的（python3 main.py --run）是 None。"""
+        return getattr(self._core.view, "name", None)  # 面板說自己是哪一種；工作程序裡是開它的那個面板的（D164）
+
+    def describe(self, error: Any) -> str:
+        """一筆錯誤（有 kind、message、file、line、source、module 的物件）的白話一句，跟面板訊息區說的一樣。"""
+        return self._core.describe(error)
 
     @property
     def config(self) -> Config:

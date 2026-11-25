@@ -169,15 +169,16 @@ def test_os_actions_go_to_the_provider_of_os_name(home, view):
     assert core.action("reveal", home / "x.txt") == "顯示 x.txt"
 
 
-def test_an_old_system_module_without_provides_still_works_by_name_for_now(home, view):
-    """0.8 過渡：使用者改過的舊版「作業系統」沒有 PROVIDES，照舊用名字找到它（0.9 拿掉）。"""
+def test_a_system_module_without_provides_is_not_found_by_name_any_more(home, view):
+    """1.0 起不照名字找「作業系統」（D164）：沒有 PROVIDES 的舊版不會被叫到，訊息區說沒有誰提供 os.reveal。"""
     make_module(home / "modules", "作業系統", 'def reveal(app, path):\n    return "舊的 " + path.name\n')
     core = started(home, view)
-    assert core.action("reveal", home / "x.txt") == "舊的 x.txt"
+    assert core.action("reveal", home / "x.txt") is None
+    assert view.logs[-1] == T["no_system"].format(role="os.reveal")
 
 
 def test_the_bundled_system_module_declares_every_action_the_core_and_app_use():
     meta = read_meta(Path(__file__).resolve().parents[1] / "modules" / "作業系統" / "iplot.py")
     assert {r for r, _ in meta.provides} == {f"os.{n}" for n in ("open", "edit", "reveal", "terminal", "trash",
-                                                                  "requirements", "webview_ready")}
+                                                                  "requirements", "webview_ready", "activate")}
     assert all(r == "os." + f for r, f in meta.provides)

@@ -25,7 +25,7 @@ def setup(tmp_path):
 
 # ── 用它的模組：在面板裡按下時不開頁面、交給另一個程序 ──
 
-PAGE_MODULES = {"工作坊": "run", "回報與討論": "run", "互通": "run"}
+PAGE_MODULES = {"工作坊": "run", "互通": "run"}  # 回報與討論 0.4.0 起不另開：1.0 每按一次本來就在自己的程序裡（D164）
 
 
 @pytest.mark.parametrize("name", PAGE_MODULES)
@@ -37,6 +37,12 @@ def test_page_modules_ask_separate_before_their_page(name):
     asked = [c.lineno for c in calls if ast.unparse(c.func) in ("_separate", "separate.here")]
     pages = [c.lineno for c in calls if ast.unparse(c.func) == "app.page"]
     assert asked and pages and min(asked) < min(pages)
+
+
+def test_report_no_longer_hands_its_page_to_interop():
+    """回報與討論 0.4.0（D164）：不經互通另開，所以互通壞掉時照樣打得開（0.8 驗收看到的問題）。"""
+    source = (ROOT / "modules" / "回報與討論" / "iplot.py").read_text(encoding="utf-8")
+    assert "_separate" not in source and "互通" not in source
 
 
 def test_report_on_error_stays_in_the_panel():
