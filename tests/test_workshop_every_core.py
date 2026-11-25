@@ -151,8 +151,10 @@ BROKEN_RUN = "import sys\nsys.exit('互通壞了：一啟動就結束，什麼�
 
 
 def old_interop(modules: Path) -> None:
-    """v0.8.0 的 modules/互通（還有 separate.py 的 0.x）放進 modules/。"""
-    archive = subprocess.run(["git", "archive", "v0.8.0", "modules/互通"], cwd=ROOT, capture_output=True, check=True)
+    """互通還有 separate.py 的最後一份（刪掉它的那個 commit 的上一個，D165）放進 modules/。"""
+    rev = subprocess.run(["git", "rev-list", "-1", "HEAD", "--", "modules/互通/separate.py"], cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    archive = subprocess.run(["git", "archive", f"{rev}^", "modules/互通"], cwd=ROOT, capture_output=True, check=True)
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
         tar.extractall(modules.parent.parent / "_old")
     shutil.copytree(modules.parent.parent / "_old" / "modules" / "互通", modules / "互通")

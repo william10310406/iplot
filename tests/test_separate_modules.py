@@ -12,7 +12,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = {"ui.web": types.ModuleType("ui.web")}
-LAST_0X = "v0.8.0"  # 互通還有 separate.py 的最後一版 iPLoT
+
+
+def last_0x() -> str | None:
+    """互通還有 separate.py 的最後一個 commit：刪掉它的那個 commit 的上一個（D165）。淺 clone 拿不到就是 None。"""
+    got = subprocess.run(["git", "rev-list", "-1", "HEAD", "--", "modules/互通/separate.py"], cwd=ROOT,
+                         capture_output=True, text=True)
+    return f"{got.stdout.strip()}^" if got.returncode == 0 and got.stdout.strip() else None
 
 
 class Info:
@@ -21,10 +27,11 @@ class Info:
 
 
 def old_separate() -> bytes:
-    """互通 0.x 的 separate.py（從 git 的 tag 拿；淺 clone 拿不到就跳過，CI 有 fetch-depth: 0）。"""
-    got = subprocess.run(["git", "show", f"{LAST_0X}:modules/互通/separate.py"], cwd=ROOT, capture_output=True)
-    if got.returncode != 0:
-        pytest.skip(f"沒有 {LAST_0X} 這個 tag")
+    """互通 0.x 的 separate.py（從 git 的歷史拿；淺 clone 拿不到就跳過，CI 有 fetch-depth: 0）。"""
+    rev = last_0x()
+    got = subprocess.run(["git", "show", f"{rev}:modules/互通/separate.py"], cwd=ROOT, capture_output=True)
+    if rev is None or got.returncode != 0:
+        pytest.skip("拿不到互通 0.x 的 separate.py（淺 clone）")
     return got.stdout
 
 
