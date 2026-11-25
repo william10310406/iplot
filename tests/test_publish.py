@@ -128,6 +128,25 @@ def test_main_end_to_end(publish, repo, capsys):
     assert "update.json" in capsys.readouterr().out
 
 
+def test_a_1_0_package_carries_the_kernel_seeds_at_the_top(publish, repo):
+    """D167：核心在 modules/核心/；包的最上層再放一份 core/、ui/（0.8 的「更新」換的就是這兩個，核心壞掉時開機程式也用它）。"""
+    kernel = repo / "modules" / "核心"
+    kernel.mkdir()
+    git(repo, "mv", "core", "modules/核心/core")
+    (kernel / "ui").mkdir()
+    (kernel / "ui" / "start.py").write_text("def ready():\n    pass\n", encoding="utf-8")
+    (kernel / "core" / "__init__.py").write_text('__version__ = "10.0.0"\n', encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "1.0")
+    assert publish.main(["--version", "10.0.0", "--base-url", "https://example.invalid/", "--ref", "HEAD"], root=repo) == 0
+    with zipfile.ZipFile(repo / "交付" / "發佈" / "iPLoT-v10.0.0.zip") as z:
+        names = set(z.namelist())
+        assert {"iPLoT-v10.0.0/core/__init__.py", "iPLoT-v10.0.0/ui/start.py",
+                "iPLoT-v10.0.0/modules/核心/core/__init__.py", "iPLoT-v10.0.0/modules/核心/ui/start.py"} <= names
+        assert z.read("iPLoT-v10.0.0/core/__init__.py") == z.read("iPLoT-v10.0.0/modules/核心/core/__init__.py")
+    assert publish.add_seeds(repo / "交付" / "發佈" / "iPLoT-v10.0.0.zip", "iPLoT-v10.0.0/") == []  # 已經有種子：不重複放
+
+
 def test_main_file_base_url_is_kept_openable(publish, repo):
     """驗收用 file:// 網址：產生的 zip_url 用 urllib 真的打得開。"""
     import urllib.request
@@ -511,10 +530,9 @@ EXPORT_IGNORE = ["tests/", "docs/plans/", "docs/original/", "docs/00_*", "docs/0
 def test_gitattributes_lists_exactly_the_design_paths():
     """設計第 9.1 節：核心的包不帶的東西，一樣不多、一樣不少。"""
     lines = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
-    rules = [x for x in lines if x.strip() and not x.startswith("#")]
-    assert [x for x in rules if x.endswith(" export-ignore")] == [f"{p} export-ignore" for p in EXPORT_IGNORE]
-    # 其他的只有行尾規則：iPLoT.bat 在哪個系統 checkout 都是 CRLF
-    assert [x for x in rules if not x.endswith(" export-ignore")] == ["*.bat text eol=crlf"]
+    assert [x for x in lines if x.strip() and not x.startswith("#") and "export-ignore" in x] == [f"{p} export-ignore" for p in EXPORT_IGNORE]
+    # iPLoT.bat 在哪個系統 checkout 都是 CRLF
+    assert "*.bat text eol=crlf" in lines
 
 
 def test_real_gitattributes_keeps_the_ignored_paths_out_of_the_core_zip(publish, repo):

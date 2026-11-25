@@ -1,20 +1,25 @@
-"""ui/web.py：WebPanel 把 show／log／report／ask 翻成對頁面的呼叫，Bridge 把頁面的動作排進單一工作執行緒。
+"""modules/主控面板/panel_web.py：WebPanel 把 show／log／report／ask 翻成對頁面的呼叫，Bridge 把頁面的動作排進單一工作執行緒。
 全部用假的 webview（conftest.FakeWebview），不開視窗、不需要顯示器。"""
 
 import base64
 import dataclasses
+import os
 import shutil
+import sys
 import threading
 import time
 from pathlib import Path
 
 import pytest
-from conftest import FakeWebview, make_module, until
+from conftest import PANEL_DIR, FakeWebview, make_module, until
+from panel_text import T as PANEL_T
+from panel_web import Bridge, WebPanel, error_json, icon_for, scope_json
 
 from core.core import Core
-from core.text import T
-from core.types import DEFAULT_CONFIG, ErrorInfo
-from ui.web import Bridge, WebPanel, error_json, icon_for, scope_json
+from core.text import T as CORE_T
+from core.types import DEFAULT_CONFIG, ErrorInfo, Result
+
+T = {**CORE_T, **PANEL_T}  # 面板的字在「主控面板」裡（D162），核心說的話在核心
 
 SLOW = ("import time\ndef run(app):\n    app.log(f'start {time.monotonic()}')\n    time.sleep(0.2)\n"
         "    app.log(f'end {time.monotonic()}')\n")
@@ -56,7 +61,7 @@ def in_thread(fn):
 
 def test_window_is_created_from_a_file_url(panel, window, home):
     """給 file:// 網址，pywebview 才不會自己起一個 HTTP server（規格：沒有 server、沒有 port）。"""
-    assert window.kw["url"] == (home / "ui" / "index.html").as_uri() and window.kw["url"].startswith("file://")
+    assert window.kw["url"] == (PANEL_DIR / "index.html").as_uri() and window.kw["url"].startswith("file://")
     assert (window.kw["width"], window.kw["height"], window.kw["min_size"]) == (820, 620, (480, 420))
     assert window.title == "iPLoT v0.4.0" and isinstance(window.kw["js_api"], Bridge)
 
@@ -73,7 +78,7 @@ def test_safe_mode_is_in_the_title(home):
 def test_init_sends_text_then_rescans(panel, window):
     assert window.js[0].startswith("iplot.init(")
     [[init]] = window.calls("init")
-    assert init == {"text": T, "version": "0.4.0", "safe": False}
+    assert init == {"text": PANEL_T, "version": "0.4.0", "safe": False}
     assert len(window.calls("show")) == 1 and window.js.index(next(j for j in window.js if "iplot.show(" in j)) > 0
 
 
@@ -525,17 +530,19 @@ def test_report_has_sentence_and_open_error_edits_at_the_line(panel, bridge, win
 
 def test_error_json_without_file(home):
     error = ErrorInfo("TypeError", "m", None, None, "", "config", None)
-    assert error_json(error) == {"kind": "TypeError", "message": "m", "file": None, "line": None, "traceback": "",
+    assert error_json(error, Core.describe(error)) == {"kind": "TypeError", "message": "m", "file": None, "line": None, "traceback": "",
                                  "source": "config", "module": None,
                                  "sentence": T["config_error"].format(message="m")}
 
 
-REPORTER_SRC = "def on_error(app, error):\n    app.log('got ' + error.kind)\n"
+REPORTER_SRC = ('PROVIDES = {"panel.error": "got"}\n'
+                'def got(app, error, recent, pressed):\n    app.log(f"got {error.kind} {pressed}")\n    return False\n')
 NAME_ERROR = ErrorInfo("NameError", "x", None, None, "", "module", "A")
 
 
-def test_reportable_follows_the_report_module(panel, home, window):
-    """D110：modules/回報與討論 是模組時，錯誤那一列才有「回報這個問題」；每一筆在回報的當下各算各的。"""
+def test_reportable_follows_the_panel_error_provider(panel, home, window):
+    """D110、D162：有模組提供 panel.error 時，錯誤那一列才有「回報這個問題」；每一筆在回報的當下各算各的。
+    面板不知道是哪個模組，只問角色。"""
     panel.report(NAME_ERROR)
     first = window.calls("report")[-1][0]
     assert first["reportable"] is False
@@ -545,62 +552,94 @@ def test_reportable_follows_the_report_module(panel, home, window):
     assert window.calls("report")[0][0] == first
 
 
-def test_report_error_hands_the_same_error_to_on_error(panel, home, bridge, monkeypatch):
-    """「回報這個問題」把面板上那一筆 ErrorInfo 原封不動交給「回報與討論」的 on_error，而且 quiet（設計第 17 節第 6 條）。
-    兩筆錯誤、先按第二筆：驗完編號卻拿錯一筆的話抓得到。"""
+def test_the_providers_own_errors_are_not_handed_back_to_it(panel, home, window):
+    """提供 panel.error 的模組自己出錯，不交給它（不然它壞了會一直轉）。"""
+    make_module(home / "modules", "回報與討論", REPORTER_SRC)
+    panel.report(ErrorInfo("NameError", "x", None, None, "", "module", "回報與討論"))
+    assert window.calls("report")[-1][0]["reportable"] is False
+
+
+def test_report_error_hands_the_same_error_and_recent_lines_over_pressed(panel, home, bridge, monkeypatch):
+    """「回報這個問題」把面板上那一筆 ErrorInfo 與那時候最近的訊息原封不動交給提供者，pressed 是 True、quiet。
+    兩筆錯誤、先按第二筆：驗完編號卻拿錯一筆的話抓得到。自動交過去看一眼的那兩次 pressed 是 False。"""
     make_module(home / "modules", "回報與討論", REPORTER_SRC)
     seen = []
     monkeypatch.setattr(panel.core, "press", lambda info, handler="run", args=(), quiet=False:
-                        seen.append((info, handler, args, quiet)))
+                        seen.append((info, handler, args, quiet)) or Result(True, None, 0.0, ""))
     panel.report(NAME_ERROR)
     panel.report(ErrorInfo("ZeroDivisionError", "division by zero", None, None, "", "module", "B"))
+    panel.wait()
+    until(lambda: len(seen) == 2)
+    assert [a[2] for _, _, a, _ in seen] == [False, False]
+    seen.clear()
     bridge.report_error(1)
     bridge.report_error(0)
     panel.wait()
-    assert len(seen) == 2 and panel.errors[0] is not panel.errors[1]
+    until(lambda: len(seen) == 2)
     for (info, handler, args, quiet), want in zip(seen, (panel.errors[1], panel.errors[0]), strict=True):
         assert info.folder == home / "modules" / "回報與討論"
-        assert (handler, quiet) == ("on_error", True)
-        assert len(args) == 1 and args[0] is want
+        assert (handler, quiet) == ("got", True)
+        assert args == (want[0], want[1], True)
 
 
-def test_report_error_runs_on_error_quietly_with_busy(panel, home, bridge, window):
-    """真的跑一次：on_error 的輸出進訊息區、沒有「完成」那一行；執行中照樣告訴頁面（經過 WebPanel.press）。"""
+def test_report_error_runs_the_provider_quietly_with_busy(panel, home, bridge, window):
+    """真的跑一次：提供者的輸出進訊息區、沒有「完成」那一行；按了的那次照樣告訴頁面還在跑（經過 WebPanel.press）。"""
     make_module(home / "modules", "回報與討論", REPORTER_SRC)
     panel.report(NAME_ERROR)
+    panel.wait()
+    until(lambda: "got NameError False" in [c[0] for c in window.calls("log")])
     bridge.report_error(0)
     panel.wait()
+    until(lambda: "got NameError True" in [c[0] for c in window.calls("log")])
     logs = [c[0] for c in window.calls("log")]
     done = T["done"].split("{seconds")[0].format(title="回報與討論")
-    assert "got NameError" in logs and not any(line.startswith(done) for line in logs)
-    assert window.calls("busy") == [["回報與討論"], [None]]
+    assert not any(line.startswith(done) for line in logs)
+    until(lambda: window.calls("busy") == [["回報與討論"], [None]])
+
+
+def test_a_provider_that_says_worth_reporting_gets_offered_once(panel, home, window):
+    """沒按鈕時提供者回 True（值得回報）：面板問「出錯了，要回報嗎？」（D150）；同一種錯誤之後不再問。"""
+    make_module(home / "modules", "回報與討論", REPORTER_SRC.replace("return False", "return not pressed"))
+    panel.offer.muted = False
+    panel.report(NAME_ERROR)
+    panel.wait()
+    until(lambda: window.calls("offer"))
+    [[ask_id, prompt]] = window.calls("offer")
+    assert prompt == T["offer_report"].format(sentence=Core.describe(NAME_ERROR))
+    panel.answer(ask_id, {"report": True, "mute": False})
+    until(lambda: "got NameError True" in [c[0] for c in window.calls("log")])
+    panel.report(NAME_ERROR)
+    panel.wait()
+    until(lambda: [c[0] for c in window.calls("log")].count("got NameError False") == 2)
+    assert len(window.calls("offer")) == 1
 
 
 @pytest.mark.parametrize("bad", [999, -1, "0", None, 1.5])
 def test_report_error_ignores_bad_ids(panel, home, bridge, window, monkeypatch, bad):
     """頁面傳來的編號只認回報過的那幾筆（照 open_error）：其餘什麼都不做，也不重掃。"""
     make_module(home / "modules", "回報與討論", REPORTER_SRC)
-    seen = []
-    monkeypatch.setattr(panel.core, "press", lambda *a: seen.append(a))
     panel.report(NAME_ERROR)
+    panel.wait()
+    until(lambda: "got NameError False" in [c[0] for c in window.calls("log")])
+    seen = []
+    monkeypatch.setattr(panel.core, "press", lambda *a, **k: seen.append(a))
     shows = len(window.calls("show"))
     bridge.report_error(bad)
     panel.wait()
     assert seen == [] and len(window.calls("show")) == shows
 
 
-def test_report_error_without_the_module_rescans(panel, bridge, window):
-    """「回報與討論」不在（回報之後被刪掉，或從來沒有）：按了就重掃，不報錯、不記任何一行。"""
+def test_report_error_without_a_provider_does_nothing(panel, bridge, window):
+    """沒有提供 panel.error 的模組（回報之後被刪掉，或從來沒有）：按了什麼都不做，不報錯、不記任何一行。"""
     panel.report(NAME_ERROR)
-    shows, logs = len(window.calls("show")), len(window.calls("log"))
+    logs = len(window.calls("log"))
     bridge.report_error(0)
     panel.wait()
-    assert len(window.calls("show")) == shows + 1
     assert len(window.calls("log")) == logs and len(window.calls("report")) == 1
 
 
 def test_report_error_works_from_a_child_level(panel, home, bridge, window):
-    """面板停在下一層時 modules/回報與討論 不在畫面上：照樣找得到（用路徑找，不用 WebPanel.find；設計第 17 節第 5 條）。"""
+    """面板停在下一層時提供者不在畫面上：照樣找得到（角色看最上層，不看面板停在哪裡）。"""
     a = make_module(home / "modules", "A").resolve()
     make_module(a, "B")
     make_module(home / "modules", "回報與討論", REPORTER_SRC)
@@ -611,7 +650,7 @@ def test_report_error_works_from_a_child_level(panel, home, bridge, window):
     panel.report(NAME_ERROR)
     bridge.report_error(0)
     panel.wait()
-    assert "got NameError" in [c[0] for c in window.calls("log")]
+    until(lambda: "got NameError True" in [c[0] for c in window.calls("log")])
 
 
 # 選檔案、選資料夾（D67）
@@ -644,6 +683,16 @@ def test_jobs_queued_behind_a_dialog_do_not_run_after_the_window_closes(panel, b
     assert not (b / "ran.txt").exists()
 
 
+def test_a_module_with_its_page_open_is_not_shown_as_running(panel, window):
+    """1.0 清單小問題 7（D166）：頁面開著的期間狀態列不說「執行中」；頁面關了、模組還在跑，就再說。"""
+    panel._busy.extend(["甲", "乙"])
+    window.js.clear()
+    panel.paging("乙", True)
+    panel.paging("甲", True)
+    panel.paging("乙", False)
+    assert window.calls("busy") == [["甲"], [None], ["乙"]]
+
+
 def test_press_tells_the_page_while_a_module_is_running(panel, bridge, window, home):
     """模組的輸出要等它結束才進訊息區：執行期間頁面要看得出「還在跑」，不然使用者會以為沒按到、再按一次。"""
     a = str(make_module(home / "modules", "A", 'TITLE = "甲"\ndef run(app):\n    app.log("mid")\n    1 / 0\n').resolve())
@@ -665,16 +714,58 @@ def test_empty_icon_file_falls_back(home):
     assert logs == [T["icon_unusable"].format(title="A")]
 
 
-# M3：app.page
+def test_the_panel_modules_start_opens_the_panel_with_the_note_and_config_error(home, monkeypatch):
+    """「主控面板」的 start（角色 main，D162）：開面板、先寫 note、再報 config.py 的錯；repo 裡那一份，覆蓋率量得到。"""
+    import importlib.util
+    import types
+    fake = FakeWebview()
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    spec = importlib.util.spec_from_file_location("iplot_panel_start", PANEL_DIR / "iplot.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    core = Core(home, DEFAULT_CONFIG, None)
+    err = ErrorInfo("SyntaxError", "invalid syntax", home / "config.py", 1, "", "config", "")
+    module.start(types.SimpleNamespace(home=home, version="0.9.0"), core, "先說一句", err)
+    [window] = fake.windows
+    until(lambda: window.calls("log") and window.calls("report"))
+    assert core.view is not None and window.calls("log")[0][0] == "先說一句"
+    assert window.calls("report")[0][0]["source"] == "config"
 
-def test_page_blocks_until_closed(panel):
-    """app.page 開第二個視窗顯示一頁 HTML，視窗關掉才回來（像對話框）；api 的方法給那一頁的 JS 呼叫。"""
-    api = object()
-    t, box = in_thread(lambda: panel.page("工作坊", "<p>hi</p>", api))
-    until(lambda: len(panel.webview.windows) == 2)
-    page = panel.webview.windows[1]
-    assert (page.title, page.kw["html"], page.kw["js_api"]) == ("工作坊", "<p>hi</p>", api)
-    assert "url" not in page.kw and t.is_alive()
-    page.fire("closed")
-    t.join(3)
-    assert box == [None] and not t.is_alive()
+
+def test_the_panel_modules_start_turns_a_webview_that_cannot_start_into_import_error(home, monkeypatch):
+    import importlib.util
+    import types
+
+    class Broken(FakeWebview):
+        def start(self):
+            raise self.WebViewException("You must have either PyObjC or Qt installed")
+
+    monkeypatch.setitem(sys.modules, "webview", Broken())
+    spec = importlib.util.spec_from_file_location("iplot_panel_start", PANEL_DIR / "iplot.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with pytest.raises(ImportError, match="PyObjC"):
+        module.start(types.SimpleNamespace(home=home, version="0.9.0"), Core(home, DEFAULT_CONFIG, None), None, None)
+
+
+def test_restart_closes_the_window_and_start_reexecs_with_the_same_arguments(home, monkeypatch):
+    """app.restart（D166）：模組在工作程序裡（D161），面板關掉視窗、事件迴圈結束後 start 重新啟動整個 iPLoT。"""
+    import importlib.util
+    import types
+
+    class Restarting(FakeWebview):
+        def start(self):
+            super().start()
+            core.view.restart()
+
+    monkeypatch.setitem(sys.modules, "webview", Restarting())
+    monkeypatch.setattr(sys, "argv", ["main.py", "--某個參數"])
+    spec = importlib.util.spec_from_file_location("iplot_panel_restart", PANEL_DIR / "iplot.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    core, seen = Core(home, DEFAULT_CONFIG, None), []
+    monkeypatch.chdir(home.parent)
+    module.start(types.SimpleNamespace(home=home, version="1.0.0"), core, None, None,
+                 execv=lambda exe, argv: seen.append((os.getcwd(), argv)))
+    assert core.view.restarting and core.view.window.destroyed
+    assert seen == [(str(home), [sys.executable, str(home / "main.py"), "--某個參數"])]

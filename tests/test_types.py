@@ -37,14 +37,20 @@ def test_module_info_icon_defaults():
 
 def test_panel_text_keys():
     """規格 §7：新面板的文字都在 T，值是中文。"""
+    import runpy
+    from pathlib import Path
+
+    panel = runpy.run_path(str(Path(__file__).resolve().parents[1] / "modules" / "主控面板" / "panel_text.py"))["T"]
     for k in ["menu_run", "menu_enter", "add_tile", "status_hint", "details", "hide_details", "ok", "cancel",
-              "scanned", "icon_unusable", "installing", "install_done", "install_failed", "no_tk", "web_failed",
-              "running", "tk_in_web", "confirm_foreign", "cancelled", "page_unsupported", "refreshing", "refresh_failed"]:
+              "scanned", "icon_unusable", "running"]:
+        assert panel.get(k), k  # 網頁面板的字在「主控面板」裡（D162）
+    for k in ["installing", "install_done", "install_failed", "no_tk", "web_failed", "no_panel", "panel_broken",
+              "confirm_foreign", "cancelled", "page_unsupported", "refreshing", "refresh_failed"]:
         assert T.get(k), k
-    assert "{roots}" in T["scanned"] and "{count}" in T["scanned"] and "{title}" in T["icon_unusable"]
+    assert "{roots}" in panel["scanned"] and "{count}" in panel["scanned"] and "{title}" in panel["icon_unusable"]
     assert "{size}" in T["installing"] and "{message}" in T["install_failed"] and "{message}" in T["web_failed"]
     assert "網路" in T["installing"] and "網路" in T["install_failed"], "裝不起來多半是沒網路：兩句都要講"
-    assert "{title}" in T["running"] and "--safe" in T["tk_in_web"]
+    assert "{title}" in panel["running"] and "{message}" in T["panel_broken"]
     assert "{title}" in T["confirm_foreign"] and "{title}" in T["cancelled"]
     for key in ("web_failed", "install_failed"):
         assert "安全模式" not in T[key], f"{key}：後備面板不是安全模式（它掃完整範圍），這句話後面開的就是後備面板"

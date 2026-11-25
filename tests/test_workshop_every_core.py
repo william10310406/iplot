@@ -8,12 +8,14 @@ CI 要拿得到 tag：.github/workflows/ci.yml 的 checkout 設了 fetch-depth: 
 拿不到就直接失敗，免得這條保證悄悄沒在跑。"""
 
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -99,7 +101,9 @@ def newer_workshop():
 def setup(tmp_path, tag, with_new_workshop, author="william10310406"):
     home = tmp_path / "iPLoT"
     home.mkdir()
-    archive = subprocess.run(["git", "archive", tag, "core"], cwd=ROOT, capture_output=True, check=True).stdout
+    moved = subprocess.run(["git", "cat-file", "-e", f"{tag}:modules/核心/core"], cwd=ROOT, capture_output=True).returncode == 0
+    tree = f"{tag}:modules/核心" if moved else tag  # 1.0 起核心在 modules/核心/（D167）
+    archive = subprocess.run(["git", "archive", tree, "core"], cwd=ROOT, capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-C", str(home)], input=archive, check=True)
     shutil.copytree(WORKSHOP, home / "modules" / "工作坊", ignore=shutil.ignore_patterns("__pycache__", ".history"))
     src = tmp_path / "site"
@@ -139,13 +143,23 @@ def test_the_workshop_updates_itself_first_on_every_core(tmp_path, tag):
     seen = press(home, url)
     folder = home / "modules" / "工作坊"
     assert seen["reports"] == [] and seen["pages"] == ["工作坊"], seen  # 清單只開一次，而且是新版開的
-    assert any("工作坊已自動更新：1.1.0 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
+    assert any("工作坊已自動更新：1.2.1 → 9.9.9" in line for line in seen["logs"]), seen["logs"]
     assert b"NEW_VERSION_MARK" in (folder / "iplot.py").read_bytes()
     assert not (folder / ".unconfirmed").exists() and not (folder / ".origin").exists()
     assert list((folder / ".history").glob("*-folder.zip"))
 
 
 BROKEN_RUN = "import sys\nsys.exit('互通壞了：一啟動就結束，什麼都沒開')\n"
+
+
+def old_interop(modules: Path) -> None:
+    """互通還有 separate.py 的最後一份（刪掉它的那個 commit 的上一個，D165）放進 modules/。"""
+    rev = subprocess.run(["git", "rev-list", "-1", "HEAD", "--", "modules/互通/separate.py"], cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    archive = subprocess.run(["git", "archive", f"{rev}^", "modules/互通"], cwd=ROOT, capture_output=True, check=True)
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+        tar.extractall(modules.parent.parent / "_old")
+    shutil.copytree(modules.parent.parent / "_old" / "modules" / "互通", modules / "互通")
 
 
 @needs_tags
@@ -156,7 +170,7 @@ def test_in_the_web_panel_the_workshop_still_opens_when_interop_does_not(tmp_pat
     或互通根本不在，工作坊都要自己開。最舊的核心、最新的 tag、現在這一版各跑一次。"""
     home, url = setup(tmp_path, tag, with_new_workshop=False)
     if interop == "broken":
-        shutil.copytree(ROOT / "modules" / "互通", home / "modules" / "互通", ignore=shutil.ignore_patterns("__pycache__"))
+        old_interop(home / "modules")  # 會交給它另開的是 0.x 的互通（1.0 沒有 separate.py，D165）
         (home / "modules" / "互通" / "run.py").write_text(BROKEN_RUN, encoding="utf-8")
     seen = press(home, url, "web", env_extra={"IPLOT_SEPARATE_WAIT": "1"})
     assert seen["pages"] == ["工作坊"] and seen["reports"] == [], seen

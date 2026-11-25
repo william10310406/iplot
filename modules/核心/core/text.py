@@ -17,6 +17,11 @@ T: dict[str, str] = {
     "config_error": "config.py 壞了，已用預設值啟動：{message}",
     "missing_handler": "iplot.py 沒有定義 {handler}(app)",
     "module_exit": "模組以 exit({code}) 結束",
+    "worker_died": "模組的程序意外結束（代碼 {code}）。細節在 logs/worker.log；再按一次試試，還是這樣請按「回報這個問題」",
+    "worker_failed": "開不了跑模組的程序：{message}。請重新啟動 iPLoT 再試",
+    "not_passable": "{title} 的回傳值傳不回 iPLoT（{kind} 不能在程序之間傳）。請改成回傳文字、數字、清單或字典",
+    "needs_api": "「{title}」要 iPLoT 的指令集第 {need} 版，這個 iPLoT 是第 {have} 版。請按「更新」換成新版的 iPLoT",
+    "no_page": "這裡開不了頁面（沒有提供頁面的模組）：{title}",
     "input_cancelled": "在提問時按了取消",
     "module_cancelled": "模組『{module}』已取消",
     "not_found": "找不到模組『{name}』",
@@ -27,6 +32,7 @@ T: dict[str, str] = {
     "already_exists": "『{name}』已經是模組了",
     "ask_name": "新模組的名稱",
     "bundled_updated": "隨附模組已換成這一版的：{names}。換下來的舊檔案備份在 {backup}",
+    "bundled_retired": "這一版不再隨附「{names}」，你沒改過它，已經移到 {backup}。想留著就把它搬回 modules/",
     "bundled_modified": "隨附模組『{name}』的程式你改過，這次沒有換，你的版本照舊留著。新版在 {package} 裡的 modules/{name}/：想用新版，把它複製過去（你改過的先自己留一份）",
     "bundled_failed": "隨附模組『{name}』沒換成新版：{message}。已經放回原來的檔案，下次啟動會再試一次",
     "open_file": "打開檔案",
@@ -34,22 +40,11 @@ T: dict[str, str] = {
     "menu_reveal": "在資料夾中顯示",
     "menu_terminal": "在終端機打開",
     "menu_add_child": "在這裡新增下一層模組…",
-    "menu_run": "執行",
-    "menu_enter": "進入下一層",
-    "add_tile": "新模組",
-    "status_hint": "單擊選一個模組看它的說明；雙擊執行。",
-    "details": "詳細",
-    "hide_details": "收起",
     "report_issue": "回報這個問題",
     "offer_report": "出錯了，要回報嗎？\n{sentence}\n\n回報之前會先給你看要送出的內容，可以改。",
     "offer_mute": "這次執行期間不要再問",
     "offer_yes": "回報",
     "offer_no": "不用",
-    "ok": "確定",
-    "cancel": "取消",
-    "scanned": "已掃描 {roots}，找到 {count} 個模組",
-    "list_sep": "、",
-    "icon_unusable": "『{title}』的圖示檔讀不到或超過 1 MB，先用預設圖示",
     "installing": "第一次啟動：正在安裝介面（需要網路，約 {size}）…",
     "install_done": "安裝完成，重新啟動中…",
     "install_failed": "介面安裝失敗：{message}\n安裝需要網路。再試一次：重新啟動 iPLoT。現在先改用備用面板",
@@ -60,11 +55,7 @@ T: dict[str, str] = {
     "refresh_failed": "介面的套件這次沒有換成新的：{message}\n先用現有的開；有網路之後重新啟動 iPLoT 會再試一次。",
     "confirm_foreign": "『{title}』是從外面裝進來的，第一次執行前確認：它是會在這台電腦上執行的程式，能讀寫你的檔案。要執行嗎？",
     "cancelled": "已取消執行『{title}』",
-    "nav_gone": "找不到模組『{title}』，可能已經被移除了",
     "page_unsupported": "這個面板沒有頁面（安全模式與備用面板都是）；這個功能要在一般的網頁面板裡用",
-    "running": "執行中：{title}…",
-    "tk_in_web": "這個面板裡的模組不能開 tkinter 的視窗（turtle、tkinter 的對話框都算）。"
-                 "要用的話，請用安全模式開 iPLoT：python3 main.py --safe",
     "title": "iPLoT v{version}",
     "safe_mode": "（安全模式）",
     "syntax_error": "第 {line} 行：{message}",
@@ -72,7 +63,15 @@ T: dict[str, str] = {
     "snapshot_failed": "無法存上一版：{message}。這次照常執行，只是沒有留下可以復原的上一版",
     "config_type": "{name} 的型別不對，應該是 {expected}",
     "bad_root": "ROOTS 裡的 {entry} 不是合法路徑（~ 後面要接 /）",
-    "need_python": "iPLoT 需要 Python 3.10 以上（目前是 {found}）。請安裝 python.org 的版本。",
+    "no_panel": "找不到提供面板的模組，先用備用面板。隨附的面板模組可能被刪了：重新下載 iPLoT 就會回來。",
+    "panel_broken": "面板模組出錯了（{message}），先用備用面板。細節在 logs/iplot.log。",
+    "cli_usage": "用法：python3 main.py --run <模組資料夾、iplot.py 或名字> [檔案…]",
+    "cli_not_module": "不是模組：{path}（資料夾裡沒有 iplot.py）",
+    "cli_gone": "找不到這個模組：{path}。它可能被改名或刪掉了。",
+    "cli_yes_no": "（y／n）",
+    "cli_files": "要交給它的檔案（路徑，用空白隔開；直接按 Enter 是不選）",
+    "cli_folder": "要交給它的資料夾（路徑；直接按 Enter 是不選）",
+    "cli_window_failed": "在面板外跑的視窗開不起來（{message}），改在終端機跑。細節在 logs/iplot.log。",
     "start_failed": "iPLoT 沒辦法啟動。技術細節記在 iPLoT 資料夾裡的 logs/iplot.log。可以試試：關掉這個視窗再開一次；"
                     "還是不行，就用安全模式開（在終端機進到 iPLoT 資料夾，打 python3 main.py --safe），"
                     "或把 logs/iplot.log 拿給幫你的人看。",
@@ -84,20 +83,11 @@ T: dict[str, str] = {
     "os_ENAMETOOLONG": "名稱太長",
     "os_ENOENT": "找不到檔案或資料夾",
     "os_other": "系統拒絕了這個動作，可以再試一次；還是不行就看 logs/iplot.log",
-    "allow_roles": "『{title}』是從工作坊裝來的，它想提供這些功能：{roles}。\n允許的話，iPLoT 需要這些功能時會執行它的程式"
+    "allow_roles": "『{title}』是從外面裝進來的，它想提供這些功能：{roles}。\n允許的話，iPLoT 需要這些功能時會執行它的程式"
                    "（不用等你按它）。要允許嗎？\n不允許也沒關係：它照樣是一顆按鈕，下次啟動會再問。",
-    "no_system": "沒有『{module}』模組，無法執行 {name}。要有這個功能，在 modules/ 新增一個叫『{module}』的模組"
-                 "並定義 {name}(app, …)；見 docs/07_接口與邊界.md",
+    "no_system": "沒有模組提供「{role}」，這個動作做不了。按「更新」把 iPLoT 隨附的模組補回來；"
+                 "或寫一個模組在 PROVIDES 宣告它，見 docs/api.md",
 }
-
-# 隨附的模組（核心的包帶的）：「更新」之後跟著換成新版的就是這些（D156）。0.9 跟著隨附同步一起搬進「更新」。
-# 「整理」模組有一份一樣的（不讓人在面板上改名或刪除，D155）；tests/test_modify.py 對照 git 的內容，兩份多一個、少一個都會紅
-BUNDLED = frozenset({"主控面板", "互通", "作業系統", "回報與討論", "工作坊", "打開核心原始碼", "更新", "行事曆", "重新啟動",
-                     "開Terminal", "開工", "整理", "導覽列"})
-# 碰作業系統的事（打開、編輯、顯示、終端機、垃圾桶）由 modules/ 裡叫這個名字的模組做（D50、D52）
-SYSTEM_MODULE = "作業系統"
-# 錯誤那一列的「回報這個問題」交給 modules/ 裡叫這個名字的模組的 on_error(app, error)（D110）
-REPORT_MODULE = "回報與討論"
 
 TEMPLATE = '''"""一句話說明這個模組做什麼。"""
 # 規則在 iPLoT 資料夾的 AGENTS.md（給 AI 助手：改這個檔之前先讀它）。重點：只透過 app 碰 iPLoT，不 import core；

@@ -626,3 +626,83 @@ def test_the_question_says_what_updating_does_and_that_the_old_version_is_kept(h
     [prompt] = app.confirms
     assert prompt.startswith("有新版 9.9.9（現在是 0.4.9）：\n這一版改了什麼\n\n") and prompt.endswith("要更新嗎？")
     assert ".backup/" in prompt and "模組和設定不動" in prompt and "重新啟動" in prompt
+
+
+# ── 1.0 起核心在 modules/ 裡（D167）：「更新」直接換它，最上層的 core/、ui/ 是種子 ──
+
+KERNEL_OLD = {"modules/核心/core/__init__.py": '__version__ = "1.0.0"\n', "modules/核心/core/x.py": "old kernel\n",
+              "modules/核心/ui/start.py": "def ready():\n    pass\n", "modules/核心/iplot.py": "def run(app):\n    pass\n",
+              "modules/核心/.local/核心.good/core/__init__.py": '__version__ = "1.0.0"\n'}
+KERNEL_NEW = {"modules/核心/core/__init__.py": '__version__ = "9.9.9"\n', "modules/核心/core/y.py": "new kernel\n",
+              "modules/核心/ui/start.py": "def ready():\n    pass\n", "modules/核心/iplot.py": "def run(app):\n    pass\n"}
+
+
+def kernel_zip(tmp_path, files=KERNEL_NEW):
+    z = tmp_path / "iPLoT-v9.9.9.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        for name, text in {**NEW, **files, "modules/m/iplot.py": "print('theirs')\n"}.items():
+            f.writestr(f"iPLoT-v9.9.9/{name}", text)
+    return z
+
+
+def test_a_1_0_update_replaces_the_kernel_in_modules_and_keeps_its_last_good_copy(update, home, tmp_path):
+    write(home, KERNEL_OLD)
+    assert update.installed_version(home) == "1.0.0", "1.0 起版本看 modules/ 裡的核心，不看最上層的種子"
+    assert update.kernels(home) == ["modules/核心"]
+    saved = update.backup(home, "1.0.0")
+    assert (saved / "modules" / "核心" / "core" / "x.py").exists() and not (saved / "modules" / "核心" / ".local").exists()
+    update.apply(home, kernel_zip(tmp_path))
+    after = tree(home)
+    assert after["modules/核心/core/y.py"] == b"new kernel\n" and "modules/核心/core/x.py" not in after
+    assert after["modules/核心/.local/核心.good/core/__init__.py"] == b'__version__ = "1.0.0"\n', "新的開不起來時還退得回去"
+    assert after["modules/m/iplot.py"] == b"print('mine')\n", "別的模組一律不碰"
+    assert update.installed_version(home) == "9.9.9" and update.unfinished(home) == []
+    assert not [p.name for p in (home / "modules").iterdir() if p.name.startswith(".")], "不留 .核心.old、.update-old"
+
+
+def test_the_kernel_is_swapped_last(update, home, tmp_path, monkeypatch):
+    write(home, KERNEL_OLD)
+    order, real = [], Path.rename
+
+    def rename(self, target):
+        if self.name.endswith(".new"):
+            order.append(self.name[:-4])
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    update.apply(home, kernel_zip(tmp_path))
+    assert order[-1] == ".核心" and order[-2] == "core"
+
+
+def test_a_failed_kernel_swap_puts_everything_back(update, home, tmp_path, monkeypatch):
+    """換 modules/ 裡的核心時出錯：最上層的四樣與核心全部回到舊的，不留 .new、.old。"""
+    write(home, KERNEL_OLD)
+    before, real = tree(home), Path.rename
+
+    def rename(self, target):
+        if self.name == ".核心.new":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(OSError):
+        update.apply(home, kernel_zip(tmp_path))
+    monkeypatch.undo()
+    assert tree(home) == before and update.unfinished(home) == []
+
+
+def test_a_kernel_swap_killed_half_way_is_finished_by_the_next_update(update, home, tmp_path):
+    write(home, KERNEL_OLD)
+    (home / "modules" / "核心").rename(home / "modules" / ".核心.old")
+    write(home, {"modules/.核心.new/core/__init__.py": '__version__ = "9.9.9"\n', "modules/.核心.new/ui/start.py": "\n"})
+    assert "modules/.核心.old" in update.unfinished(home) and "modules/核心" in update.unfinished(home)
+    update.apply(home, kernel_zip(tmp_path))
+    assert update.installed_version(home) == "9.9.9" and update.unfinished(home) == []
+    assert (home / "modules" / "核心" / ".local" / "核心.good").is_dir()
+
+
+def test_an_install_without_a_kernel_in_modules_gets_one(update, home, tmp_path):
+    """modules/ 裡還沒有核心（例如有人把它刪了）：最上層換成種子，包裡的核心一起裝上。"""
+    update.apply(home, kernel_zip(tmp_path))
+    after = tree(home)
+    assert after["core/y.py"] == b"new core\n" and "modules/核心/core/y.py" in after
