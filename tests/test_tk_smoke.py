@@ -371,3 +371,15 @@ def test_page_logs_unsupported(home, panel):
     started(home, panel)
     assert panel.page("工作坊", "<p>hi</p>", object()) is None
     assert T["page_unsupported"] in messages(panel)
+
+
+def test_restart_ends_the_loop_and_reexecs_with_the_same_arguments(home, panel, monkeypatch):
+    """app.restart（D166）：安全模式開的，重新啟動之後還是安全模式（啟動參數照舊）。"""
+    started(home, panel)
+    seen = []
+    monkeypatch.setattr(sys, "argv", ["main.py", "--safe"])
+    monkeypatch.setattr(os, "execv", lambda exe, argv: seen.append((os.getcwd(), argv)))
+    monkeypatch.chdir(home.parent)
+    panel.root.after(10, panel.restart)
+    panel.mainloop()
+    assert seen == [(str(home), [sys.executable, str(home / "main.py"), "--safe"])]

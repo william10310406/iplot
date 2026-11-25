@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE = ROOT / "core"
+KERNEL = ROOT / "modules" / "核心"  # 1.0 起核心是一個模組（D167）
+CORE = KERNEL / "core"
 CJK = re.compile(r"[一-鿿]")
 FORBIDDEN = ("subprocess", "sys.platform", "os.name", "startfile", "ctypes")
 
@@ -14,7 +15,7 @@ def test_bottom_layer_never_imports_tkinter():
     code = ("import sys; sys.modules['tkinter']=None; import core.types, core.text, core.meta, "
             "core.scan, core.errors, core.runner, core.history, core.create, "
             "core.app, core.core")
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=KERNEL)
     assert r.returncode == 0, r.stderr
 
 
@@ -49,9 +50,10 @@ def _string_constants(path):
 
 
 def test_no_chinese_string_constants_outside_text():
-    """D32：畫面文字都在 core/text.py；core/ 其他檔、ui/*.py、main.py 的字串常數沒有中文（註解與 docstring 不算）。"""
-    files = [p for p in CORE.glob("*.py") if p.name != "text.py"] + list((ROOT / "ui").glob("*.py"))
-    for p in sorted(files + [ROOT / "main.py"]):
+    """D32：畫面文字都在 core/text.py；core/ 其他檔、ui/*.py、ui/start.py 的字串常數沒有中文（註解與 docstring 不算）。
+    凍結的開機程式 main.py 是例外：它要在核心壞掉時也說得出那兩句話（D167）。"""
+    files = [p for p in CORE.glob("*.py") if p.name != "text.py"] + list((KERNEL / "ui").glob("*.py"))
+    for p in sorted(files + [KERNEL / "ui" / "start.py"]):
         found = [s for s in _string_constants(p) if CJK.search(s)]
         assert not found, f"{p.relative_to(ROOT)} 有中文字串常數：{found}"
 

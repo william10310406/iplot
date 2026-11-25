@@ -3,6 +3,7 @@
 
 import base64
 import dataclasses
+import os
 import shutil
 import sys
 import threading
@@ -682,6 +683,16 @@ def test_jobs_queued_behind_a_dialog_do_not_run_after_the_window_closes(panel, b
     assert not (b / "ran.txt").exists()
 
 
+def test_a_module_with_its_page_open_is_not_shown_as_running(panel, window):
+    """1.0 清單小問題 7（D166）：頁面開著的期間狀態列不說「執行中」；頁面關了、模組還在跑，就再說。"""
+    panel._busy.extend(["甲", "乙"])
+    window.js.clear()
+    panel.paging("乙", True)
+    panel.paging("甲", True)
+    panel.paging("乙", False)
+    assert window.calls("busy") == [["甲"], [None], ["乙"]]
+
+
 def test_press_tells_the_page_while_a_module_is_running(panel, bridge, window, home):
     """模組的輸出要等它結束才進訊息區：執行期間頁面要看得出「還在跑」，不然使用者會以為沒按到、再按一次。"""
     a = str(make_module(home / "modules", "A", 'TITLE = "甲"\ndef run(app):\n    app.log("mid")\n    1 / 0\n').resolve())
@@ -735,3 +746,26 @@ def test_the_panel_modules_start_turns_a_webview_that_cannot_start_into_import_e
     spec.loader.exec_module(module)
     with pytest.raises(ImportError, match="PyObjC"):
         module.start(types.SimpleNamespace(home=home, version="0.9.0"), Core(home, DEFAULT_CONFIG, None), None, None)
+
+
+def test_restart_closes_the_window_and_start_reexecs_with_the_same_arguments(home, monkeypatch):
+    """app.restart（D166）：模組在工作程序裡（D161），面板關掉視窗、事件迴圈結束後 start 重新啟動整個 iPLoT。"""
+    import importlib.util
+    import types
+
+    class Restarting(FakeWebview):
+        def start(self):
+            super().start()
+            core.view.restart()
+
+    monkeypatch.setitem(sys.modules, "webview", Restarting())
+    monkeypatch.setattr(sys, "argv", ["main.py", "--某個參數"])
+    spec = importlib.util.spec_from_file_location("iplot_panel_restart", PANEL_DIR / "iplot.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    core, seen = Core(home, DEFAULT_CONFIG, None), []
+    monkeypatch.chdir(home.parent)
+    module.start(types.SimpleNamespace(home=home, version="1.0.0"), core, None, None,
+                 execv=lambda exe, argv: seen.append((os.getcwd(), argv)))
+    assert core.view.restarting and core.view.window.destroyed
+    assert seen == [(str(home), [sys.executable, str(home / "main.py"), "--某個參數"])]

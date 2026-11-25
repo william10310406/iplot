@@ -63,16 +63,14 @@ def opened(monkeypatch):
 
 @pytest.fixture
 def web(monkeypatch):
-    """網頁面板的樣子：只有 ui.web。"""
-    monkeypatch.delitem(sys.modules, "ui.tk", raising=False)
-    monkeypatch.setitem(sys.modules, "ui.web", types.ModuleType("ui.web"))
+    """網頁面板開的：app.panel 是「網頁」（面板說自己是哪一種，D164）。"""
+    monkeypatch.setattr(FakeView, "name", "網頁", raising=False)
 
 
 @pytest.fixture
 def tk(monkeypatch):
-    """後備的 tkinter 面板的樣子：網頁面板開不起來之後 ui.web 還在，兩個都在。"""
-    monkeypatch.setitem(sys.modules, "ui.tk", types.ModuleType("ui.tk"))
-    monkeypatch.setitem(sys.modules, "ui.web", types.ModuleType("ui.web"))
+    """後備的 tkinter 面板開的：app.panel 是「tkinter」。"""
+    monkeypatch.setattr(FakeView, "name", "tkinter", raising=False)
 
 
 def test_helper_names_are_not_stdlib():
@@ -663,11 +661,12 @@ def child_tree(home):
     return make_module(make_module(top, "HK2"), "王小明_B11201234")
 
 
-@pytest.mark.parametrize("mods, want", [({"ui.tk"}, "tkinter"), ({"ui.tk", "ui.web"}, "tkinter"), ({"ui.web"}, "網頁"),
-                                        (set(), "面板外")])
-def test_panel_kind(load, mods, want):
-    # 後備的 tkinter 面板裡兩個都在：先看 ui.tk
-    assert load("report").panel_kind(dict.fromkeys(mods)) == want
+@pytest.mark.parametrize("panel, want", [("tkinter", "tkinter"), ("網頁", "網頁"), (None, "面板外")])
+def test_panel_kind_asks_the_app_not_sys_modules(load, panel, want, monkeypatch):
+    """不猜（R3，D164）：ui.tk 在 sys.modules 裡也不算，只看 app.panel；舊的 app 沒有 panel 也照樣寫「面板外」。"""
+    monkeypatch.setitem(sys.modules, "ui.tk", types.ModuleType("ui.tk"))
+    assert load("report").panel_kind(types.SimpleNamespace(panel=panel)) == want
+    assert load("report").panel_kind(object()) == "面板外"
 
 
 @pytest.mark.parametrize("base, want", [
@@ -821,7 +820,7 @@ ERROR_KINDS = {"module": "NameError", "core": "KeyError", "config": "TypeError"}
 
 
 @pytest.mark.parametrize("source, module, want", [("module", "科學計算", "[回報] 科學計算：NameError（iPLoT 9.9.9）"),
-                                                  ("core", None, "[回報] 核心：KeyError（iPLoT 9.9.9）"),
+                                                  ("core", None, "[回報] iPLoT 核心：KeyError（iPLoT 9.9.9）"),
                                                   ("config", None, "[回報] config.py：TypeError（iPLoT 9.9.9）")])
 def test_from_error_title(load, tmp_path, monkeypatch, source, module, want):
     report = load("report")
@@ -1607,9 +1606,7 @@ def test_on_error_reveals_the_saved_file_after_the_page_closes(tmp_path, web, op
 
 
 def test_on_error_outside_the_panel_uses_the_page(tmp_path, monkeypatch, opened):
-    # 互通的小視窗：兩個都不在，app.page 在那裡能用
-    monkeypatch.delitem(sys.modules, "ui.tk", raising=False)
-    monkeypatch.delitem(sys.modules, "ui.web", raising=False)
+    # 不是從面板開的（python3 main.py --run）：app.panel 是 None，app.page 在那裡能用
     home = tmp_path / "iPLoT"
     view = View()
     result, _ = press(home, view, "on_error", sample_error(home))
@@ -1619,7 +1616,7 @@ def test_on_error_outside_the_panel_uses_the_page(tmp_path, monkeypatch, opened)
 
 
 def test_on_error_in_tk_uses_a_file(tmp_path, tk, opened):
-    # 後備的 tkinter 面板（ui.tk 與 ui.web 都在）：沒有頁面，走草稿檔（設計第 5.2 節、第 17 節第 7 條）
+    # 後備的 tkinter 面板：沒有頁面，走草稿檔（設計第 5.2 節、第 17 節第 7 條）
     home = tmp_path / "iPLoT"
     view = View()
     view.answers = [True]

@@ -129,6 +129,11 @@ class FakeCore:
     def all_modules(self):
         return ()
 
+    @staticmethod
+    def describe(error):
+        from core.errors import describe
+        return describe(error)
+
     def roots(self):
         return scan.roots_from_config(self.home, self.config.roots)
 

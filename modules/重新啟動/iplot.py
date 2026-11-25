@@ -1,4 +1,4 @@
-"""重新啟動 iPLoT：改了 core/ 或 config.py 之後按這顆，整個程式從頭再來。"""
+"""重新啟動 iPLoT：改了 core/ 或 config.py 之後按這顆，整個程式從頭再來（安全模式開的，重新啟動後還是安全模式）。"""
 
 import os
 
@@ -27,7 +27,15 @@ if __name__ == "__main__" and "core.runner" not in sys.modules:
 ICON = "🔄"
 
 
+NOT_HERE = "這裡沒有面板可以重新啟動：從 iPLoT 的面板按「重新啟動」。"
+
+
 def run(app):
+    if hasattr(app, "restart"):  # iPLoT 1.0 起：模組在自己的程序裡跑（D161），要請面板重新啟動，--safe 照舊（D166）
+        try:
+            return app.restart()
+        except AttributeError:  # 不是面板開的（python3 main.py --run）
+            return app.log(NOT_HERE)
     os.chdir(app.home)  # 執行期間的工作目錄是這個模組的資料夾；新的 iPLoT 要從自己的資料夾起來
     try:
         os.execv(sys.executable, [sys.executable, str(app.home / "main.py")])

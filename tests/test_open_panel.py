@@ -5,7 +5,6 @@ import errno
 import importlib.util
 import subprocess
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -37,12 +36,13 @@ def nothing(*a, **k):
 
 
 def go(mod, home, **kw):
-    """open_panel 用假的 ps、lsof、Popen、activate；回 (app, 叫到前面的 pid 們, Popen 的呼叫)。"""
+    """open_panel 用假的 ps、lsof、Popen 與 app.call("os.activate")；回 (app, 問了 os.activate 的, Popen 的呼叫)。
+    panel= 是 app.panel（開它的面板是哪一種），answer= 是 os.activate 回的。"""
     app, activated, launched = FakeApp(home), [], []
-    kw.setdefault("modules", {})
+    app.panel, answer = kw.pop("panel", None), kw.pop("answer", True)
+    app.call = lambda role, pid: (activated.append((role, pid)), answer)[1]  # 只有 os.activate 會被問
     kw.setdefault("ps", lambda: "")
     kw.setdefault("lsof", lambda pid: "")
-    kw.setdefault("activate", lambda pid, platform: activated.append(pid) or True)
     kw.setdefault("popen", lambda argv, **k: launched.append((argv, k)))
     kw.setdefault("platform", "darwin")
     kw.setdefault("me", 999)
@@ -50,20 +50,12 @@ def go(mod, home, **kw):
     return app, activated, launched
 
 
-def test_in_panel_brings_itself_forward(panel_mod, home):
-    app, activated, launched = go(panel_mod, home, modules={"ui.web": object()}, ps=nothing)
-    assert activated == [None] and launched == [] and app.logs == ["主控面板已經開著"]
-
-
-def test_in_a_worker_the_panel_started_it_says_so_without_activating(panel_mod, home):
-    """iPLoT 0.9 起每按一次另開程序（D161）：工作程序裡沒有 ui.web，但開它的就是面板（202），面板本來就在最前面。
-    以前會去叫 202 到最前面，工作程序沒辦法叫別的程式，就說「沒辦法叫到最前面」（2026-11-24 Mac 驗收）。"""
-    app, activated, launched = go(panel_mod, home, ps=lambda: ps_for(home), parent=lambda: 202)
+@pytest.mark.parametrize("kind", ["網頁", "tkinter"])
+def test_opened_by_a_panel_only_says_so(panel_mod, home, kind):
+    """1.0 起每按一次都在面板開的工作程序裡跑（D161）：app.panel 有值，面板就是開這個程序的那一個，本來就在最前面。
+    以前用 sys.modules 猜（R3），在工作程序裡猜不到，就去叫面板到最前面而失敗（2026-11-24 Mac 驗收）。"""
+    app, activated, launched = go(panel_mod, home, panel=kind, ps=nothing)
     assert activated == [] and launched == [] and app.logs == ["主控面板已經開著"]
-
-
-def test_in_the_safe_mode_panel_too(panel_mod, home):
-    assert panel_mod.in_panel({"ui.tk": object()}) and not panel_mod.in_panel({"core.runner": object()})
 
 
 def test_find_panel_by_absolute_path(panel_mod, home):
@@ -92,10 +84,9 @@ def test_find_panel_ignores_itself_and_other_iplots(panel_mod, home, tmp_path):
     assert panel_mod.find_panel(home, ps=lambda: "  7 /bin/zsh main.py\n  8 vim /x/main.py\n", lsof=nothing, me=1) is None
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="把已經開著的主控面板叫到最前面只在 macOS 才有")
 def test_open_panel_brings_the_running_one_forward(panel_mod, home):
     app, activated, launched = go(panel_mod, home, ps=lambda: ps_for(home))
-    assert activated == [202] and launched == [] and app.logs == ["主控面板已經開著，叫到最前面了"]
+    assert activated == [("os.activate", 202)] and launched == [] and app.logs == ["主控面板已經開著，叫到最前面了"]
 
 
 def test_not_running_launches_detached(panel_mod, home):
@@ -115,9 +106,8 @@ def test_launch_failure_is_one_sentence(panel_mod, home):
     assert app.logs == ["打不開主控面板：找不到 Python 或 iPLoT 的 main.py。確認 iPLoT 資料夾還在，再雙擊一次"]  # 體驗 7-08：中文原因、有下一步
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="把已經開著的主控面板叫到最前面只在 macOS 才有")
 def test_appkit_missing_still_logs(panel_mod, home):
-    app, _, _ = go(panel_mod, home, ps=lambda: ps_for(home), activate=lambda pid, platform: False)
+    app, _, _ = go(panel_mod, home, ps=lambda: ps_for(home), answer=False)
     assert app.logs == ["主控面板已經開著，但沒辦法把它叫到最前面。到 Dock 點一下 Python 的圖示"]
 
 
@@ -128,46 +118,8 @@ def test_elsewhere_launches_and_says_it_cannot_bring_forward(panel_mod, home):
 
 
 def test_elsewhere_in_the_panel_only_logs(panel_mod, home):
-    app, activated, launched = go(panel_mod, home, platform="linux", modules={"ui.tk": object()})
+    app, activated, launched = go(panel_mod, home, platform="linux", panel="tkinter")
     assert (activated, launched, app.logs) == ([], [], ["主控面板已經開著"])
-
-
-def test_activate_is_false_elsewhere_or_without_appkit(panel_mod, monkeypatch):
-    assert panel_mod.activate(123, platform="linux") is False
-    monkeypatch.setitem(sys.modules, "AppKit", None)  # import AppKit 會丟 ImportError
-    assert panel_mod.activate(123, platform="darwin", run=nothing) is False
-
-
-def fake_appkit(answer):
-    """假的 AppKit：NSRunningApplication 的 activateWithOptions_ 回 answer。"""
-    target = types.SimpleNamespace(activateWithOptions_=lambda options: answer)
-    running = types.SimpleNamespace(runningApplicationWithProcessIdentifier_=lambda pid: target,
-                                    currentApplication=lambda: target)
-    return types.SimpleNamespace(NSRunningApplication=running, NSApplicationActivateIgnoringOtherApps=2,
-                                 __file__="/lib/AppKit/__init__.py")
-
-
-def test_activate_directly_when_macos_allows_it(panel_mod, monkeypatch):
-    monkeypatch.setitem(sys.modules, "AppKit", fake_appkit(True))
-    assert panel_mod.activate(123, platform="darwin", run=nothing) is True
-    assert panel_mod.activate(None, platform="darwin", run=nothing) is True
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="用 AppKit 把面板叫到最前面只在 macOS 才有")
-def test_activate_hands_over_to_a_plain_helper_when_refused(panel_mod, monkeypatch):
-    """macOS 14 起，自己不在前面的 App 叫別人到前面會被拒絕；一般的 python 子程序叫就可以（Task 0 量過）。"""
-    monkeypatch.setitem(sys.modules, "AppKit", fake_appkit(False))
-    calls = []
-
-    def run(argv, **kw):
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0)
-
-    assert panel_mod.activate(123, platform="darwin", run=run) is True
-    [argv] = calls
-    assert argv[0] == sys.executable and argv[1] == "-c" and argv[-2:] == ["/lib", "123"]
-    assert panel_mod.activate(None, platform="darwin", run=lambda argv, **kw: subprocess.CompletedProcess(argv, 1)) \
-        is False
 
 
 def test_ps_is_called_with_a_utf8_locale(panel_mod, monkeypatch):
