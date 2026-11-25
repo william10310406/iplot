@@ -1,4 +1,4 @@
-"""另開程序要確認起來了（D160 第 3 條）：主控面板、互通的 nav.py 各有一份一樣的 _spawn（tools/copies.json 登記成 same）。
+"""另開程序要確認起來了（D160 第 3 條）：主控面板的 _spawn（互通 1.0 拿掉了 nav.py 那一份，D165）。
 等 wait 秒：這段時間裡出錯結束了回 False；stderr 接到 logs/separate.log。"""
 import importlib.util
 import subprocess
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 
-@pytest.fixture(params=["modules/主控面板/iplot.py", "modules/互通/nav.py"])
+@pytest.fixture(params=["modules/主控面板/iplot.py"])
 def spawn(request, monkeypatch):
     monkeypatch.syspath_prepend(str((ROOT / request.param).parent))
     monkeypatch.syspath_prepend(str(ROOT))

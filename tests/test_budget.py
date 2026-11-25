@@ -177,7 +177,7 @@ def test_exceptions_are_complete_and_not_expired():
 # 0.8 過渡：核心還認得的模組名字，只能出現在 core/text.py 的這三個常數裡（0.9 隨附同步搬進「更新」、作業系統只靠 PROVIDES、
 # 回報改用角色之後拿掉）。其他地方——core/ 的其他檔——一個模組的名字都不能當成字串出現（D159）。
 # 只比「整個字串就是名字」與「modules/名字」：訊息裡的一般用字（「重新啟動 iPLoT」、「從工作坊裝來的」）不是在找模組
-TRANSITIONAL = {"BUNDLED", "SYSTEM_MODULE", "REPORT_MODULE"}
+TRANSITIONAL = {"BUNDLED"}  # SYSTEM_MODULE 1.0 拿掉（D164）、REPORT_MODULE 0.9 拿掉（D162）
 
 
 def test_core_names_no_module_except_the_transitional_constants():

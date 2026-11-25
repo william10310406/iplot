@@ -387,7 +387,7 @@ def test_system_module_answers_through_core_action(fake_core, monkeypatch):
     assert r.ok and r.value is None
 
 
-CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "主控面板", "行事曆", "回報與討論")
+CARRY = ("開工", "打開核心原始碼", "重新啟動", "開Terminal", "主控面板", "行事曆", "回報與討論", "互通")  # 互通 1.0 起也是（D164）
 
 
 def iplot_header() -> str:
@@ -400,14 +400,6 @@ def iplot_header() -> str:
 def test_repo_modules_carry_the_iplot_header(name):
     """隨附模組帶的是 iPLoT 自己的那一段，跟 docs/api.md 一字不差；不再寫死互通的路徑（D163）。"""
     assert iplot_header() in (MODULES / name / "iplot.py").read_text(encoding="utf-8")
-
-
-def test_interop_keeps_its_own_snippet():
-    """互通從工作坊裝、要在舊的 iPLoT 上照舊：它自己帶的還是它自己的那一段（找 run.py，0.9 起 run.py 再轉給 main.py --run）。"""
-    spec = importlib.util.spec_from_file_location("snippet_text", MODULES / "互通" / "snippet.py")
-    snippet = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(snippet)
-    assert snippet.TEXT in (MODULES / "互通" / "iplot.py").read_text(encoding="utf-8")
 
 
 def test_the_iplot_header_hands_over_to_main_run(tmp_path):

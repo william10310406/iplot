@@ -106,6 +106,7 @@ def run(app):
 
 - `main`：`start(app, core, note=None, err=None)`，開面板、視窗關掉才回來。只有開機程式會叫，一般模組不用管。
 - `run.outside`：`outside(app, core, info, files, problem, config_error)`，`python3 main.py --run <模組>` 在面板外跑一個模組時要的畫面（D163）。`info` 是找好的模組（找不到是 `None`，`problem` 是那一句），`files` 是要交給 `on_files` 的檔案；回結束碼。丟 `ImportError` 就改在終端機跑。隨附的「互通」提供它。
+- `home`：`run(app)`，使用者的「首頁」：面板外跑完的小視窗，回去鈕先回這裡，沒有人提供才回面板（`main`，D93、D165）。剛好一個模組提供時才算。隨附的「行事曆」提供它。
 - `os.activate`：`activate(app, pid)`，把另一個程序的視窗叫到最前面，叫到了回 `True`（D164）。隨附的「作業系統」提供它，跟 `os.open`、`os.trash` 那些放在一起；這個系統做不到就回 `False`，由你跟使用者說下一步。
 - `panel.error`：`on_panel_error(app, error, recent, pressed)`。面板上出了錯（不是你這個模組出的錯），先交給你看一眼，`pressed` 是 `False`：回 `True` 表示值得問「要回報嗎？」，面板會問（每個錯誤最多問一次，可以「不要再問」）；使用者按了「回報這個問題」，或答了要回報，會再交一次，`pressed` 是 `True`。`error` 是那一筆錯誤，`recent` 是那時候訊息區最後幾行。隨附的「回報與討論」提供它。
 

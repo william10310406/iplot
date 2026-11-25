@@ -42,6 +42,7 @@ import photos
 
 ICON = "📅"
 NEEDS = ("os.activate",)  # 已經開著時叫它到最前面（D164）
+PROVIDES = {"home": "run"}  # 在面板外跑完一個模組，小視窗的回去鈕回到這裡（D93；以前看名字，1.0 起看這個角色）
 MIN_API = 7  # app.top_modules、每按一次在自己的程序裡跑（D161、D164）
 OPEN = (".local", "開著")  # 頁面開著的那個程序拿著這個檔的鎖、寫著它的 pid；每台電腦自己的，不進上傳的包（規則 9）
 SETTINGS = "設定.json"

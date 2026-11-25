@@ -15,7 +15,9 @@ import pytest
 from conftest import FakeWebview, make_module, until
 
 from core import __version__
-from core.text import SYSTEM_MODULE, T
+from core.text import T
+
+SYSTEM_MODULE = "作業系統"  # 隨附的作業系統模組（提供 os.*）；1.0 起核心不知道這個名字（D164）
 
 ROOT = Path(__file__).resolve().parent.parent
 PRE_GATE = ["main.py", "core/__init__.py", "core/text.py"]  # 版本防線之前就會被 import 的檔案

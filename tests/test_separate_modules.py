@@ -1,4 +1,5 @@
-"""有頁面的模組改用「互通」的 separate.py：在網頁面板裡按下時不開頁面、交給另一個程序（面板不會被卡住）。"""
+"""工作坊在舊的 iPLoT 上（0.8 以前的網頁面板）交給「互通」0.x 的 separate.py 另開（面板不會被卡住）；
+互通 1.0 拿掉了 separate.py（D165），iPLoT 1.0 每按一次本來就在自己的程序裡，工作坊在這裡開。"""
 
 import ast
 import runpy
@@ -8,9 +9,23 @@ import types
 from pathlib import Path
 
 import pytest
-from test_separate import SEPARATE, WEB, Info
 
 ROOT = Path(__file__).resolve().parents[1]
+WEB = {"ui.web": types.ModuleType("ui.web")}
+LAST_0X = "v0.8.0"  # 互通還有 separate.py 的最後一版 iPLoT
+
+
+class Info:
+    def __init__(self, folder, title):
+        self.folder, self.title, self.name = folder, title, folder.name
+
+
+def old_separate() -> bytes:
+    """互通 0.x 的 separate.py（從 git 的 tag 拿；淺 clone 拿不到就跳過，CI 有 fetch-depth: 0）。"""
+    got = subprocess.run(["git", "show", f"{LAST_0X}:modules/互通/separate.py"], cwd=ROOT, capture_output=True)
+    if got.returncode != 0:
+        pytest.skip(f"沒有 {LAST_0X} 這個 tag")
+    return got.stdout
 
 
 @pytest.fixture
@@ -25,7 +40,7 @@ def setup(tmp_path):
 
 # ── 用它的模組：在面板裡按下時不開頁面、交給另一個程序 ──
 
-PAGE_MODULES = {"工作坊": "run", "互通": "run"}  # 回報與討論 0.4.0 起不另開：1.0 每按一次本來就在自己的程序裡（D164）
+PAGE_MODULES = {"工作坊": "run"}  # 回報與討論 0.4.0、互通 1.0 起不另開：1.0 每按一次本來就在自己的程序裡（D164、D165）
 
 
 @pytest.mark.parametrize("name", PAGE_MODULES)
@@ -87,7 +102,7 @@ def run_workshop(app, monkeypatch, listing, popen=None):
 
 def test_workshop_in_the_web_panel_hands_off_without_fetching_or_opening_a_page(setup, monkeypatch):
     home, folder, run_py = setup
-    (home / "modules" / "互通" / "separate.py").write_bytes(SEPARATE.read_bytes())
+    (home / "modules" / "互通" / "separate.py").write_bytes(old_separate())
     app, launched = WorkshopApp(home, folder), []
 
     def popen(argv, **kw):  # 像真的一樣：另開的程序起來後把自己的 pid 寫進 .pid

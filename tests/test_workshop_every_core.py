@@ -8,12 +8,14 @@ CI 要拿得到 tag：.github/workflows/ci.yml 的 checkout 設了 fetch-depth: 
 拿不到就直接失敗，免得這條保證悄悄沒在跑。"""
 
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -148,6 +150,14 @@ def test_the_workshop_updates_itself_first_on_every_core(tmp_path, tag):
 BROKEN_RUN = "import sys\nsys.exit('互通壞了：一啟動就結束，什麼都沒開')\n"
 
 
+def old_interop(modules: Path) -> None:
+    """v0.8.0 的 modules/互通（還有 separate.py 的 0.x）放進 modules/。"""
+    archive = subprocess.run(["git", "archive", "v0.8.0", "modules/互通"], cwd=ROOT, capture_output=True, check=True)
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+        tar.extractall(modules.parent.parent / "_old")
+    shutil.copytree(modules.parent.parent / "_old" / "modules" / "互通", modules / "互通")
+
+
 @needs_tags
 @pytest.mark.parametrize("tag", [*TAGS[:1], *TAGS[-1:], "HEAD"])
 @pytest.mark.parametrize("interop", ["broken", "missing"])
@@ -156,7 +166,7 @@ def test_in_the_web_panel_the_workshop_still_opens_when_interop_does_not(tmp_pat
     或互通根本不在，工作坊都要自己開。最舊的核心、最新的 tag、現在這一版各跑一次。"""
     home, url = setup(tmp_path, tag, with_new_workshop=False)
     if interop == "broken":
-        shutil.copytree(ROOT / "modules" / "互通", home / "modules" / "互通", ignore=shutil.ignore_patterns("__pycache__"))
+        old_interop(home / "modules")  # 會交給它另開的是 0.x 的互通（1.0 沒有 separate.py，D165）
         (home / "modules" / "互通" / "run.py").write_text(BROKEN_RUN, encoding="utf-8")
     seen = press(home, url, "web", env_extra={"IPLOT_SEPARATE_WAIT": "1"})
     assert seen["pages"] == ["工作坊"] and seen["reports"] == [], seen

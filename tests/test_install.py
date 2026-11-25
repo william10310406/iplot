@@ -10,9 +10,11 @@ from pathlib import Path
 import pytest
 
 from core.core import Core
-from core.text import SYSTEM_MODULE, T
+from core.text import T
 from core.types import DEFAULT_CONFIG, ErrorInfo
 from ui import install
+
+SYSTEM_MODULE = "作業系統"  # 隨附的作業系統模組（提供 os.*）；1.0 起核心不知道這個名字（D164）
 
 ROOT = Path(__file__).resolve().parents[1]
 

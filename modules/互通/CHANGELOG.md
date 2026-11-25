@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-25
+
+只跟 iPLoT 1.0 以上合作：捷徑、Dock、直接執行 `iplot.py` 都交給 iPLoT 的 `python3 main.py --run`，用 turtle、tkinter 的模組也能從面板外打開。舊的 iPLoT 上按「互通」會請你先按「更新」。
+
+### 變更
+- `run.py` 只確認 Python，交給 `main.py --run`；不再自己找模組、建核心（D165）。
+- 小視窗跑完的回去鈕回行事曆（提供 `home` 的模組），沒有就回面板，不看名字。
+- 「加上」加的是 iPLoT 自己的那一段（`# ── iPLoT ──`）；以前加過的照樣能用。
+- 用 tkinter、turtle 的模組也列進「可以加上」與捷徑。
+
+### 移除
+- 替別的模組另開頁面（`separate.py`）、自己的導覽列（`nav.py`、`nav.js`）：iPLoT 1.0 自己做了。
+
 ## [0.6.0] - 2026-11-24
 
 在 iPLoT 0.9 上，捷徑、Dock、直接執行 `iplot.py` 都交給 iPLoT 的 `python3 main.py --run`：模組跟在面板裡按下一樣在自己的程序裡跑，turtle、tkinter 也能用了。小視窗、跑完同步捷徑照舊由互通做。iPLoT 0.8 以前照舊。

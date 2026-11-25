@@ -13,8 +13,10 @@ from core import errors, history, scan
 from core.app import App
 from core.core import Core, View, load_config
 from core.runner import run_module
-from core.text import SYSTEM_MODULE, T
+from core.text import T
 from core.types import Config, ErrorInfo, Group, ModuleInfo, Result, Root, Scope
+
+SYSTEM_MODULE = "作業系統"  # 隨附的作業系統模組（提供 os.*）；1.0 起核心不知道這個名字（D164）
 
 EMPTY = inspect.Parameter.empty
 
