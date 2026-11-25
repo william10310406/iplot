@@ -65,6 +65,7 @@ def test_an_0_8_install_updated_with_its_own_updater_starts_and_moves_into_modul
 
     home = tmp_path / "iPLoT"
     old_install(home, old_ref())
+    (home / ".bundled-version").write_text("0.8.0\n", encoding="utf-8")  # 0.8 開過一次就寫了這個
     spec = importlib.util.spec_from_file_location("old_update", home / "modules" / "更新" / "update.py")
     old = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(old)
@@ -83,3 +84,12 @@ def test_an_0_8_install_updated_with_its_own_updater_starts_and_moves_into_modul
     second = boot(home, "--run", "甲")
     assert f"甲跑了 {__version__}" in second.stdout, second.stdout + second.stderr
     assert (kernel / ".local" / "核心.good" / "ui" / "start.py").is_file(), "第二次從 modules/核心/ 開，記下這一份"
+
+
+def test_the_kernel_module_counts_as_new_in_1_0():
+    """「核心」在 1.0 才變成隨附模組：雜湊表要這樣寫，0.8 升上來的人（.bundled-version 是 0.8.x）才會裝上它。"""
+    import json
+
+    from core import bundled
+
+    assert json.loads(bundled.HASHES.read_text(encoding="utf-8"))[".introduced"]["核心"] == "1.0.0"
