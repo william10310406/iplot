@@ -3,6 +3,7 @@
 
 import hashlib
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -34,8 +35,9 @@ def tmp_path(tmp_path):
 
 def boot(home):
     shutil.copy2(ROOT / "main.py", home / "main.py")
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}  # Windows 的管線預設不是 UTF-8，假核心印的中文才比得到
     return subprocess.run([sys.executable, str(home / "main.py")], cwd=home, capture_output=True, text=True,
-                          encoding="utf-8", timeout=60)
+                          encoding="utf-8", timeout=60, env=env)
 
 
 def test_the_boot_program_is_frozen():
@@ -71,7 +73,17 @@ def test_both_broken_falls_back_to_the_seed(tmp_path):
 def test_nothing_usable_says_one_sentence_and_exits_1(tmp_path):
     (tmp_path / "modules").mkdir()
     out = boot(tmp_path)
-    assert out.returncode == 1 and "找不到能用的核心" in out.stdout and "Traceback" not in out.stdout + out.stderr
+    assert out.returncode == 1 and "找不到能用的核心" in out.stderr and "Traceback" not in out.stdout + out.stderr
+    assert "找不到能用的核心" in (tmp_path / "logs" / "iplot.log").read_text(encoding="utf-8")
+
+
+def test_nothing_usable_still_exits_1_without_a_traceback_when_the_pipe_is_not_utf8(tmp_path):
+    """Windows 的管線是 cp1252 之類印不出中文的編碼：那一句照樣出去（換成 \\uXXXX），不會變成 UnicodeEncodeError。"""
+    (tmp_path / "modules").mkdir()
+    shutil.copy2(ROOT / "main.py", tmp_path / "main.py")
+    out = subprocess.run([sys.executable, str(tmp_path / "main.py")], cwd=tmp_path, capture_output=True, timeout=60,
+                         env={**os.environ, "PYTHONIOENCODING": "cp1252"})
+    assert out.returncode == 1 and b"Traceback" not in out.stdout + out.stderr
 
 
 def test_a_failed_kernel_leaves_nothing_behind_for_the_next(tmp_path):

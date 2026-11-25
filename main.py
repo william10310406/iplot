@@ -70,8 +70,8 @@ def main():
         start = load(folder)
         if start is not None:
             return start.run(HOME, folder)
-    print(GONE)
-    sys.exit(1)
+    log(GONE)
+    sys.exit(GONE)  # 寫到 stderr、結束碼 1；stderr 遇到印不出的字會換成 \uXXXX，不會在 Windows 的管線上再丟一次錯
 
 
 if __name__ == "__main__":
