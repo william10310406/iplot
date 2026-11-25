@@ -101,7 +101,9 @@ def newer_workshop():
 def setup(tmp_path, tag, with_new_workshop, author="william10310406"):
     home = tmp_path / "iPLoT"
     home.mkdir()
-    archive = subprocess.run(["git", "archive", tag, "core"], cwd=ROOT, capture_output=True, check=True).stdout
+    moved = subprocess.run(["git", "cat-file", "-e", f"{tag}:modules/核心/core"], cwd=ROOT, capture_output=True).returncode == 0
+    tree = f"{tag}:modules/核心" if moved else tag  # 1.0 起核心在 modules/核心/（D167）
+    archive = subprocess.run(["git", "archive", tree, "core"], cwd=ROOT, capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-C", str(home)], input=archive, check=True)
     shutil.copytree(WORKSHOP, home / "modules" / "工作坊", ignore=shutil.ignore_patterns("__pycache__", ".history"))
     src = tmp_path / "site"
