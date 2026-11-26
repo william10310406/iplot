@@ -1,6 +1,7 @@
 """隨附模組跟著核心一起更新（D156）：「更新」下載的包留在 .backup/download-<版本>.zip，新版核心第一次啟動時，
 照那個包把 modules/ 裡隨附的模組換成新版。只動「沒改過」的檔案：安裝的檔案的 sha256 是任何一版發出去過的
-（core/bundled_hashes.json）才換；不認得的就是使用者改過的，整個模組都不換，只說一句。工作坊裝來的（有 .origin）、
+（core/bundled_hashes.json）才換；不認得的就是使用者改過的，整個模組都不換，只說一句。從外面裝來的（有 .origin）
+同名隨附模組，每個檔也都是發出去過的原樣，就一樣換上新版、拿掉 .origin 等記號，回到跟著核心更新（D172）；改過的不碰。
 包裡沒有的檔（資料、設定、.history、捷徑）、使用者刪掉的整個模組，一律不碰；
 這一版才新加的隨附模組（雜湊表的 .introduced 比上次處理過的版本新）本機沒有就裝上（D159）；
 拿掉的（.retired）本機那一份沒改過就移到備份（D171）。
@@ -23,6 +24,7 @@ from .text import T
 MARKER = ".bundled-version"  # 記著哪一版核心已經處理過隨附模組；沒有這個檔的舊安裝，第一次會處理
 HASHES = Path(__file__).with_name("bundled_hashes.json")
 SKIP = {"__pycache__", ".DS_Store"}
+ADOPT = (".origin", ".roles-ok", ".unconfirmed")  # 從外面裝的記號：沒改過的同名隨附模組換成新版時一起拿掉（D172）
 
 
 def _sha(data: bytes) -> str:
@@ -68,7 +70,7 @@ def sync(home: Path, version: str, known: dict | None = None) -> list[str]:
     for name, new in sorted(files.items()):
         folder = home / "modules" / name
         added = not folder.exists() and _added_since(known.get(".introduced", {}).get(name), before, version)
-        if not added and (not scan.is_module(folder) or (folder / ".origin").exists()):
+        if not added and not scan.is_module(folder):
             continue  # 包裡有、本機沒有的、以前就有的模組是使用者刪的，不補；新加的（例如 0.8 的「整理」）才裝
         todo, modified = (dict(new) if added else {}), False
         for rel, data in () if added else new.items():
@@ -82,11 +84,14 @@ def sync(home: Path, version: str, known: dict | None = None) -> list[str]:
                     todo[rel] = data
             else:
                 todo[rel] = data
-        if modified:
+        outside = (folder / ".origin").exists()  # 從外面裝來的同名模組：改過的不說（那是另一條路的版本），沒改過的收回來
+        if modified and not outside:
             notes.append(T["bundled_modified"].format(name=name, package=package.relative_to(home).as_posix()))
-        elif todo:
+        elif not modified and (todo or outside):
             try:
                 _install(folder, todo) if added else _write(folder, todo, backup / name)
+                for mark in ADOPT:  # 自己的隨附模組本來就沒有這些記號
+                    (folder / mark).unlink(missing_ok=True)
             except OSError as exc:
                 retry = True
                 notes.append(T["bundled_failed"].format(name=name, message=reason(exc)))
@@ -105,11 +110,9 @@ def sync(home: Path, version: str, known: dict | None = None) -> list[str]:
 
 def _retire(folder: Path, entry: dict, backup: Path) -> bool:
     """這一版拿掉的隨附模組（雜湊表的 .retired，D171）：本機那一份每個檔都是發出去過的原樣，才整個移到 backup；
-    改過的、工作坊裝來的（.origin）、移不動的都留著（下次啟動不再試，只是多一格舊按鈕）。"""
-    if not scan.is_module(folder) or (folder / ".origin").exists():
-        return False
-    files = (p for p in folder.rglob("*") if p.is_file() and not any(x[0] == "." or x in SKIP for x in p.relative_to(folder).parts))
-    if any(_sha(p.read_bytes()) not in entry["files"].get(p.relative_to(folder).as_posix(), ()) for p in files):
+    從外面裝來的（.origin）也一樣看（多一個 LICENSE 不算改過，D172）。改過的、移不動的都留著（下次啟動不再試，只是多一格舊按鈕）。"""
+    files = (p for p in folder.rglob("*") if p.is_file() and p.relative_to(folder).as_posix() != "LICENSE" and not any(x[0] == "." or x in SKIP for x in p.relative_to(folder).parts))
+    if not scan.is_module(folder) or any(_sha(p.read_bytes()) not in entry["files"].get(p.relative_to(folder).as_posix(), ()) for p in files):
         return False
     try:
         backup.mkdir(parents=True, exist_ok=True)
@@ -126,9 +129,7 @@ def _version(text: str) -> tuple[int, ...]:
 def _added_since(introduced: str | None, before: str | None, version: str) -> bool:
     """隨附模組 introduced 那一版才加進來（bundled_hashes.json 的 .introduced）：上次處理過的是更舊的版本才算新的。
     沒有 .bundled-version 的舊安裝不知道上次是哪一版，只認這一版才加的。"""
-    if introduced is None:
-        return False
-    return _version(introduced) > _version(before) if before else _version(introduced) == _version(version)
+    return introduced is not None and (_version(introduced) > _version(before) if before else _version(introduced) == _version(version))
 
 
 def _install(folder: Path, files: dict[str, bytes]) -> None:
