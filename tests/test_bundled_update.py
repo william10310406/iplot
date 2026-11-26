@@ -102,11 +102,30 @@ def test_data_and_other_files_in_a_module_are_never_touched(home):
     assert after == before
 
 
-def test_a_workshop_module_is_never_replaced(home):
-    folder = module(home, "互通", {"run.py": OLD, ".origin": b"url: x\nversion: 0.3.0\n"})
+def test_a_bundled_module_installed_from_outside_and_unchanged_is_taken_back(home):
+    """升 1.0 的人從工作坊裝過「主控面板」（有 .origin）：每個檔都是發出去過的原樣，就換成新版、拿掉 .origin 等記號，
+    回到跟著核心更新；不然舊的那份不提供面板，又因為是外來的而不算數，開起來只剩備用面板（D172）。"""
+    marks = {".origin": b"url: x\nversion: 0.3.0\n", ".roles-ok": b"[]", ".unconfirmed": b""}
+    folder = module(home, "互通", {"run.py": OLD, "LICENSE": b"MIT\n", "data.json": b"{}", **marks})
+    package(home, {"互通/run.py": NEW})
+    notes = bundled.sync(home, V, known(互通={"run.py": [OLD]}))
+    assert (folder / "run.py").read_bytes() == NEW and notes and "互通" in notes[0]
+    assert not any((folder / m).exists() for m in marks)
+    assert (folder / "LICENSE").read_bytes() == b"MIT\n" and (folder / "data.json").is_file()
+
+
+def test_an_outside_copy_already_equal_to_the_new_one_just_loses_its_marks(home):
+    folder = module(home, "互通", {"run.py": NEW, ".origin": b"url: x\n"})
+    package(home, {"互通/run.py": NEW})
+    bundled.sync(home, V, known(互通={"run.py": [OLD]}))
+    assert (folder / "run.py").read_bytes() == NEW and not (folder / ".origin").exists()
+
+
+def test_a_changed_module_installed_from_outside_is_left_alone_quietly(home):
+    folder = module(home, "互通", {"run.py": "# 改過\n".encode(), ".origin": b"url: x\n"})
     package(home, {"互通/run.py": NEW})
     assert bundled.sync(home, V, known(互通={"run.py": [OLD]})) == []
-    assert (folder / "run.py").read_bytes() == OLD
+    assert (folder / "run.py").read_bytes() == "# 改過\n".encode() and (folder / ".origin").is_file()
 
 
 def test_a_module_the_user_removed_is_not_brought_back_but_a_new_file_is_added(home):
@@ -312,11 +331,18 @@ def test_a_retired_module_nobody_changed_is_moved_to_the_backup(home):
     assert notes == [T["bundled_retired"].format(names="舊按鈕", backup=backup.relative_to(home).as_posix())]
 
 
-@pytest.mark.parametrize("extra", [{"iplot.py": b"# \xe6\x94\xb9\xe9\x81\x8e\n"}, {"mine.py": b"x = 1\n"}, {".origin": b"{}"}])
-def test_a_retired_module_that_was_changed_added_to_or_came_from_the_workshop_stays(home, extra):
+@pytest.mark.parametrize("extra", [{"iplot.py": b"# \xe6\x94\xb9\xe9\x81\x8e\n"}, {"mine.py": b"x = 1\n"}])
+def test_a_retired_module_that_was_changed_or_added_to_stays(home, extra):
     folder = module(home, "舊按鈕", {"iplot.py": BUTTON, **extra})
     assert bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [BUTTON]})) == []
     assert (folder / "iplot.py").is_file()
+
+
+def test_a_retired_module_installed_from_outside_and_unchanged_is_moved_too(home):
+    """工作坊裝的那份多一個收件機器人加的 LICENSE 和 .origin，不算改過（D172）。"""
+    folder = module(home, "舊按鈕", {"iplot.py": BUTTON, "LICENSE": b"MIT\n", ".origin": b"url: x\n"})
+    assert bundled.sync(home, V, retired(known(), 舊按鈕={"iplot.py": [BUTTON]}))
+    assert not folder.exists()
 
 
 def test_a_retired_module_that_is_already_gone_says_nothing(home):

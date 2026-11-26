@@ -53,7 +53,7 @@ def run_web(home: Path, config: Config, err: ErrorInfo | None, note: str | None 
     errlog.sink = lambda exc: core.report_internal(type(exc), exc, exc.__traceback__)
     try:
         if not core.providers("main"):
-            return tk_or_exit(home, config, err, False, T["no_panel"])
+            return tk_or_exit(home, config, err, False, "\n".join(filter(None, [note, T["no_panel"]])))
         core.call_here("main", core, note, err)
     except ImportError:
         raise
