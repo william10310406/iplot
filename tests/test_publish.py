@@ -531,6 +531,8 @@ def test_gitattributes_lists_exactly_the_design_paths():
     """設計第 9.1 節：核心的包不帶的東西，一樣不多、一樣不少。"""
     lines = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
     assert [x for x in lines if x.strip() and not x.startswith("#") and "export-ignore" in x] == [f"{p} export-ignore" for p in EXPORT_IGNORE]
+    # iPLoT.bat 在哪個系統 checkout 都是 CRLF
+    assert "*.bat text eol=crlf" in lines
 
 
 def test_real_gitattributes_keeps_the_ignored_paths_out_of_the_core_zip(publish, repo):

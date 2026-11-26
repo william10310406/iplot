@@ -21,3 +21,6 @@ docs/想法清單.md export-ignore
 modules/Lean/ export-ignore
 # 凍結的開機程式（D167）：每台電腦上都要跟 tools/frozen_boot.sha256 一模一樣，不讓 Windows 換成 CRLF
 /main.py text eol=lf
+
+# iPLoT.bat 是 UTF-8 無 BOM、CRLF；在哪個系統 checkout 都要是 CRLF（cmd 讀 LF 的 bat 會跳錯行）。
+*.bat text eol=crlf
