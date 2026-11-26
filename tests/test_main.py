@@ -288,6 +288,8 @@ def test_run_web_without_a_panel_module_opens_the_rescue_panel_and_says_why(home
     monkeypatch.setattr(main, "tk_or_exit", lambda home, config, err, safe, note=None: seen.append((safe, note)))
     main.run_web(home, DEFAULT_CONFIG, None)
     assert seen == [(False, T["no_panel"])]
+    main.run_web(home, DEFAULT_CONFIG, None, "隨附模組已換成這一版的")  # 更新之後要說的話不能被這一句蓋掉
+    assert seen[-1] == (False, "隨附模組已換成這一版的\n" + T["no_panel"])
 
 
 def test_run_web_with_a_broken_panel_module_opens_the_rescue_panel_and_logs_it(home, monkeypatch):
